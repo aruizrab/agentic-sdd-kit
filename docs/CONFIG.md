@@ -19,6 +19,7 @@ Workflow script takes as `args.config`.
 | `paths.build_dirs` | build output to delete after merging | `[]` |
 | `paths.tools_dir` | where the kit tools are installed | `tools/sdd` |
 | `features.id_prefix`, `id_digits`, `branch_prefix` | `F`, `3`, `feat/` -> `F011`, `feat/F011-slug` | |
+| `features.main_branch` | the integration branch worktrees are created from and merged into (`master`, `trunk`, `develop`...) | `main` |
 | `features.roadmap_milestone_regex`, `roadmap_feature_regex` | how `sdd progress` and `sdd new-feature` parse the roadmap | `### M<n> — name`, `#### F<NNN> slug` |
 | `features.done_without_spec` | feature ids counted as merged although they predate the pipeline | `[]` |
 | `requirements.id_regex` | requirement id syntax (used by trace, spec-info, tasks) | `[A-Z][A-Z0-9]*(?:-[A-Z0-9.]+)*-R\d{2,3}` |

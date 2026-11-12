@@ -113,10 +113,11 @@ over-engineer beyond it.>
 
 ## 11. Open questions
 
+<!-- One bullet per open question, in this form (the whole line, outside this comment):
 - [NEEDS CLARIFICATION: <question about the normative source>] — affects <ID>; options:
   <a/b>; spec-author's recommendation: <...>
-
-<!-- Approval is blocked while any open clarification marker remains (`sdd spec-info`).
+Leave the section empty when there are none.
+Approval is blocked while any open clarification marker remains (`sdd spec-info`).
 Resolved questions move to Decisions with the answer and who decided. -->
 
 ### Decisions

@@ -102,6 +102,24 @@ class TraceTest(unittest.TestCase):
         md = trace.to_markdown(m, "011")
         self.assertIn("| TS24501-5.5.1.2.4-R110 | must |", md)
 
+    def test_python_docstring_tags(self) -> None:
+        src = (
+            "def add(a, b):\n"
+            "    \"\"\"Implements: FC-OBS-R110\"\"\"\n"
+            "    return a + b\n\n\n"
+            "class TestAdd:\n"
+            "    def test_add(self):\n"
+            "        \'\'\'Verifies: FC-OBS-R110\n"
+            "        A longer docstring.\n"
+            "        \'\'\'\n"
+            "        assert add(1, 1) == 2\n\n"
+            "def other():\n"
+            "    \"\"\"Return nothing. Implements nothing.\"\"\"\n"
+        )
+        tags = trace.scan_source(src, "src/app/doc.py", self.cfg)
+        self.assertEqual([(t.id, t.kind, t.line, t.item) for t in tags],
+                         [("FC-OBS-R110", "implements", 2, "add"), ("FC-OBS-R110", "verifies", 8, "test_add")])
+
     def test_draft_specs_are_not_enforced(self) -> None:
         write(self.root, "specs/features/011-registration/spec.md", SPEC.format(status="Draft", markers=""))
         m = trace.load(self.root, self.cfg)
@@ -203,6 +221,17 @@ class TasksTest(unittest.TestCase):
         self.assertEqual(specs.build_lanes(w1)[0]["components"], ["*"])
         full = specs.parse_tasks(TASKS, self.cfg, include_done=True)
         self.assertEqual([t["id"] for t in full["waves"][0]["tasks"]], ["T01", "T02"])
+
+    def test_template_placeholders_are_not_tasks(self) -> None:
+        text = (
+            "## Wave 1\n"
+            "- [ ] T01 [P] <imperative description> — files: <path>, <path> — verifies: <ID> — depends: -\n"
+            "- [ ] T02 [P] <description> — files: <path in component a> — verifies: <ID>, <ID> — depends: T01\n"
+            "- [ ] T03 Parse Vec<u8> payloads — files: crates/fc-nas/src/lib.rs — verifies: FC-OBS-R110 — depends: -\n"
+        )
+        plan = specs.parse_tasks(text, self.cfg)
+        self.assertEqual([t["id"] for t in plan["waves"][0]["tasks"]], ["T03"])
+        self.assertEqual(specs.validate_tasks(plan, ["FC-OBS-R110"]), [])
 
     def test_validate(self) -> None:
         plan = specs.parse_tasks(TASKS, self.cfg, include_done=True)

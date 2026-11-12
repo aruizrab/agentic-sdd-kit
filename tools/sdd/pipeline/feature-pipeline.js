@@ -68,6 +68,9 @@ const NUM = idMatch[1].padStart(C.features.id_digits || 3, '0')
 const FID = (C.features.id_prefix || 'F') + NUM
 const SLUG = A.slug
 const DIR = `${C.paths.features_dir}/${NUM}-${SLUG}`
+const MAIN = (C.features && C.features.main_branch) || 'main'
+const BUILD_DIRS = Array.isArray(C.paths.build_dirs) ? C.paths.build_dirs.filter((d) => typeof d === 'string' && d) : []
+const BUILD_DIRS_HINT = BUILD_DIRS.length && ROOT ? ` (\`rm -rf ${BUILD_DIRS.map((d) => `${ROOT}/${d}`).join(' ')}\`)` : ''
 const BRANCH = A.branch || `${C.features.branch_prefix || 'feat/'}${FID}-${SLUG}`
 const ISOLATION = ROOT ? 'none' : ['auto', 'none', 'worktree'].includes(A.isolation) ? A.isolation : 'auto'
 const P = C.pipeline || {}
@@ -163,7 +166,7 @@ const CTX = [
     '`git clean`, `git reset --hard`, `git stash`, `git switch`/`checkout <branch>`, or `rm` on files you did not create in this task. To revert your own ' +
     'scratch edits, undo exactly those edits. Read-only roles (reviewers, verifiers, fix-checks) must not edit tracked files at all: for experiments create a ' +
     `detached worktree (\`git worktree add --detach ${WT_ROOT}/exp-<unique> HEAD\`), work there, then \`git worktree remove --force\` it.`,
-  `DISK RULE: never put build output, worktrees or large files under /tmp (small RAM tmpfs); use the project's build directory inside ${ROOT || PROJECT_DIR} and delete what you created when done. Cap parallel build jobs at ${P.max_build_jobs || 4}.`,
+  `DISK RULE: never put build output, worktrees or large files under /tmp (small RAM tmpfs); use the project's build directory inside ${ROOT || PROJECT_DIR}${BUILD_DIRS.length ? ` (${BUILD_DIRS.join(', ')})` : ''} and delete what you created when done. Cap parallel build jobs at ${P.max_build_jobs || 4}.`,
 ].filter(Boolean).concat(A.notes ? [`Orchestrator notes (apply in every stage): ${A.notes}`] : []).join('\n')
 
 const summary = {
@@ -223,7 +226,7 @@ const SETUP = {
   properties: {
     ok: { type: 'boolean' },
     branch: { type: 'string' },
-    baseSha: { type: 'string', description: 'merge-base of the feature branch with main' },
+    baseSha: { type: 'string', description: 'merge-base of the feature branch with the main branch' },
     headSha: { type: 'string' },
     scaffolded: { type: 'boolean' },
     notes: { type: 'string' },
@@ -513,12 +516,12 @@ async function gateLoop(tag, ph) {
 const setup = await agentR(
   `${CTX}\n\nPrepare the feature workspace:\n` +
     (ROOT
-      ? `1. If ${ROOT} does not exist: from the main checkout ${PROJECT_DIR} run \`git worktree add ${ROOT} ${BRANCH}\` if the branch exists, else \`git worktree add -b ${BRANCH} ${ROOT} main\`. Then \`cd ${ROOT}\`.\n` +
+      ? `1. If ${ROOT} does not exist: from the main checkout ${PROJECT_DIR} run \`git worktree add ${ROOT} ${BRANCH}\` if the branch exists, else \`git worktree add -b ${BRANCH} ${ROOT} ${MAIN}\`. Then \`cd ${ROOT}\`.\n` +
         `2. \`git status\` in ${ROOT} must show no uncommitted changes outside ${DIR}/ (otherwise ok=false, list them in notes). The checked-out branch must be ${BRANCH}.\n`
       : `1. \`git status\` must show no uncommitted changes outside ${DIR}/ (otherwise ok=false, list them in notes).\n` +
         `2. If the current branch is not ${BRANCH}: switch to it if it exists, else create it from the current HEAD (\`git switch -c ${BRANCH}\`).\n`) +
     `3. If ${DIR}/ does not exist, run \`${SDD} new-feature ${NUM} ${SLUG}\` (scaffolds it from ${C.paths.templates_dir}); set scaffolded=true.\n` +
-    `4. baseSha = \`git merge-base ${BRANCH} main\` (or HEAD if there is no main yet); headSha = \`git rev-parse HEAD\`.\n` +
+    `4. baseSha = \`git merge-base ${BRANCH} ${MAIN}\` (or HEAD if there is no ${MAIN} yet); headSha = \`git rev-parse HEAD\`.\n` +
     'Do not commit.',
   { label: 'setup', phase: 'Setup', schema: SETUP, agentType: 'integrator', effort: 'low' },
 )
@@ -1021,7 +1024,7 @@ if (want('finalize')) {
         ? `2. Set the spec header line to "Status: Implemented" in ${DIR}/spec.md.\n3. Run \`${SDD} trace --check --feature ${NUM}\` then \`${SDD} trace --check\`. ` +
           'If either fails, set the Status line back to "Approved" and record the failure in review.md.\n'
         : `2. Do NOT change the Status line (blocked: ${failedGates ? 'gates failing; ' : ''}${unresolved ? 'unresolved findings ' + summary.findings.unresolved.join(', ') + '; ' : ''}${gaps ? 'missing reviews ' + summary.reviewGaps.join(', ') : ''}). Skip trace --check.\n`) +
-      `4. Commit everything as "docs(${FID}): ${canImplement ? 'mark implemented, review record' : 'review record (blocked)'}" with the trailer. Do not merge to main.\n\n` +
+      `4. Commit everything as "docs(${FID}): ${canImplement ? 'mark implemented, review record' : 'review record (blocked)'}" with the trailer. Do not merge to ${MAIN}.\n\n` +
       'Pipeline record:\n' +
       JSON.stringify(record, null, 1),
     { label: `finalize ${FID}`, phase: 'Finalize', schema: FINAL, agentType: 'integrator' },
@@ -1042,8 +1045,8 @@ if (want('finalize')) {
     )
   }
   const mergeSteps = ROOT
-    ? `merge main INTO ${BRANCH} first (\`git -C ${ROOT} merge main\`; manifests via \`${SDD} union-merge\`, sources semantically), run full \`${SDD} gates\` there, then \`git switch main && git merge --no-ff ${BRANCH}\` in ${PROJECT_DIR} (conflict-free), run \`${SDD} trace --check\` on main, delete the worktree's build output and \`git worktree remove ${ROOT}\`.`
-    : `\`git switch main && git merge --no-ff ${BRANCH}\`, then \`${SDD} trace --check\` on main.`
+    ? `merge ${MAIN} INTO ${BRANCH} first (\`git -C ${ROOT} merge ${MAIN}\`; manifests via \`${SDD} union-merge\`, sources semantically), run full \`${SDD} gates\` there, then \`git switch ${MAIN} && git merge --no-ff ${BRANCH}\` in ${PROJECT_DIR} (conflict-free), run \`${SDD} trace --check\` on ${MAIN}, delete the worktree's build output${BUILD_DIRS_HINT} and \`git worktree remove ${ROOT}\`.`
+    : `\`git switch ${MAIN} && git merge --no-ff ${BRANCH}\`, then \`${SDD} trace --check\` on ${MAIN}.`
   return finish(
     'ready-to-merge',
     null,

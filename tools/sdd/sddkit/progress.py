@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .trace import spec_status
-from .util import Git, strip_html_comments
+from .util import Git, is_placeholder_line, strip_html_comments
 
 SCHEMA = 1
 STAGES = {
@@ -83,7 +83,7 @@ def count_tasks(text: Optional[str]) -> Tuple[int, int]:
         return (0, 0)
     done = total = 0
     for line in strip_html_comments(text).splitlines():
-        if "<imperative description>" in line:
+        if is_placeholder_line(line):
             continue
         m = _TASK_LINE.match(line)
         if not m:
@@ -175,7 +175,8 @@ def _mean(values: List[float]) -> float:
 
 def build_report(root: Path, cfg: Dict[str, Any], main_ref: Optional[str] = None, remote: str = "origin", now: Optional[_dt.datetime] = None) -> Dict[str, Any]:
     repo = Repo(root, cfg, remote)
-    resolved = repo.git.resolve(main_ref or "", f"{remote}/main" if remote else "", "main", "master")
+    main_branch = cfg.get("features", {}).get("main_branch") or "main"
+    resolved = repo.git.resolve(main_ref or "", f"{remote}/{main_branch}" if remote else "", main_branch, "main", "master")
     if not resolved:
         raise RuntimeError("could not resolve the main branch (pass --main-ref)")
     roadmap = repo.git.show(resolved, cfg["paths"]["roadmap"])

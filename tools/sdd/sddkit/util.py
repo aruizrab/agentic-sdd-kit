@@ -44,8 +44,8 @@ def glob_match(path: str, glob: str) -> bool:
     """Match a relative, slash-separated path against a glob.
 
     ``**/`` matches zero or more directories, so ``**/tests/**`` matches
-    ``tests/x.rs`` as well as ``crates/a/tests/x.rs``. A glob without a slash
-    matches the file name anywhere (``*.rs``), like ``.gitignore`` does.
+    ``tests/x.ext`` as well as ``packages/a/tests/x.ext``. A glob without a slash
+    matches the file name anywhere (``*.ext``), like ``.gitignore`` does.
     """
     path = path.replace("\\", "/")
     while path.startswith("./"):
@@ -53,6 +53,16 @@ def glob_match(path: str, glob: str) -> bool:
     if "/" not in glob:
         return fnmatch.fnmatchcase(path.rsplit("/", 1)[-1], glob)
     return re.match(_glob_to_regex(glob), path) is not None
+
+
+# A template placeholder such as ``<path in component a>``, ``<ID>`` or ``<description>``;
+# generics like ``Vec<u8>`` do not match (no space, not a known placeholder word).
+PLACEHOLDER = re.compile(r"<(?:ID|path|description|[^<>]*\s[^<>]*)>")
+
+
+def is_placeholder_line(line: str) -> bool:
+    """True for a template example line that was never filled in."""
+    return bool(PLACEHOLDER.search(line))
 
 
 def any_match(path: str, globs: Iterable[str]) -> Optional[str]:

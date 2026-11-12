@@ -10,13 +10,13 @@ allowed-tools: Read Grep Bash(git status *) Bash(git log *) Bash(git branch *) B
 !`git branch --show-current 2>/dev/null; git status --short 2>/dev/null | head -20; python3 -I tools/sdd/sdd.py spec-info "$(python3 -I tools/sdd/sdd.py config --get paths.features_dir)/${0#F}-$1" 2>/dev/null || echo "no spec yet"`
 
 ## Pipeline config (pass as args.config)
-!`python3 -I tools/sdd/sdd.py config --pipeline 2>/dev/null | head -120`
+!`python3 -I tools/sdd/sdd.py config --pipeline --compact 2>/dev/null`
 
 ## Steps (you are the orchestrator and product owner)
 1. **Check the roadmap.** It must contain $0 with this slug and its dependencies merged. If
    not, stop and ask the architect or human: the roadmap owns feature numbers.
 2. **Worktree.** Run each feature in its own worktree `<worktree_root>/$0` (the pipeline's
-   Setup creates it from `main` when `root` is given). Never switch branches in a checkout
+   Setup creates it from `features.main_branch` when `root` is given). Never switch branches in a checkout
    another agent is using.
 3. **Run the pipeline** with the Workflow tool:
    `Workflow({scriptPath: "${CLAUDE_PROJECT_DIR}/tools/sdd/pipeline/feature-pipeline.js", args: {feature: "$0", slug: "$1", root: "${CLAUDE_PROJECT_DIR}/<worktree_root>/$0", config: <the JSON above>}})`.

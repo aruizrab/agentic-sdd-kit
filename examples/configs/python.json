@@ -236,7 +236,7 @@
     }
   ],
   "stop_check": {
-    "command": "python -m compileall -q src",
+    "command": "python3 -m compileall -q src",
     "changed_globs": [
       "*.py"
     ],

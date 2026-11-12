@@ -3,9 +3,9 @@
 Gates come from ``sdd.config.json``::
 
     "gates": {
-      "fast": [{"name": "fmt", "command": "cargo fmt --all -- --check", "timeout": 120}],
-      "full": [{"name": "fmt", ...}, {"name": "test", "command": "...", "timeout": 1800,
-                "optional": true, "skip_if_missing": "cargo-nextest"}]
+      "fast": [{"name": "fmt", "command": "<formatter> --check", "timeout": 120}],
+      "full": [{"name": "fmt", ...}, {"name": "test", "command": "<test runner>", "timeout": 1800,
+                "optional": true, "skip_if_missing": "<program>"}]
     }
 
 Every gate runs even if an earlier one fails ("all gates, then the verdict");

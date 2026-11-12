@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .trace import spec_status
-from .util import strip_code, strip_html_comments
+from .util import is_placeholder_line, strip_code, strip_html_comments
 
 TASK_LINE = re.compile(
     r"^- \[(?P<done>[ xX])\] (?P<id>T\d{2,3})(?P<par>\s+\[P\])?\s+(?P<rest>.*)$"
@@ -107,7 +107,7 @@ def parse_tasks(text: str, cfg: Dict[str, Any], include_done: bool = False) -> D
         m = TASK_LINE.match(line)
         if not m:
             continue
-        if "<imperative description>" in line:
+        if is_placeholder_line(line):
             continue
         done = m.group("done") in "xX"
         if done and not include_done:

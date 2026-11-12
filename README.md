@@ -69,7 +69,7 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 
 | Command | What it does |
 |---|---|
-| `sdd config [--validate\|--pipeline\|--get key]` | show/validate `sdd.config.json`; `--pipeline` prints the subset the Workflow script takes as `args.config` |
+| `sdd config [--validate\|--pipeline [--compact]\|--get key]` | show/validate `sdd.config.json`; `--pipeline` prints the subset the Workflow script takes as `args.config` (`--compact`: one line, for embedding in a prompt) |
 | `sdd trace [--feature NNN] [--check] [--json]` | requirement -> implementation -> test matrix; `--check` is the CI gate (orphans, duplicates, uncovered `must`) |
 | `sdd gates [--fast] [--only g] [--detached] [--wait LOG]` | runs the configured gates, prints a summary table, exit code; every log ends with `GATES_EXIT=<n>` |
 | `sdd new-feature NNN slug` | scaffolds the feature directory from the templates and prints the feature's requirement id block |

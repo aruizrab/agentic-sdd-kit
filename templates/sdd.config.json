@@ -35,14 +35,14 @@
     "require_impl_for_statuses": ["Implemented"]
   },
   "trace": {
-    "scan_globs": ["src/**/*", "lib/**/*", "pkg/**/*", "packages/**/*", "crates/**/*", "tests/**/*", "test/**/*"],
+    "scan_globs": ["src/**/*", "lib/**/*", "pkg/**/*", "packages/**/*", "tests/**/*", "test/**/*"],
     "exclude_globs": ["**/target/**", "**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**", "**/.venv/**"],
     "implements_keywords": ["Implements"],
     "verifies_keywords": ["Verifies"],
     "attribute_forms": true
   },
   "components": {
-    "path_regex": "^(?:packages|crates|services|apps|pkg)/([^/]+)/",
+    "path_regex": "^(?:packages|services|apps|pkg)/([^/]+)/",
     "root": "repository",
     "word": "component"
   },
@@ -115,7 +115,7 @@
     "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, parsing of untrusted input"
   },
   "merge": {
-    "union_manifests": ["package.json", "Cargo.toml", "crates/*/Cargo.toml", "go.mod", "pyproject.toml"],
+    "union_manifests": ["package.json", "go.mod", "pyproject.toml", "Cargo.toml"],
     "lockfiles": ["package-lock.json", "Cargo.lock", "go.sum", "poetry.lock", "uv.lock"],
     "after_union": ""
   },

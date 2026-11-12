@@ -43,6 +43,16 @@ class ConfigTest(unittest.TestCase):
             self.assertEqual(cfg["paths"]["features_dir"], "specs/features")
             problems = cfgmod.validate(cfg)
             self.assertEqual(problems, ["unknown top-level key 'bogus'"])
+            write(root, "sdd.config.json", json.dumps({
+                "gates": {"fsat": [], "full": [{"name": "t", "command": "true"}]}, "pipeline": {"skeptcs": 1, "role_tiers": {"critic": "top"}},
+                "components": {"word": "crate"}, "role_write_scopes": {"my-role": ["x/**"]}, "requirements": {"budget": {"mni": 1}},
+                "commit": {"trailers": ["Co-Authored-By: <agent> <noreply@example.com>", "Signed-off-by: Jane Doe <jane@example.com>"]},
+            }))
+            problems = cfgmod.validate(cfgmod.load(root))
+            self.assertEqual([p for p in problems if p.startswith("unknown")],
+                             ["unknown key 'requirements.budget.mni'", "unknown key 'gates.fsat'", "unknown key 'pipeline.skeptcs'"])
+            self.assertEqual([p for p in problems if "placeholder" in p],
+                             ["commit.trailers[0]: still the template placeholder ('Co-Authored-By: <agent> <noreply@example.com>'); set the real attribution line"])
             view = cfgmod.pipeline_view(cfg)
             self.assertEqual(view["gates"], {"fast": [], "full": ["t"]})
             self.assertEqual(view["root"], str(root))
@@ -231,6 +241,12 @@ class HooksTest(unittest.TestCase):
             self.assertEqual(hooks.stop_check(dict(base)), 2)
             self.assertEqual(hooks.stop_check(dict(base, stop_hook_active=True)), 0)
             self.assertEqual(hooks.stop_check(dict(base, agent_type="verifier")), 0)
+            self.cfg["stop_check"]["command"] = "definitely-not-a-program-xyz -m compileall src"
+            write_config(self.root, self.cfg)
+            err = io.StringIO()
+            with redirect_stderr(err):
+                self.assertEqual(hooks.stop_check(dict(base)), 0)  # exit 127: tool missing, never block
+            self.assertIn("command not found", err.getvalue())
 
     def test_cli_hook_reads_stdin(self) -> None:
         import subprocess
@@ -460,6 +476,7 @@ class DoctorTest(unittest.TestCase):
             write(root, "specs/templates/spec.md", "x")
             write(root, "docs/CONSTITUTION.md", "x")
             proc = run_cli(root, "doctor")
+            self.assertIn("gate full/missing: definitely-not-a-program-xyz NOT on PATH", proc.stdout)
             self.assertEqual(proc.returncode, 0, proc.stdout)
             self.assertIn("doctor: OK", proc.stdout)
         finally:

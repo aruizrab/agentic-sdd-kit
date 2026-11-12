@@ -41,7 +41,10 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .util import any_match, glob_match, strip_html_comments
 
-COMMENT_PREFIX = re.compile(r"^[ \t]*(?://[/!]?|#+|\*|--|;+|<!--)[ \t]*(?P<body>.*?)(?:-->)?[ \t]*$")
+# A comment line in any of the supported syntaxes, or the first line of a Python docstring
+# (``"""Implements: ID"""``). ``body`` is the text without the opener/closer.
+COMMENT_PREFIX = re.compile(r"^[ \t]*(?P<open>//[/!]?|#+|\*|--|;+|<!--|[rRuU]?\"\"\"|[rRuU]?''')[ \t]*(?P<body>.*?)(?:-->|\"\"\"|''')?[ \t]*$")
+DOCSTRING_OPEN = re.compile(r"^[rRuU]?(?:\"\"\"|''')$")
 NEXT_ITEM = re.compile(
     r"\b(?:fn|def|func|function|class|struct|enum|trait|impl|mod|interface|type|const|static|let|var|val|"
     r"describe|it|test|proc|sub|method)\b\s*(?:<[^>{]*>\s*)?(?P<name>[A-Za-z_][A-Za-z0-9_:.]*)"
@@ -177,6 +180,15 @@ def _next_item(lines: List[str], start: int) -> Optional[str]:
     return None
 
 
+def _prev_item(lines: List[str], start: int) -> Optional[str]:
+    """The item a docstring belongs to: the nearest ``def``/``class`` line above it."""
+    for line in reversed(lines[max(0, start - 4) : start]):
+        m = NEXT_ITEM.search(line)
+        if m:
+            return m.group("name")
+    return None
+
+
 def scan_source(text: str, file: str, cfg: Dict[str, Any]) -> List[Tag]:
     id_re = re.compile(cfg["requirements"]["id_regex"])
     keywords = {}
@@ -211,7 +223,7 @@ def scan_source(text: str, file: str, cfg: Dict[str, Any]) -> List[Tag]:
                     j += 1
                 ids = _id_list(body, id_re)
                 if ids:
-                    item = _next_item(lines, j)
+                    item = _prev_item(lines, i) if DOCSTRING_OPEN.match(cm.group("open")) else _next_item(lines, j)
                     for rid in ids:
                         tags.append(Tag(rid, kind, file, i + 1, item))
                     i = j

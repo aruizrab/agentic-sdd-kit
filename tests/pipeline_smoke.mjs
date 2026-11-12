@@ -234,4 +234,19 @@ async function run(args, rules = []) {
   console.log('ok 10 worktree mode')
 }
 
+// 11. features.main_branch and paths.build_dirs are honoured in the Setup prompt, the DISK RULE and the merge steps.
+{
+  const config = { ...CONFIG, features: { ...CONFIG.features, main_branch: 'master' }, paths: { ...CONFIG.paths, build_dirs: ['dist', 'node_modules/.cache'] } }
+  const { result, calls } = await run({ config, root: '/proj/.wt/F011', stages: ['finalize'] })
+  const setup = calls.find((c) => c.label === 'setup').prompt
+  assert.match(setup, /git worktree add -b feat\/F011-x \/proj\/\.wt\/F011 master/)
+  assert.match(setup, /git merge-base feat\/F011-x master/)
+  assert.match(setup, /DISK RULE: .*\(dist, node_modules\/\.cache\)/)
+  assert.match(result.nextAction, /merge master INTO feat\/F011-x first/)
+  assert.match(result.nextAction, /git switch master && git merge --no-ff feat\/F011-x/)
+  assert.match(result.nextAction, /rm -rf \/proj\/\.wt\/F011\/dist \/proj\/\.wt\/F011\/node_modules\/\.cache/)
+  assert.doesNotMatch(result.nextAction, /\bmain\b/)
+  console.log('ok 11 main_branch and build_dirs')
+}
+
 console.log('pipeline smoke: all ok')

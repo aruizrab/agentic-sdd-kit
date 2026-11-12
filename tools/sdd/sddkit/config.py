@@ -3,7 +3,8 @@
 Everything project-specific lives in that one file. The defaults below are
 deliberately language-neutral; a project overrides what it needs. Unknown keys
 are preserved (the pipeline script receives the whole object), but
-``validate`` reports keys it does not understand so that typos are caught.
+``validate`` reports keys it does not understand (at every level of the known
+sections) so that typos such as ``gates.fsat`` are caught.
 
 The file is plain JSON (standard library on every platform, readable by the
 Python tools, the hooks and the Node workflow script without dependencies).
@@ -42,6 +43,7 @@ DEFAULTS: Dict[str, Any] = {
         "id_prefix": "F",
         "id_digits": 3,
         "branch_prefix": "feat/",
+        "main_branch": "main",
         "roadmap_milestone_regex": r"^###\s+(M\d+)\s*[—–-]+\s*(.+?)\s*$",
         "roadmap_feature_regex": r"^####\s+(F\d{3})\s+(\S+)(.*)$",
         "done_without_spec": [],
@@ -129,6 +131,29 @@ DEFAULTS: Dict[str, Any] = {
 }
 
 
+# Sections whose keys are free-form (role names), and known keys that have no default.
+_FREE_FORM_SECTIONS = {"role_write_scopes", "role_denied_paths"}
+_EXTRA_KEYS = {"components": {"word"}, "pipeline": {"role_tiers"}}
+
+
+def _unknown_keys(node: Dict[str, Any], defaults: Dict[str, Any], path: str = "") -> List[str]:
+    """Keys in ``node`` (recursively, dict sections only) that the defaults do not know."""
+    out: List[str] = []
+    allowed = set(defaults) | _EXTRA_KEYS.get(path, set())
+    for key, value in node.items():
+        if not path and key.startswith("_"):
+            continue
+        full = f"{path}.{key}" if path else key
+        if key not in allowed:
+            out.append(f"unknown {'top-level ' if not path else ''}key {full!r}")
+            continue
+        if full in _FREE_FORM_SECTIONS:
+            continue
+        if isinstance(value, dict) and isinstance(defaults.get(key), dict):
+            out.extend(_unknown_keys(value, defaults[key], full))
+    return out
+
+
 class ConfigError(Exception):
     """Raised for a missing or invalid configuration."""
 
@@ -187,13 +212,7 @@ def load(root: Optional[Path] = None, path: Optional[Path] = None) -> Dict[str, 
 
 def validate(cfg: Dict[str, Any]) -> List[str]:
     """Return a list of problems (empty when the configuration is usable)."""
-    problems: List[str] = []
-    known = set(DEFAULTS)
-    for key in cfg:
-        if key.startswith("_"):
-            continue
-        if key not in known:
-            problems.append(f"unknown top-level key {key!r}")
+    problems: List[str] = _unknown_keys(cfg, DEFAULTS)
     try:
         re.compile(cfg["requirements"]["id_regex"])
     except re.error as exc:
@@ -241,6 +260,11 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
             problems.append(f"models.{tier}: use an explicit model id (lower-case, digits, dots, dashes), got {value!r}")
     if not cfg["commit"]["trailers"]:
         problems.append("commit.trailers is empty: add at least the attribution trailer line the project uses")
+    for i, trailer in enumerate(cfg["commit"]["trailers"]):
+        if not isinstance(trailer, str) or not trailer.strip():
+            problems.append(f"commit.trailers[{i}] must be a non-empty string")
+        elif re.search(r"<[^<>@]*>", trailer.split("<noreply@", 1)[0]) or re.search(r"<[^<>]*\s[^<>]*>", trailer):
+            problems.append(f"commit.trailers[{i}]: still the template placeholder ({trailer!r}); set the real attribution line")
     return problems
 
 

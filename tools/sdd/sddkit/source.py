@@ -4,7 +4,7 @@ section, product requirement) so that agents never cite from memory.
 Configured by ``sources``:
 
 * ``lookup_command``: a shell command with ``{args}`` (all arguments joined) or
-  ``{doc}`` / ``{clause}`` placeholders, e.g. ``cargo xtask spec clause {doc} {clause}``.
+  ``{doc}`` / ``{clause}`` placeholders, e.g. ``<lookup tool> clause {doc} {clause}``.
   When set, ``sdd source clause <doc> <clause>`` runs it.
 * ``text_dir``: a directory of Markdown documents. Without a lookup command the
   built-in reader finds the file whose name starts with ``<doc>`` (case-
@@ -41,7 +41,7 @@ def find_doc(text_dir: Path, doc: str) -> Optional[Path]:
     containing = [p for p in candidates if key and key in _norm(p.stem)]
     if not containing:
         return None
-    # Prefer the shortest stem (e.g. "ts24501-hi1" over "ts24501-annex-notes"); latest version last.
+    # Prefer the shortest stem (e.g. "<doc>" over "<doc>-annex-notes"); latest version last.
     shortest = min(len(_norm(p.stem)) for p in containing)
     return sorted(p for p in containing if len(_norm(p.stem)) == shortest)[-1]
 

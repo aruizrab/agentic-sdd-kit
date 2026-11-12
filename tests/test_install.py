@@ -58,7 +58,16 @@ class InstallTest(unittest.TestCase):
 
         # Tools run from inside the installed repo.
         tool = [sys.executable, "-I", "tools/sdd/sdd.py"]
+        # The example config ships a placeholder trailer: validate must say so until it is set.
+        proc = sh(*tool, "config", "--validate", cwd=self.root)
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("commit.trailers[0]: still the template placeholder", proc.stdout)
+        cfg["commit"]["trailers"] = ["Co-Authored-By: Demo Bot <demo@localhost>"]
+        (self.root / "sdd.config.json").write_text(json.dumps(cfg, indent=2) + "\n")
         self.assertEqual(sh(*tool, "config", "--validate", cwd=self.root).returncode, 0)
+        proc = sh(*tool, "config", "--pipeline", "--compact", cwd=self.root)
+        self.assertEqual(len(proc.stdout.strip().splitlines()), 1)
+        self.assertEqual(json.loads(proc.stdout)["features"]["main_branch"], "main")
         proc = sh(*tool, "new-feature", "001", "hello", cwd=self.root)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertTrue((self.root / "specs/features/001-hello/spec.md").is_file())
@@ -69,9 +78,11 @@ class InstallTest(unittest.TestCase):
         proc = sh(*tool, "spec-info", "specs/features/001-hello", cwd=self.root)
         info = json.loads(proc.stdout)
         self.assertEqual(info["status"], "Draft")
-        self.assertEqual(info["needsClarification"], 1)  # the template's example open question
+        self.assertEqual(info["needsClarification"], 0)  # the template's example question lives in a comment
         proc = sh(*tool, "tasks", "specs/features/001-hello", "--validate", "--no-trace", cwd=self.root)
-        self.assertEqual(json.loads(proc.stdout)["waves"][0]["tasks"][0]["id"], "T01")
+        plan = json.loads(proc.stdout)
+        self.assertEqual(plan["problems"], [])  # placeholder task lines are not tasks
+        self.assertEqual(sum(len(w["tasks"]) for w in plan["waves"]), 0)
         proc = sh(*tool, "config", "--pipeline", cwd=self.root)
         view = json.loads(proc.stdout)
         self.assertEqual(view["root"], str(self.root.resolve()))

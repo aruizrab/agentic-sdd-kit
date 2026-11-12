@@ -54,8 +54,9 @@ take the quick path in `docs/DEVELOPMENT.md`.
   block R<NNN*10>..R<NNN*10+9> (printed by `sdd new-feature`); reuse an existing id instead
   of redefining the same rule.
 - spec.md header line: `Status: Draft|Approved|Implemented`.
-- Code: `<Implements tag syntax, e.g. // Implements: <ID> or #[trace::implements("<ID>")]>`.
+- Code: `<Implements tag syntax, e.g. // Implements: <ID>, """Implements: <ID>""" as a docstring's first line, or #[trace::implements("<ID>")]>`.
 - Tests: `<Verifies tag syntax, e.g. // Verifies: <ID> or @verifies("<ID>")>`.
+- Only comment lines, a docstring's opening line and attribute/decorator forms are scanned; a tag buried inside a longer docstring is not.
 - A `must` requirement with no implementation site fails `trace --check` once the feature is
   Implemented, unless its spec line carries `[behaviour-only]`.
 

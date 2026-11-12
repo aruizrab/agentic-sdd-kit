@@ -47,7 +47,8 @@ def cmd_config(args: argparse.Namespace) -> int:
         print("config: " + ("OK" if not problems else f"{len(problems)} problem(s)"))
         return 1 if problems else 0
     if args.pipeline:
-        print(json.dumps(cfgmod.pipeline_view(cfg), indent=2))
+        view = cfgmod.pipeline_view(cfg)
+        print(json.dumps(view, separators=(",", ":")) if args.compact else json.dumps(view, indent=2))
         return 0
     if args.get:
         node = cfg
@@ -222,7 +223,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 check(False, f"gate {mode}/{g['name']}: still the template placeholder (set a real command; see docs/ADAPTING.md)", warn=bool(g.get("optional")))
                 continue
             prog = g["command"].split()[0] if g["command"].split() else ""
-            check(shutil.which(prog) is not None or prog in ("python3", "python", "sdd"), f"gate {mode}/{g['name']}: {prog} on PATH", warn=bool(g.get("optional")))
+            found = shutil.which(prog) is not None or prog in ("python3", "sdd")
+            check(found, f"gate {mode}/{g['name']}: {prog} {'on' if found else 'NOT on'} PATH", warn=bool(g.get("optional")))
     if "not configured" in (cfg.get("tests", {}).get("run") or ""):
         check(False, "tests.run: still the template placeholder", warn=True)
     for tier in ("mechanical", "mid", "strong", "top"):
@@ -242,6 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("config", help="show, validate or initialise sdd.config.json")
     c.add_argument("--validate", action="store_true")
     c.add_argument("--pipeline", action="store_true", help="print the subset the feature pipeline needs (args.config)")
+    c.add_argument("--compact", action="store_true", help="with --pipeline: one-line JSON (safe to embed in a prompt)")
     c.add_argument("--get", help="print one key, e.g. paths.features_dir")
     c.add_argument("--init", action="store_true", help="write the template config")
     c.add_argument("--force", action="store_true")

@@ -1,7 +1,7 @@
 """``sdd union-merge [files...]``: resolve ADDITIVE manifest conflicts only.
 
 For each conflicted file that matches ``merge.union_manifests`` (globs such as
-``Cargo.toml``, ``crates/*/Cargo.toml``, ``package.json``, ``go.mod``), both
+``package.json``, ``go.mod``, ``pyproject.toml``, ``<manifest>``), both
 sides of every conflict hunk are kept (ours then theirs) and the file is staged.
 Any other conflicted file is refused with exit code 3: resolve it semantically
 (an agent reads both sides and the spec), never by union. Lesson: a union merge
@@ -9,7 +9,7 @@ of a source file once produced a compiling but wrong main branch that had to be
 reverted.
 
 Lockfiles in ``merge.lockfiles`` are resolved by taking "theirs" and then
-``merge.after_union`` is run (e.g. ``cargo metadata -q``) so the tool regenerates
+``merge.after_union`` is run (the project's ``<lockfile regenerate>`` command) so the tool regenerates
 them. Duplicate ``key = value`` lines inside one table (the typical result of a
 union of two added dependencies) are removed, keeping the first.
 """

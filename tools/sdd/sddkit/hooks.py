@@ -291,6 +291,9 @@ def stop_check(data: Optional[Dict[str, Any]] = None) -> int:
         return 0
     if proc.returncode == 0:
         return 0
+    if proc.returncode == 127:
+        sys.stderr.write(f"stop-check: command not found ({sc['command'].split()[0]!r}); not blocking. Fix stop_check.command in sdd.config.json.\n")
+        return 0
     sys.stderr.write(f"stop-check failed in {root}. Fix these before finishing (or report them if they are outside your task):\n")
     lines = [l for l in proc.stdout.splitlines() if re.search(r"error|FAIL|Error", l)][:40] or proc.stdout.splitlines()[-20:]
     sys.stderr.write("\n".join(lines) + "\n")

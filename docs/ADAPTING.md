@@ -54,9 +54,11 @@ paths: `**/*.test.ts`, `**/__tests__/**`.
 Fast: `ruff format --check`, `ruff check`, `mypy src` (optional), `pytest -q -x`, trace. Full
 adds `--cov --cov-fail-under`, `pip-audit`, hypothesis property tests, `pytest-benchmark
 --benchmark-compare`. Components: `^src/([^/]+)/`. Union manifests: `pyproject.toml`;
-lockfiles `poetry.lock`/`uv.lock`. Tags: `# Implements: ID` comments or `@implements("ID")`
-/ `@verifies("ID")` decorators (define them as no-op decorators in a tiny `trace` module).
-Stop check: `python -m compileall -q src`.
+lockfiles `poetry.lock`/`uv.lock`. Tags: `# Implements: ID` comments, a docstring whose
+first line is the tag (`"""Implements: ID"""` or `"""Verifies: ID` on the opening line; a tag
+on a later docstring line is NOT scanned), or `@implements("ID")` / `@verifies("ID")`
+decorators (define them as no-op decorators in a tiny `trace` module).
+Stop check: `python3 -m compileall -q src` (not `python`: many hosts have no such alias).
 
 ### Go
 Fast: `gofmt -l`, `go vet`, `golangci-lint` (optional), `go test ./...`, trace. Full adds

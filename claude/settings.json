@@ -6,6 +6,7 @@
   "permissions": {
     "allow": [
       "Bash(python3 -I tools/sdd/sdd.py *)",
+      "Bash(python3 -I */tools/sdd/sdd.py *)",
       "Bash(sdd *)",
       "Bash(git status *)",
       "Bash(git diff *)",
