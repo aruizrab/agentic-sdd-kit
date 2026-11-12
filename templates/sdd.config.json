@@ -2,7 +2,7 @@
   "project": {
     "name": "my-project",
     "description": "One line: what the project is and what it is not (research prototype, production service, library).",
-    "languages": ["rust"],
+    "languages": [],
     "threat_model": "State what is untrusted (every byte from a peer/client/file), what must never happen (crash, hang, memory exhaustion, secret leak into logs/diagnostics), and what is deliberately out of scope (e.g. test fixtures are not secrets; do not re-implement mature libraries to zeroize transient buffers)."
   },
   "paths": {
@@ -13,7 +13,7 @@
     "development": "docs/DEVELOPMENT.md",
     "logs_dir": ".sdd/logs",
     "worktree_root": ".wt",
-    "build_dirs": ["target"],
+    "build_dirs": ["build", "dist", "target"],
     "tools_dir": "tools/sdd"
   },
   "features": {
@@ -35,35 +35,35 @@
     "require_impl_for_statuses": ["Implemented"]
   },
   "trace": {
-    "scan_globs": ["src/**/*", "crates/**/*", "tests/**/*"],
-    "exclude_globs": ["**/target/**", "**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**"],
+    "scan_globs": ["src/**/*", "lib/**/*", "pkg/**/*", "packages/**/*", "crates/**/*", "tests/**/*", "test/**/*"],
+    "exclude_globs": ["**/target/**", "**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**", "**/.venv/**"],
     "implements_keywords": ["Implements"],
     "verifies_keywords": ["Verifies"],
     "attribute_forms": true
   },
   "components": {
-    "path_regex": "^crates/([^/]+)/",
-    "root": "workspace",
-    "word": "crate"
+    "path_regex": "^(?:packages|crates|services|apps|pkg)/([^/]+)/",
+    "root": "repository",
+    "word": "component"
   },
   "gates": {
     "fast": [
-      {"name": "fmt", "command": "cargo fmt --all -- --check", "timeout": 120},
-      {"name": "lint", "command": "cargo clippy --workspace --all-targets -- -D warnings", "timeout": 1200},
-      {"name": "test", "command": "cargo test --workspace", "timeout": 1800},
+      {"name": "fmt", "command": "sh -c 'echo \"gate fmt not configured: set gates.fast in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 120},
+      {"name": "lint", "command": "sh -c 'echo \"gate lint not configured: set gates.fast in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 1200},
+      {"name": "test", "command": "sh -c 'echo \"gate test not configured: set gates.fast in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 1800},
       {"name": "trace", "command": "python3 -I tools/sdd/sdd.py trace --check", "timeout": 60}
     ],
     "full": [
-      {"name": "fmt", "command": "cargo fmt --all -- --check", "timeout": 120},
-      {"name": "lint", "command": "cargo clippy --workspace --all-targets -- -D warnings", "timeout": 1200},
-      {"name": "test", "command": "cargo test --workspace", "timeout": 3600},
+      {"name": "fmt", "command": "sh -c 'echo \"gate fmt not configured: set gates.full in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 120},
+      {"name": "lint", "command": "sh -c 'echo \"gate lint not configured: set gates.full in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 1200},
+      {"name": "test", "command": "sh -c 'echo \"gate test not configured: set gates.full in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 3600},
       {"name": "trace", "command": "python3 -I tools/sdd/sdd.py trace --check", "timeout": 60},
-      {"name": "audit", "command": "cargo audit", "timeout": 600, "optional": true, "skip_if_missing": "cargo-audit"}
+      {"name": "audit", "command": "sh -c 'echo \"gate audit not configured: dependency audit for your language (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 600, "optional": true}
     ]
   },
   "tests": {
-    "run": "cargo test --workspace",
-    "run_component": "cargo test -p {component}",
+    "run": "sh -c 'echo \"tests.run not configured in sdd.config.json\" >&2; exit 2'",
+    "run_component": "",
     "red_check": ""
   },
   "sources": {
@@ -87,17 +87,15 @@
     "spec-author": ["specs/features/**"],
     "architect-planner": ["specs/features/**"],
     "product-owner": ["specs/features/**"],
-    "integrator": ["specs/features/**", "Cargo.lock"]
+    "integrator": ["specs/features/**", "package-lock.json", "Cargo.lock", "go.sum", "poetry.lock", "uv.lock"]
   },
   "role_denied_paths": {
-    "implementer": ["**/tests/**", "**/*_test.*", "**/*.test.*", "**/test_*.py"]
+    "implementer": ["**/tests/**", "**/test/**", "**/*_test.*", "**/*.test.*", "**/test_*.py"]
   },
-  "formatters": [
-    {"glob": "*.rs", "command": "rustfmt --edition 2024 {file}", "exclude": ["**/target/**"]}
-  ],
+  "formatters": [],
   "stop_check": {
-    "command": "cargo check -q --workspace --all-targets --message-format short",
-    "changed_globs": ["*.rs", "Cargo.toml"],
+    "command": "",
+    "changed_globs": [],
     "roles": ["implementer"],
     "timeout": 240
   },
@@ -117,9 +115,9 @@
     "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, parsing of untrusted input"
   },
   "merge": {
-    "union_manifests": ["Cargo.toml", "crates/*/Cargo.toml"],
-    "lockfiles": ["Cargo.lock"],
-    "after_union": "cargo metadata --format-version 1 -q >/dev/null"
+    "union_manifests": ["package.json", "Cargo.toml", "crates/*/Cargo.toml", "go.mod", "pyproject.toml"],
+    "lockfiles": ["package-lock.json", "Cargo.lock", "go.sum", "poetry.lock", "uv.lock"],
+    "after_union": ""
   },
   "commit": {
     "trailers": ["Co-Authored-By: <agent name> <noreply@example.com>"],

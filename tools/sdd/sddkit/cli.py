@@ -218,8 +218,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     check((root / cfg["paths"]["tools_dir"] / "pipeline" / "feature-pipeline.js").is_file(), "feature pipeline script installed", warn=True)
     for mode in ("fast", "full"):
         for g in cfg["gates"][mode]:
+            if "not configured" in g["command"]:
+                check(False, f"gate {mode}/{g['name']}: still the template placeholder (set a real command; see docs/ADAPTING.md)", warn=bool(g.get("optional")))
+                continue
             prog = g["command"].split()[0] if g["command"].split() else ""
             check(shutil.which(prog) is not None or prog in ("python3", "python", "sdd"), f"gate {mode}/{g['name']}: {prog} on PATH", warn=bool(g.get("optional")))
+    if "not configured" in (cfg.get("tests", {}).get("run") or ""):
+        check(False, "tests.run: still the template placeholder", warn=True)
     for tier in ("mechanical", "mid", "strong", "top"):
         check(bool(cfg["models"].get(tier)), f"models.{tier} set (explicit model id)", warn=True)
     mounts = str(root)

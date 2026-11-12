@@ -2,7 +2,10 @@
 
 Everything below is `sdd.config.json`. The full example files are in `examples/configs/`
 (`rust.json`, `typescript.json`, `python.json`, `go.json`); `install.sh --config <name>`
-installs one of them.
+installs one of them. Without `--config`, the language-neutral `templates/sdd.config.json`
+is installed: its `fmt`/`lint`/`test` gates and `tests.run` are placeholders that fail with
+"not configured" until you replace them (`sdd doctor` warns about each one); only the
+`trace` gate is real.
 
 ## 1. Gates
 

@@ -55,7 +55,7 @@ class Requirement:
     id: str
     priority: str
     text: str
-    feature: str  # directory name, e.g. "009-udm-udr-ausf-5g-aka"
+    feature: str  # directory name, e.g. "012-session-timeout"
     file: str
     line: int
     status: str

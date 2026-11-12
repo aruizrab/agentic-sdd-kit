@@ -84,7 +84,7 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 ## Testing the kit
 
 ```sh
-python3 -I -m unittest discover -s tests -v     # 31 tests; synthetic git repos under .scratch/
+python3 -I -m unittest discover -s tests -v     # 31 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
 node tests/pipeline_smoke.mjs                   # drives feature-pipeline.js with a fake agent()
 ```
 
