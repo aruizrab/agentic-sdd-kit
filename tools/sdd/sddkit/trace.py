@@ -138,7 +138,8 @@ def parse_spec(text: str, id_regex: str, priorities: Iterable[str], feature: str
                     behaviour_only=bool(BEHAVIOUR_ONLY.search(m.group("text"))),
                 )
             )
-        elif req_like.match(line) and "[" in line and re.search(rf"\[(?:{prio})\]", line):
+        elif req_like.match(line) and "<" not in line.split("**")[1] and re.search(rf"\[(?:{prio})\]", line):
+            # Template placeholders (**<ID>**) are not malformed lines.
             malformed.append(f"{file}:{idx}: looks like a requirement line but does not match the exact format")
     return reqs, malformed
 
