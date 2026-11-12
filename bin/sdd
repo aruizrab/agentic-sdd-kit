@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# `sdd` wrapper: runs the kit tools from the project that contains the cwd
+# (nearest sdd.config.json / tools/sdd/sdd.py), falling back to the kit copy.
+set -euo pipefail
+dir="$PWD"
+while [ "$dir" != "/" ]; do
+  if [ -f "$dir/tools/sdd/sdd.py" ]; then exec python3 -I "$dir/tools/sdd/sdd.py" "$@"; fi
+  dir="$(dirname "$dir")"
+done
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec python3 -I "$here/tools/sdd/sdd.py" "$@"
