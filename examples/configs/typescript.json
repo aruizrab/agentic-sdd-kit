@@ -1,0 +1,285 @@
+{
+  "project": {
+    "name": "typescript-project",
+    "description": "",
+    "languages": [
+      "typescript"
+    ],
+    "threat_model": "State what is untrusted (every byte from a peer/client/file), what must never happen (crash, hang, memory exhaustion, secret leak into logs/diagnostics), and what is deliberately out of scope (e.g. test fixtures are not secrets; do not re-implement mature libraries to zeroize transient buffers)."
+  },
+  "paths": {
+    "features_dir": "specs/features",
+    "templates_dir": "specs/templates",
+    "roadmap": "docs/ROADMAP.md",
+    "constitution": "docs/CONSTITUTION.md",
+    "development": "docs/DEVELOPMENT.md",
+    "logs_dir": ".sdd/logs",
+    "worktree_root": ".wt",
+    "build_dirs": [
+      "dist",
+      "node_modules/.cache"
+    ],
+    "tools_dir": "tools/sdd"
+  },
+  "features": {
+    "id_prefix": "F",
+    "id_digits": 3,
+    "branch_prefix": "feat/",
+    "roadmap_milestone_regex": "^###\\s+(M\\d+)\\s*[—–-]+\\s*(.+?)\\s*$",
+    "roadmap_feature_regex": "^####\\s+(F\\d{3})\\s+(\\S+)(.*)$",
+    "done_without_spec": []
+  },
+  "requirements": {
+    "id_regex": "(?:STD\\d+-[0-9A-Z.]+|PRJ-[A-Z0-9]+)-R\\d{2,3}",
+    "priorities": [
+      "must",
+      "should",
+      "may"
+    ],
+    "block_size": 10,
+    "budget": {
+      "min": 15,
+      "max": 45
+    },
+    "clarification_marker": "[NEEDS CLARIFICATION:",
+    "statuses": [
+      "Draft",
+      "Approved",
+      "Implemented"
+    ],
+    "enforce_for_statuses": [
+      "Implemented"
+    ],
+    "require_impl_for_statuses": [
+      "Implemented"
+    ]
+  },
+  "trace": {
+    "scan_globs": [
+      "packages/**/*.ts",
+      "packages/**/*.tsx",
+      "src/**/*.ts",
+      "src/**/*.tsx",
+      "test/**/*.ts",
+      "tests/**/*.ts"
+    ],
+    "exclude_globs": [
+      "**/target/**",
+      "**/node_modules/**",
+      "**/.git/**",
+      "**/dist/**",
+      "**/build/**"
+    ],
+    "implements_keywords": [
+      "Implements"
+    ],
+    "verifies_keywords": [
+      "Verifies"
+    ],
+    "attribute_forms": true
+  },
+  "components": {
+    "path_regex": "^packages/([^/]+)/",
+    "root": "workspace",
+    "word": "package"
+  },
+  "gates": {
+    "fast": [
+      {
+        "name": "fmt",
+        "command": "npx prettier --check .",
+        "timeout": 300
+      },
+      {
+        "name": "lint",
+        "command": "npx eslint . --max-warnings 0",
+        "timeout": 600
+      },
+      {
+        "name": "typecheck",
+        "command": "npx tsc --noEmit -p .",
+        "timeout": 600
+      },
+      {
+        "name": "test",
+        "command": "npm test --silent -- --run",
+        "timeout": 1200
+      },
+      {
+        "name": "trace",
+        "command": "python3 -I tools/sdd/sdd.py trace --check",
+        "timeout": 60
+      }
+    ],
+    "full": [
+      {
+        "name": "fmt",
+        "command": "npx prettier --check .",
+        "timeout": 300
+      },
+      {
+        "name": "lint",
+        "command": "npx eslint . --max-warnings 0",
+        "timeout": 600
+      },
+      {
+        "name": "typecheck",
+        "command": "npx tsc --noEmit -p .",
+        "timeout": 600
+      },
+      {
+        "name": "test",
+        "command": "npm test --silent -- --run --coverage",
+        "timeout": 2400
+      },
+      {
+        "name": "trace",
+        "command": "python3 -I tools/sdd/sdd.py trace --check",
+        "timeout": 60
+      },
+      {
+        "name": "audit",
+        "command": "npm audit --audit-level=high",
+        "timeout": 600,
+        "optional": true
+      },
+      {
+        "name": "contract",
+        "command": "npm run test:contract --if-present",
+        "timeout": 1200,
+        "optional": true
+      },
+      {
+        "name": "bench",
+        "command": "npm run bench:compare --if-present",
+        "timeout": 1800,
+        "optional": true
+      }
+    ]
+  },
+  "tests": {
+    "run": "npm test --silent -- --run",
+    "run_component": "npm test --silent -w {component} -- --run",
+    "red_check": ""
+  },
+  "sources": {
+    "kind": "api-contract",
+    "description": "openapi/*.yaml is the normative contract; cite by path and operationId",
+    "citation_format": "(Source: openapi/<file> #<operationId or JSON pointer>)",
+    "lookup_command": "",
+    "text_dir": "docs/requirements",
+    "heading_regex": "^#+\\s+{clause}\\b"
+  },
+  "protected_paths": [
+    {
+      "glob": "docs/CONSTITUTION.md",
+      "reason": "the constitution changes only via a human-approved ADR"
+    },
+    {
+      "glob": ".claude/**",
+      "reason": "agent, skill, hook and workflow configuration is human-owned"
+    },
+    {
+      "glob": "sdd.config.json",
+      "reason": "the SDD configuration is human-owned"
+    },
+    {
+      "glob": "docs/requirements/**",
+      "reason": "the normative source is read-only"
+    }
+  ],
+  "append_only_paths": [
+    {
+      "glob": "**/__fixtures__/**",
+      "allowed_roles": [
+        "test-author"
+      ],
+      "reason": "fixtures are immutable; test-author may only add NEW files with provenance"
+    }
+  ],
+  "role_write_scopes": {
+    "spec-author": [
+      "specs/features/**"
+    ],
+    "architect-planner": [
+      "specs/features/**"
+    ],
+    "product-owner": [
+      "specs/features/**"
+    ],
+    "integrator": [
+      "specs/features/**",
+      "package-lock.json",
+      "pnpm-lock.yaml",
+      "yarn.lock"
+    ]
+  },
+  "role_denied_paths": {
+    "implementer": [
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "**/*.spec.ts",
+      "**/__tests__/**",
+      "test/**",
+      "tests/**"
+    ]
+  },
+  "formatters": [
+    {
+      "glob": "*.ts",
+      "command": "npx prettier --write {file}",
+      "exclude": [
+        "**/node_modules/**",
+        "**/dist/**"
+      ]
+    },
+    {
+      "glob": "*.tsx",
+      "command": "npx prettier --write {file}"
+    }
+  ],
+  "stop_check": {
+    "command": "npx tsc --noEmit -p .",
+    "changed_globs": [
+      "*.ts",
+      "*.tsx"
+    ],
+    "roles": [
+      "implementer"
+    ],
+    "timeout": 240
+  },
+  "models": {
+    "mechanical": "",
+    "mid": "",
+    "strong": "",
+    "top": ""
+  },
+  "pipeline": {
+    "max_parallel_features": 2,
+    "max_critic_fix_rounds": 2,
+    "max_gate_fix_rounds": 3,
+    "skeptics": 2,
+    "max_build_jobs": 4,
+    "gate_poll_seconds": 120,
+    "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, parsing of untrusted input"
+  },
+  "merge": {
+    "union_manifests": [
+      "package.json",
+      "packages/*/package.json"
+    ],
+    "lockfiles": [
+      "package-lock.json",
+      "pnpm-lock.yaml"
+    ],
+    "after_union": "npm install --package-lock-only --ignore-scripts"
+  },
+  "commit": {
+    "trailers": [
+      "Co-Authored-By: <agent> <noreply@example.com>"
+    ],
+    "scope_format": "{feature}"
+  },
+  "override_env": "SDD_ALLOW_PROTECTED"
+}

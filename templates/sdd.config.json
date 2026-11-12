@@ -1,0 +1,129 @@
+{
+  "project": {
+    "name": "my-project",
+    "description": "One line: what the project is and what it is not (research prototype, production service, library).",
+    "languages": ["rust"],
+    "threat_model": "State what is untrusted (every byte from a peer/client/file), what must never happen (crash, hang, memory exhaustion, secret leak into logs/diagnostics), and what is deliberately out of scope (e.g. test fixtures are not secrets; do not re-implement mature libraries to zeroize transient buffers)."
+  },
+  "paths": {
+    "features_dir": "specs/features",
+    "templates_dir": "specs/templates",
+    "roadmap": "docs/ROADMAP.md",
+    "constitution": "docs/CONSTITUTION.md",
+    "development": "docs/DEVELOPMENT.md",
+    "logs_dir": ".sdd/logs",
+    "worktree_root": ".wt",
+    "build_dirs": ["target"],
+    "tools_dir": "tools/sdd"
+  },
+  "features": {
+    "id_prefix": "F",
+    "id_digits": 3,
+    "branch_prefix": "feat/",
+    "roadmap_milestone_regex": "^###\\s+(M\\d+)\\s*[—–-]+\\s*(.+?)\\s*$",
+    "roadmap_feature_regex": "^####\\s+(F\\d{3})\\s+(\\S+)(.*)$",
+    "done_without_spec": []
+  },
+  "requirements": {
+    "id_regex": "(?:STD\\d+-[0-9A-Z.]+|PRJ-[A-Z0-9]+)-R\\d{2,3}",
+    "priorities": ["must", "should", "may"],
+    "block_size": 10,
+    "budget": {"min": 15, "max": 45},
+    "clarification_marker": "[NEEDS CLARIFICATION:",
+    "statuses": ["Draft", "Approved", "Implemented"],
+    "enforce_for_statuses": ["Implemented"],
+    "require_impl_for_statuses": ["Implemented"]
+  },
+  "trace": {
+    "scan_globs": ["src/**/*", "crates/**/*", "tests/**/*"],
+    "exclude_globs": ["**/target/**", "**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**"],
+    "implements_keywords": ["Implements"],
+    "verifies_keywords": ["Verifies"],
+    "attribute_forms": true
+  },
+  "components": {
+    "path_regex": "^crates/([^/]+)/",
+    "root": "workspace",
+    "word": "crate"
+  },
+  "gates": {
+    "fast": [
+      {"name": "fmt", "command": "cargo fmt --all -- --check", "timeout": 120},
+      {"name": "lint", "command": "cargo clippy --workspace --all-targets -- -D warnings", "timeout": 1200},
+      {"name": "test", "command": "cargo test --workspace", "timeout": 1800},
+      {"name": "trace", "command": "python3 -I tools/sdd/sdd.py trace --check", "timeout": 60}
+    ],
+    "full": [
+      {"name": "fmt", "command": "cargo fmt --all -- --check", "timeout": 120},
+      {"name": "lint", "command": "cargo clippy --workspace --all-targets -- -D warnings", "timeout": 1200},
+      {"name": "test", "command": "cargo test --workspace", "timeout": 3600},
+      {"name": "trace", "command": "python3 -I tools/sdd/sdd.py trace --check", "timeout": 60},
+      {"name": "audit", "command": "cargo audit", "timeout": 600, "optional": true, "skip_if_missing": "cargo-audit"}
+    ]
+  },
+  "tests": {
+    "run": "cargo test --workspace",
+    "run_component": "cargo test -p {component}",
+    "red_check": ""
+  },
+  "sources": {
+    "kind": "product-requirements",
+    "description": "docs/REQUIREMENTS.md is the normative source; sections are numbered.",
+    "citation_format": "(Source: REQUIREMENTS §<section>)",
+    "lookup_command": "",
+    "text_dir": "docs/requirements",
+    "heading_regex": "^#+\\s+{clause}\\b"
+  },
+  "protected_paths": [
+    {"glob": "docs/CONSTITUTION.md", "reason": "the constitution changes only via a human-approved ADR"},
+    {"glob": ".claude/**", "reason": "agent, skill, hook and workflow configuration is human-owned"},
+    {"glob": "sdd.config.json", "reason": "the SDD configuration is human-owned"},
+    {"glob": "docs/requirements/**", "reason": "the normative source is read-only"}
+  ],
+  "append_only_paths": [
+    {"glob": "**/tests/fixtures/**", "allowed_roles": ["test-author"], "reason": "fixtures and golden vectors are immutable; test-author may only add NEW files with provenance"}
+  ],
+  "role_write_scopes": {
+    "spec-author": ["specs/features/**"],
+    "architect-planner": ["specs/features/**"],
+    "product-owner": ["specs/features/**"],
+    "integrator": ["specs/features/**", "Cargo.lock"]
+  },
+  "role_denied_paths": {
+    "implementer": ["**/tests/**", "**/*_test.*", "**/*.test.*", "**/test_*.py"]
+  },
+  "formatters": [
+    {"glob": "*.rs", "command": "rustfmt --edition 2024 {file}", "exclude": ["**/target/**"]}
+  ],
+  "stop_check": {
+    "command": "cargo check -q --workspace --all-targets --message-format short",
+    "changed_globs": ["*.rs", "Cargo.toml"],
+    "roles": ["implementer"],
+    "timeout": 240
+  },
+  "models": {
+    "mechanical": "",
+    "mid": "",
+    "strong": "",
+    "top": ""
+  },
+  "pipeline": {
+    "max_parallel_features": 2,
+    "max_critic_fix_rounds": 2,
+    "max_gate_fix_rounds": 3,
+    "skeptics": 2,
+    "max_build_jobs": 4,
+    "gate_poll_seconds": 120,
+    "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, parsing of untrusted input"
+  },
+  "merge": {
+    "union_manifests": ["Cargo.toml", "crates/*/Cargo.toml"],
+    "lockfiles": ["Cargo.lock"],
+    "after_union": "cargo metadata --format-version 1 -q >/dev/null"
+  },
+  "commit": {
+    "trailers": ["Co-Authored-By: <agent name> <noreply@example.com>"],
+    "scope_format": "{feature}"
+  },
+  "override_env": "SDD_ALLOW_PROTECTED"
+}
