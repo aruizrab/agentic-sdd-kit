@@ -149,6 +149,16 @@ property tests. Gate logs live in `paths.logs_dir`.
 - Review findings and verifier verdicts are committed to review.md as soon as they exist, so a
   run paused in Verify keeps them; a resumed Finalize completes the record and keeps the §3
   rows and §6 justifications.
+- With `persistFindings: true` (or `pipeline.persist_findings`) §3 also holds a machine-readable
+  findings block with each finding's outcome, the verdicts are written right after the votes
+  (before any fix), and a run started with stages from `verify` (no `review`, no `findings`
+  arg) reloads the findings from that block; findings already refuted or fixed are not
+  verified again. Use it whenever a run may be resumed with new stages instead of from its
+  journal.
+- With `redCheckTags: true` (or `pipeline.red_check_tags`) the red check also searches the whole
+  repository for Verifies tags with the configured tag syntax, so tests in directories outside
+  `trace.scan_globs` do not block the run as "untested"; their files are reported in
+  `outsideScan` for the owner to add to the scan globs.
 - `blocked-setup` with uncommitted edits outside the feature directory: an interrupted worker
   probably left them. Inspect them (`git status`, `git diff`), then commit them or hand them to
   an implementer; never discard them automatically (the bash-guard blocks the commands that
@@ -273,7 +283,7 @@ or an opts field of an already completed call and the resumed run silently runs 
 again (cost, and possibly a different answer than the one the later phases built on). So:
 
 1. **Every new behaviour is opt-in**, behind a new pipeline arg or a new `pipeline.*` config
-   key that defaults to off (example: `readViaGit`).
+   key that defaults to off (examples: `readViaGit`, `redCheckTags`, `persistFindings`).
    Without it, every prompt and opts object must stay byte-identical to the previous script.
 2. **Prove it with the cache-key equivalence test**, `node tests/pipeline_cachekeys.mjs
    [--baseline <git-rev>]`. It loads the current script and the baseline script

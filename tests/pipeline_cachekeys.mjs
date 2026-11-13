@@ -7,9 +7,10 @@
 //   1. it runs the current script and the baseline (default: `git show 43c0883:<script>`) under a stub runtime
 //      that records every agent(prompt, opts) and answers from the label and the per-label call count only, so both
 //      scripts walk the same path; over several arg sets and scenarios it compares the sequences and the summaries;
+//   2. it checks that the opt-in args change exactly what they should (redCheckTags, persistFindings).
 //
 // Run: node tests/pipeline_cachekeys.mjs [--baseline <git-rev>]
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -165,6 +166,104 @@ if (baselineSrc) {
   const capped = await run(currentSrc, ARGSETS[5][1], { capped: true })
   assert.ok(capped.calls.some((c) => / \(fallback\)$/.test(c.label)), 'the capped scenario exercises the fallback')
   ok('the scenarios reach retries, the test arbiter, the second security review, verify, fixes, fix-checks and the cap fallback')
+}
+
+// 2. Intended changes with the new args ---------------------------------------------------------------------
+const REF = ARGSETS[0][1]
+const ref = await run(currentSrc, REF)
+
+// 2a. redCheckTags: only the red-check calls change (appended rule, schema with tagOnly).
+{
+  for (const [name, args] of [['arg', Object.assign({}, REF, { redCheckTags: true })], ['config', Object.assign({}, REF, { config: Object.assign({}, CONFIG, { pipeline: Object.assign({}, CONFIG.pipeline, { red_check_tags: true }) }) })]]) {
+    const r = await run(currentSrc, args)
+    assert.equal(r.calls.length, ref.calls.length)
+    let changed = 0
+    for (let i = 0; i < r.calls.length; i++) {
+      if (/^red-check #\d/.test(r.calls[i].label)) {
+        const p = r.calls[i].prompt
+        assert.ok(p.startsWith(ref.calls[i].prompt + '\nTAG CROSS-CHECK'), `rule appended (${name})`)
+        assert.ok(p.endsWith('`trace.scan_globs`).'))
+        for (const s of ['WHOLE repository', 'Verifies', '-g \'!build/**\'', '-g \'!.wt/**\'', '-g \'!**/node_modules/**\'', 'several ids', 'NEITHER', 'tagOnly']) assert.ok(p.includes(s), `rule mentions ${s}`)
+        const o = JSON.parse(r.calls[i].opts)
+        const o0 = JSON.parse(ref.calls[i].opts)
+        assert.ok(o.schema.properties.tagOnly && !o0.schema.properties.tagOnly)
+        delete o.schema
+        delete o0.schema
+        assert.deepEqual(o, o0)
+        changed++
+      } else {
+        assert.equal(r.calls[i].opts, ref.calls[i].opts, `opts unchanged: ${r.calls[i].label}`)
+        assert.equal(r.calls[i].prompt, ref.calls[i].prompt, `prompt unchanged: ${r.calls[i].label}`)
+      }
+    }
+    assert.equal(changed, 2)
+  }
+  ok('redCheckTags (arg or pipeline.red_check_tags): both red-check prompts get the repository-wide tag search; everything else identical')
+
+  // The search command works on a fixture tree: multi-id and multi-line lists, a doc-comment tag, excluded dirs.
+  const r = await run(currentSrc, Object.assign({}, REF, { redCheckTags: true }))
+  const cmd = /^2\. [^`]*`([^`]+)`/m.exec(r.calls.find((c) => c.label === 'red-check #1').prompt)[1]
+  const hasRg = (() => { try { execFileSync('rg', ['--version'], { stdio: 'ignore' }); return true } catch { return false } })()
+  if (!hasRg) console.log('skip - rg not installed: tag search command not executed')
+  else {
+    mkdirSync(path.join(KIT, '.scratch'), { recursive: true }) // git-ignored; never /tmp
+    const tmp = mkdtempSync(path.join(KIT, '.scratch', 'redcheck-'))
+    try {
+      const w = (rel, text) => { mkdirSync(path.dirname(path.join(tmp, rel)), { recursive: true }); writeFileSync(path.join(tmp, rel), text) }
+      w('tools/x/test_tool.py', '@verifies("REQ-A-R010", "REQ-A-R011")\ndef test_a():\n    pass\n# Verifies: REQ-B-R020, REQ-B-R021\n')
+      w('tests/b.test.ts', '// verifies(\n//   "REQ-C-R030",\n//   "REQ-C-R031")\nit("x", () => {})\n// this verifies nothing REQ-D-R040\n')
+      w('build/gen.py', '# Verifies: REQ-E-R050\n')
+      w('node_modules/m/i.js', '// Verifies: REQ-E-R051\n')
+      const out = execFileSync('sh', ['-c', cmd], { cwd: tmp, encoding: 'utf8' }).trim().split('\n')
+      assert.deepEqual(out, ['REQ-A-R010', 'REQ-A-R011', 'REQ-B-R020', 'REQ-B-R021', 'REQ-C-R030', 'REQ-C-R031'])
+      ok('redCheckTags search command: ids from attribute, multi-line and doc-comment lists anywhere in the tree; prose and excluded dirs ignored')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  }
+}
+
+// 2b. persistFindings: machine-readable block in the existing record calls, verdicts before fixes, reload on resume.
+{
+  const r = await run(currentSrc, Object.assign({}, REF, { persistFindings: true }))
+  const EARLY = /^verify record$/
+  // Every call except the extra verify record (before the fixes) matches; record and finalize prompts only gain text.
+  const extra = r.calls.findIndex((c, i) => EARLY.test(c.label) && r.calls.slice(i + 1).some((d) => /^fix R1/.test(d.label)))
+  assert.ok(extra > 0, 'a verify record is written before the first fix')
+  const rest = r.calls.filter((_, i) => i !== extra)
+  assert.equal(rest.length, ref.calls.length)
+  for (let i = 0; i < rest.length; i++) {
+    assert.equal(rest[i].opts, ref.calls[i].opts, `opts unchanged: ${rest[i].label}`)
+    if (/^(review findings|verify record)$/.test(rest[i].label)) assert.ok(rest[i].prompt.startsWith(ref.calls[i].prompt + '\n\nAlso replace the machine-readable findings block'), rest[i].label)
+    else if (/^finalize/.test(rest[i].label)) assert.ok(rest[i].prompt.includes('"<!-- pipeline-findings" block'))
+    else assert.equal(rest[i].prompt, ref.calls[i].prompt, `prompt unchanged: ${rest[i].label}`)
+  }
+  const block = (c) => JSON.parse(/```json\n([\s\S]*?)\n```/.exec(c.prompt)[1])
+  const out = (c) => Object.fromEntries(block(c).map((x) => [x.id, x.outcome]))
+  const rf = r.calls.find((c) => c.label === 'review findings')
+  const records = r.calls.filter((c) => c.label === 'verify record')
+  assert.deepEqual(out(rf), { R1: 'pending verification', R2: 'pending verification', R3: 'non-blocking' })
+  assert.deepEqual(out(records[0]), { R1: 'confirmed, fix pending', R2: 'refuted', R3: 'non-blocking' })
+  assert.deepEqual(out(records[1]), { R1: 'confirmed, fixed', R2: 'refuted', R3: 'non-blocking' })
+  const r1 = block(records[1])[0]
+  for (const k of ['id', 'reviewer', 'severity', 'location', 'claim', 'votes', 'outcome']) assert.ok(k in r1, `record has ${k}`)
+  assert.equal(r1.votes.length, 2)
+  ok('persistFindings: review findings and verify records carry the findings block; verdicts are written before the fixes; outcomes pending -> confirmed/refuted -> fixed')
+
+  // Resume from "verify": findings reload from review.md; refuted/fixed ones keep their outcome and are not verified again.
+  const persisted = block(records[0]).map((x) => (x.id === 'R1' ? Object.assign({}, x, { outcome: 'confirmed, unresolved' }) : x))
+  persisted.push({ id: 'R4', reviewer: 'perf-reviewer', severity: 'blocking', category: 'perf', file: 'c/y.ts', line: 5, claim: 'O(n) per request', evidence: 'loop', location: 'c/y.ts:5', votes: [], outcome: 'confirmed, fixed' })
+  const v = await run(currentSrc, Object.assign({}, REF, { persistFindings: true, stages: ['verify', 'finalize'] }), { persisted, approved: true })
+  const labels = v.calls.map((c) => c.label)
+  assert.ok(labels.indexOf('load persisted findings') > 0 && labels.indexOf('load persisted findings') < labels.indexOf('verify R1 #1'))
+  assert.deepEqual(labels.filter((l) => /^verify R/.test(l)), ['verify R1 #1', 'verify R1 #2'])
+  const fin = v.calls.find((c) => /^finalize/.test(c.label)).prompt
+  assert.ok(fin.includes('"verifier": "refuted (persisted)"') && fin.includes('"verifier": "confirmed, fixed (persisted)"'))
+  assert.ok(!v.calls.find((c) => c.label === 'verify R1 #1').prompt.includes('"outcome"'), 'verifiers get the finding without the bookkeeping fields')
+  assert.equal(v.summary.findings.total, 4)
+  const lost = await run(currentSrc, Object.assign({}, REF, { stages: ['verify', 'finalize'] }), { persisted, approved: true })
+  assert.ok(!lost.calls.some((c) => /^(load persisted|verify R)/.test(c.label)), 'without the option the resumed run has no findings')
+  ok('persistFindings resume from "verify": findings reload; refuted/fixed keep their outcome, the unresolved one is verified again')
 }
 
 console.log(`\npipeline cache keys: ${checks} checks passed${baselineSrc ? ` (${compared} agent calls compared byte for byte against ${BASE_REV})` : ''}`)

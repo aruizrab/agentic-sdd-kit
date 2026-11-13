@@ -179,6 +179,8 @@ DEFAULTS: Dict[str, Any] = {
         "routing": "tiers",
         "models_table": "sdd.models.json",
         "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, input parsing of untrusted data",
+        "red_check_tags": False,
+        "persist_findings": False,
     },
     "merge": {
         "union_manifests": [],
@@ -454,7 +456,7 @@ def pipeline_view(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """The subset the Workflow script needs (passed as ``args.config``)."""
     keys = [
         "project", "paths", "features", "requirements", "components", "tests", "sources",
-        "models", "pipeline", "commit", "merge", "override_env", "build_cache",
+        "models", "pipeline", "commit", "merge", "override_env", "build_cache", "trace",
     ]
     view = {k: copy.deepcopy(cfg[k]) for k in keys}
     view["gates"] = {

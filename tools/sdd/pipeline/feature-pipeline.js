@@ -2,7 +2,7 @@ export const meta = {
   name: 'feature-pipeline',
   description: 'Spec-driven lifecycle for one roadmap feature: specify, critique, approve, plan, tests-first, implement in waves, gates, review, adversarial verify, finalize',
   whenToUse:
-    'Orchestrator runs this per feature with args {feature: "F011", slug: "user-login", config?: <sdd config --pipeline>, root?: "<abs worktree path>", stages?: [...], approval?: "orchestrator"|"agent", isolation?: "auto"|"none"|"worktree", security?: bool, hard?: bool, notes?: string, models?: {...}, modelsFromPhase?: "Gates", modelsBefore?: {...}, routing?: "tiers"|"formula", routingBefore?: <summary.routing>, runKey?: string, strictScope?: bool (default true), readViaGit?: bool (default false), outsideScan?: [paths]}. See docs/PLAYBOOK.md.',
+    'Orchestrator runs this per feature with args {feature: "F011", slug: "user-login", config?: <sdd config --pipeline>, root?: "<abs worktree path>", stages?: [...], approval?: "orchestrator"|"agent", isolation?: "auto"|"none"|"worktree", security?: bool, hard?: bool, notes?: string, models?: {...}, modelsFromPhase?: "Gates", modelsBefore?: {...}, routing?: "tiers"|"formula", routingBefore?: <summary.routing>, runKey?: string, strictScope?: bool (default true), readViaGit?: bool (default false), outsideScan?: [paths], redCheckTags?: bool, persistFindings?: bool}. See docs/PLAYBOOK.md.',
   phases: [
     { title: 'Setup', detail: 'load sdd.config.json (unless passed as args.config), feature branch/worktree, scaffold the feature directory' },
     { title: 'Specify', detail: 'spec-author writes spec.md (atomic requirements with ids) from the normative source, within the requirement budget' },
@@ -118,6 +118,34 @@ const READ_RULE =
   '`git show $SHA:<path>`, use `git diff <range>` and `git log`; do not create worktrees and do not edit any file. You may run the existing test command in the ' +
   'working copy without editing anything; a reproduction that needs new code is described in `reproduction`, not executed.'
 const readOnly = (prompt) => (READ_VIA_GIT ? `${prompt}\n${READ_RULE}` : prompt)
+// Opt-in behaviour (args or sdd.config.json pipeline.*). Without them every agent prompt and opts object is
+// byte-identical to the previous script (tests/pipeline_cachekeys.mjs), so paused runs resume from their journal.
+// redCheckTags: the red check also searches the WHOLE repository for Verifies tags with the configured tag syntax
+// (trace.verifies_keywords + requirements.id_regex) and counts every id of a multi-id list; a `must` is untested only
+// if neither the trace tool nor that search finds a test (lesson 23).
+const RED_CHECK_TAGS = A.redCheckTags === true || P.red_check_tags === true
+// persistFindings: the review record in review.md also carries a machine-readable findings block with each
+// finding's outcome; verdicts are written right after the votes (before any fix), and a run resumed from "verify"
+// without "review" reloads the findings from that block (lesson 24).
+const PERSIST_FINDINGS = A.persistFindings === true || P.persist_findings === true
+const TR = C.trace || {}
+const VERIFIES_KW = Array.isArray(TR.verifies_keywords) && TR.verifies_keywords.length ? TR.verifies_keywords : ['Verifies']
+const ID_RX = (C.requirements && C.requirements.id_regex) || '[A-Z][A-Z0-9]*(?:-[A-Z0-9.]+)*-R\\d{2,3}'
+const reEsc = (x) => String(x).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const TAG_EXCLUDES = Array.from(new Set((Array.isArray(TR.exclude_globs) ? TR.exclude_globs : ['**/node_modules/**', '**/target/**', '**/.git/**', '**/dist/**', '**/build/**'])
+  .concat(BUILD_DIRS.map((d) => `${d}/**`), [`${C.paths.worktree_root || '.wt'}/**`])))
+function tagCheckRule() {
+  const kw = VERIFIES_KW.map(reEsc).join('|')
+  const tagRx = `\\b(?:${kw})\\b(?:\\s*:[^\\n]*|\\s*\\((?s:.*?)\\))`
+  return '\nTAG CROSS-CHECK (the trace tool scans only `trace.scan_globs`; tests in other directories, such as tool or tooling test directories, ' +
+    'then look untested). At the root of the working copy:\n' +
+    '1. The `must` ids are the requirements with priority "must" in the trace JSON above (all of them, not only the untested ones).\n' +
+    `2. Search the WHOLE repository for Verifies tags with the configured syntax: \`rg -U -i --no-filename --no-heading -o ${TAG_EXCLUDES.map((g) => `-g ${shq('!' + g)}`).join(' ')} ` +
+    `${shq(tagRx)} . | rg -o ${shq(ID_RX)} | sort -u\`. A tag list may name several ids, possibly over several lines (wrapped comment lines included): ` +
+    `every id in it counts. Without rg use \`git grep -n -i -E -A3 ${shq(`\\b(${kw})\\b`)}\` and read the ids from the matches.\n` +
+    '3. A `must` id belongs in mustWithoutTest only if NEITHER the trace tool NOR step 2 finds a verifying test for it. Report the ids found only by ' +
+    'step 2 in tagOnly and the files holding those tags in outsideScan (the owner adds them to `trace.scan_globs`).'
+}
 
 // ---------------------------------------------------------------------------
 // Model routing (README "Model routing", docs/design/quality-gates-and-routing.md §4).
@@ -496,6 +524,14 @@ const REDCHECK = {
   },
   required: ['compiles', 'failingTests', 'unexpectedPasses', 'mustWithoutTest'],
 }
+const REDCHECK_TAGS = {
+  type: 'object',
+  properties: Object.assign({}, REDCHECK.properties, {
+    mustWithoutTest: { type: 'array', items: { type: 'string' }, description: 'must ids with no verifying test per the trace tool AND per the repository-wide tag search' },
+    tagOnly: { type: 'array', items: { type: 'string' }, description: 'must ids the trace tool reported untested but the repository-wide tag search found' },
+  }),
+  required: REDCHECK.required,
+}
 const IMPL = {
   type: 'object',
   properties: {
@@ -557,6 +593,27 @@ const FINDINGS = {
     },
   },
   required: ['securitySensitive', 'findings'],
+}
+const PERSISTED = {
+  type: 'object',
+  properties: {
+    found: { type: 'boolean' },
+    records: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: Object.assign({}, FINDINGS.properties.findings.items.properties, {
+          id: { type: 'string' },
+          reviewer: { type: 'string' },
+          location: { type: 'string' },
+          votes: { type: 'array', items: { type: 'object', properties: { refuted: { type: 'boolean' }, confidence: { type: 'string' }, reasoning: { type: 'string' } } } },
+          outcome: { type: 'string' },
+        }),
+        required: ['id', 'reviewer', 'severity', 'claim', 'outcome'],
+      },
+    },
+  },
+  required: ['found', 'records'],
 }
 const VERDICT = {
   type: 'object',
@@ -931,8 +988,8 @@ if (want('tests')) {
       `${CTX}\n\nIndependent red check (do not modify anything): run \`${testCmd}\` and \`${SDD} trace --feature ${NUM} --json${includes}\`. ` +
         'Report whether everything compiles, how many tests fail, which new tests unexpectedly pass, and which `must` requirements have no verifying test. ' +
         'A `must` whose Verifies tag the tool finds only in a file of its "outsideScan" list IS tested: do not report it as untested; report those files in outsideScan. ' +
-        'Before reporting a `must` as untested, grep the added test files for its id yourself.',
-      { label: `red-check #${attempt + 1}`, phase: 'Tests', schema: REDCHECK, agentType: 'integrator', effort: 'low' },
+        'Before reporting a `must` as untested, grep the added test files for its id yourself.' + (RED_CHECK_TAGS ? tagCheckRule() : ''),
+      { label: `red-check #${attempt + 1}`, phase: 'Tests', schema: RED_CHECK_TAGS ? REDCHECK_TAGS : REDCHECK, agentType: 'integrator', effort: 'low' },
     )
     if (red && red.compiles && !red.mustWithoutTest.length) break
     if (attempt === 1) break
@@ -1087,15 +1144,38 @@ async function persistRecord(label, ph, what, message, data) {
   return agentR(
     `${CTX}\n\nPersist the review record now (follow your integrator role): in ${DIR}/review.md (create it from ${C.paths.templates_dir}/review.md if missing) ${what}. ` +
       `Keep existing rows and §6 justifications. Commit only review.md as "${message}" with the trailer.\n\n` +
-      JSON.stringify(data, null, 1),
+      JSON.stringify(data, null, 1) + (PERSIST_FINDINGS ? findingsBlockRule() : ''),
     { label, phase: ph, schema: STEP, agentType: 'integrator' },
   )
+}
+
+// persistFindings: one record per finding with its current outcome, written verbatim into review.md §3 so a resumed
+// run can reload it. PRIOR holds outcomes and votes reloaded from review.md; FIXED the fix-check result.
+const PRIOR = {}
+const FIXED = {}
+function findingRows() {
+  return findings.map((f) => {
+    const v = verdicts.find((x) => x && x.finding.id === f.id)
+    const p = PRIOR[f.id]
+    const outcome = v
+      ? v.refuted ? 'refuted' : f.id in FIXED ? (FIXED[f.id] ? 'confirmed, fixed' : 'confirmed, unresolved') : 'confirmed, fix pending'
+      : p ? p.outcome : f.severity === 'blocking' ? 'pending verification' : 'non-blocking'
+    return Object.assign({}, f, { location: `${f.file}:${f.line}`, votes: v ? v.votes : p && Array.isArray(p.votes) ? p.votes : [], outcome })
+  })
+}
+function findingsBlockRule() {
+  return '\n\nAlso replace the machine-readable findings block in §3 (from the line starting with "<!-- pipeline-findings" to the line ' +
+    '"<!-- /pipeline-findings -->"; append it at the end of §3 if absent) with the text between BEGIN and END below, verbatim, and make the §3 table ' +
+    'rows show the same outcomes.\nBEGIN\n<!-- pipeline-findings: machine-readable record written by the feature pipeline (persistFindings); keep it -->\n```json\n[\n' +
+    // One record per line; backticks escaped so a claim cannot close the fence.
+    findingRows().map((r) => JSON.stringify(r).replace(/`/g, '\\u0060')).join(',\n') + '\n]\n```\n<!-- /pipeline-findings -->\nEND'
 }
 
 // ---------------------------------------------------------------------------
 // Review (parallel reviewers; barrier needed for dedup + security escalation)
 // ---------------------------------------------------------------------------
 let findings = Array.isArray(A.findings) ? A.findings : []
+let verdicts = []
 const RANGE = `${summary.baseSha}..HEAD`
 if (want('review')) {
   phase('Review')
@@ -1160,7 +1240,6 @@ if (want('review')) {
 // ---------------------------------------------------------------------------
 // Verify: N skeptics per blocking finding; survivors are fixed, re-gated, fix-checked
 // ---------------------------------------------------------------------------
-let verdicts = []
 const fixedIds = new Set()
 function persistVerify() {
   return persistRecord(
@@ -1178,7 +1257,27 @@ function persistVerify() {
 }
 if (want('verify')) {
   phase('Verify')
-  const blocking = findings.filter((f) => f.severity === 'blocking')
+  if (PERSIST_FINDINGS && !want('review') && !Array.isArray(A.findings)) {
+    const loaded = await agentR(
+      `${CTX}\n\nRead ${DIR}/review.md in ${WHERE} without modifying anything. If it contains a block between a line starting with "<!-- pipeline-findings" ` +
+        'and the line "<!-- /pipeline-findings -->", return found=true and the JSON array of that block\'s ```json fenced code block as records, exactly as ' +
+        'written (every record, every field). Otherwise return found=false and records=[].',
+      { label: 'load persisted findings', phase: 'Verify', schema: PERSISTED, agentType: 'integrator', effort: 'low' },
+    )
+    for (const rec of (loaded && loaded.found && loaded.records) || []) {
+      const f = Object.assign({}, rec)
+      PRIOR[f.id] = { outcome: f.outcome, votes: f.votes }
+      delete f.location
+      delete f.votes
+      delete f.outcome
+      findings.push(f)
+    }
+    summary.findings.total = findings.length
+    summary.findings.blocking = findings.filter((f) => f.severity === 'blocking').length
+    log(`loaded ${findings.length} persisted finding(s) from ${DIR}/review.md`)
+  }
+  // Persisted findings already refuted or fixed are not verified again (PRIOR is empty without persistFindings).
+  const blocking = findings.filter((f) => f.severity === 'blocking' && !(PRIOR[f.id] && /^(refuted|confirmed, fixed)$/.test(PRIOR[f.id].outcome)))
   if (!blocking.length) {
     log('no blocking findings to verify')
   } else {
@@ -1204,6 +1303,8 @@ if (want('verify')) {
     const confirmed = verdicts.filter((v) => !v.refuted).map((v) => v.finding)
     summary.findings.confirmed = confirmed.length
     summary.findings.refuted = verdicts.length - confirmed.length
+    // persistFindings: the verdicts reach review.md before any fix, so a fix stage that pauses or fails keeps them.
+    if (PERSIST_FINDINGS && confirmed.length) await persistVerify()
 
     if (confirmed.length) {
       for (const f of confirmed) {
@@ -1244,6 +1345,7 @@ if (want('verify')) {
           summary.findings.fixed++
           fixedIds.add(confirmed[i].id)
         }
+        FIXED[confirmed[i].id] = fixedIds.has(confirmed[i].id)
       })
     }
     await persistVerify()
@@ -1270,9 +1372,10 @@ if (want('finalize')) {
     reviewGaps: summary.reviewGaps,
     findings: findings.map((f) => {
       const v = verdicts.find((x) => x.finding.id === f.id)
+      const p = PRIOR[f.id]
       return Object.assign({}, f, {
-        verifier: v ? (v.refuted ? 'refuted' : 'confirmed') : f.severity === 'blocking' ? 'not-verified' : 'n/a',
-        votes: v ? v.votes : [],
+        verifier: v ? (v.refuted ? 'refuted' : 'confirmed') : p ? `${p.outcome} (persisted)` : f.severity === 'blocking' ? 'not-verified' : 'n/a',
+        votes: v ? v.votes : p && Array.isArray(p.votes) ? p.votes : [],
         unresolved: summary.findings.unresolved.includes(f.id),
       })
     }),
@@ -1280,7 +1383,8 @@ if (want('finalize')) {
   const fin = await agentR(
     `${CTX}\n\nFinalize ${FID} in ${WHERE} on ${BRANCH} (follow your integrator role):\n` +
       `1. Complete ${DIR}/review.md (from ${C.paths.templates_dir}/review.md if missing) using the pipeline record below: keep the existing §3 rows and §6 justifications ` +
-      '(update their verifier and outcome columns), and fill the gates, security and final sections (' +
+      '(update their verifier and outcome columns)' + (PERSIST_FINDINGS ? ' and the "<!-- pipeline-findings" block (outcomes as in the record below; drop no finding)' : '') +
+      ', and fill the gates, security and final sections (' +
       `"Product-owner security sign-off" = ${summary.securitySensitive ? '"PENDING - orchestrator must sign off before merge"' : '"not required"'}${summary.perfException ? '; record the requested performance exception as PENDING product-owner decision' : ''}).\n` +
       (canImplement
         ? `2. Set the spec header line to "Status: Implemented" in ${DIR}/spec.md.\n3. With that change in the working tree run \`${SDD} trace --check --feature ${NUM}\` then \`${SDD} trace --check\` ` +
