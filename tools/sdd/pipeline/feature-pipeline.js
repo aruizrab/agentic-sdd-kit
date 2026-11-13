@@ -2,7 +2,7 @@ export const meta = {
   name: 'feature-pipeline',
   description: 'Spec-driven lifecycle for one roadmap feature: specify, critique, approve, plan, tests-first, implement in waves, gates, review, adversarial verify, finalize',
   whenToUse:
-    'Orchestrator runs this per feature with args {feature: "F011", slug: "user-login", config?: <sdd config --pipeline>, root?: "<abs worktree path>", stages?: [...], approval?: "orchestrator"|"agent", isolation?: "auto"|"none"|"worktree", security?: bool, hard?: bool, notes?: string, models?: {...}, modelsFromPhase?: "Gates", strictScope?: bool (default true), readViaGit?: bool (default false), outsideScan?: [paths]}. See docs/PLAYBOOK.md.',
+    'Orchestrator runs this per feature with args {feature: "F011", slug: "user-login", config?: <sdd config --pipeline>, root?: "<abs worktree path>", stages?: [...], approval?: "orchestrator"|"agent", isolation?: "auto"|"none"|"worktree", security?: bool, hard?: bool, notes?: string, models?: {...}, modelsFromPhase?: "Gates", modelsBefore?: {...}, routing?: "tiers"|"formula", routingBefore?: <summary.routing>, runKey?: string, strictScope?: bool (default true), readViaGit?: bool (default false), outsideScan?: [paths]}. See docs/PLAYBOOK.md.',
   phases: [
     { title: 'Setup', detail: 'load sdd.config.json (unless passed as args.config), feature branch/worktree, scaffold the feature directory' },
     { title: 'Specify', detail: 'spec-author writes spec.md (atomic requirements with ids) from the normative source, within the requirement budget' },
@@ -108,13 +108,27 @@ const READ_RULE =
 const readOnly = (prompt) => (READ_VIA_GIT ? `${prompt}\n${READ_RULE}` : prompt)
 
 // ---------------------------------------------------------------------------
-// Model tiering by role (explicit ids from config.models; empty = inherit the session model).
-// Tier changes on a resumed run apply from args.modelsFromPhase onward; earlier phases keep
-// args.modelsBefore (default: config.models) so cached agent calls still match.
+// Model routing (README "Model routing", docs/design/quality-gates-and-routing.md §4).
+// tiers (default): role -> tier -> config.models (an id string or {id, effort}; "" inherits the session model).
+// formula: every call gets a level L1-L6; config.routing.candidates[L] (computed by `sdd config --pipeline`,
+// the one implementation of the formula) is the ordered list of eligible model/effort points.
+// Routing changes on a resumed run apply from args.modelsFromPhase onward; earlier phases keep
+// args.modelsBefore / args.routingBefore so completed agent calls replay from the journal.
 // ---------------------------------------------------------------------------
 const MODELS_NOW = Object.assign({}, C.models || {}, A.models || {})
 const MODELS_BEFORE = Object.assign({}, C.models || {}, A.modelsBefore || {})
 const MODELS_FROM = A.modelsFromPhase ? Math.max(0, PHASE_ORDER.indexOf(A.modelsFromPhase)) : 0
+const R_NOW = Object.assign({ mode: 'tiers' }, C.routing || {}, typeof A.routing === 'string' ? { mode: A.routing } : {})
+const R_BEFORE = A.routingBefore && typeof A.routingBefore === 'object' ? A.routingBefore : R_NOW
+for (const R of [R_NOW, R_BEFORE]) {
+  if (R.mode === 'formula' && !(R.table && R.candidates && Object.keys(R.candidates).length)) {
+    throw new Error(`feature-pipeline: formula routing needs routing.table and routing.candidates from \`sdd config --pipeline\`${R.problems ? ': ' + R.problems.join('; ') : ''}`)
+  }
+}
+const DEFAULT_ROLES = {
+  mechanical: { base: 1, min: 1 }, gate: { base: 2, min: 2 }, integrator: { base: 3, min: 2 }, implementer: { base: 3, min: 2 },
+  'perf-reviewer': { base: 3, min: 3 }, 'test-adequacy-reviewer': { base: 3, min: 3 },
+}
 const ROLE_TIER = Object.assign(
   {
     integrator: 'mid',
@@ -132,41 +146,152 @@ const ROLE_TIER = Object.assign(
   },
   P.role_tiers || {},
 )
-function tierFor(opts) {
-  const role = opts.agentType || ''
-  const label = String(opts.label || '')
-  if (/^test-arbiter /.test(label) || /^gate-fix .* #([2-9]|\d\d)/.test(label) || /^product-owner resolve 2/.test(label) || /retry$/.test(label) && role === 'implementer') return 'top'
-  if (A.hard === true && ['spec-author', 'spec-critic', 'architect-planner', 'verifier', 'security-reviewer'].includes(role)) return 'top'
-  if (role === 'integrator' && opts.effort === 'low') return 'mechanical'
+const HARD_TOP = ['spec-author', 'spec-critic', 'architect-planner', 'verifier', 'security-reviewer']
+const COMPLEXITY = { low: -1, medium: 0, high: 1 }
+
+// The routing role: gate runner, mechanical (integrator at call-site effort low) or the agent role.
+function routingRole(opts) {
+  if (/^gates /.test(String(opts.label || ''))) return 'gate'
+  if (opts.agentType === 'integrator' && opts.effort === 'low') return 'mechanical'
+  return opts.agentType || 'general-purpose'
+}
+function tierFor(role, label) {
+  if (/^test-arbiter /.test(label) || /^gate-fix .* #([2-9]|\d\d)/.test(label) || /^product-owner resolve 2/.test(label) || /^merge-resolve /.test(label) || (/retry$/.test(label) && role === 'implementer')) return 'top'
+  if (A.hard === true && HARD_TOP.includes(role)) return 'top'
+  if (role === 'gate' || role === 'mechanical') return role
   if (/^finalize /.test(label)) return 'mid'
   return ROLE_TIER[role] || 'strong'
 }
-function pickModel(opts) {
-  if (!TIERING || !opts || opts.model) return opts && opts.model
-  const models = PHASE_ORDER.indexOf(opts.phase) >= MODELS_FROM ? MODELS_NOW : MODELS_BEFORE
-  const id = models[tierFor(opts)]
-  return id ? id : undefined
+function tierValue(models, tier) {
+  const v = models[tier]
+  const set = v && (typeof v === 'string' || v.id)
+  return !set && tier === 'gate' ? models.mid : v
 }
+// A tier as a point; when it is a point of the models table it carries its pool, so caps fall back.
+function tierPoint(models, tier, R) {
+  const v = tierValue(models, tier)
+  if (!v || (typeof v !== 'string' && !v.id)) return null
+  const p = typeof v === 'string' ? { model: v, effort: '' } : { model: v.id, effort: v.effort || '' }
+  const known = R.table && (R.table.points || []).find((q) => q.model === p.model && (q.effort || '') === p.effort)
+  return known ? Object.assign({}, known, { effort: known.effort || '' }) : p
+}
+// L = clamp(max(role.min, role.base + complexity + risk + hard + retries), 1, 6)
+function levelOf(role, route, R) {
+  const roles = (R.table && R.table.roles) || DEFAULT_ROLES
+  const r = roles[role] || { base: 4, min: 4 }
+  const risk = route.risk === 'security' || route.risk === 'concurrency' ? 1 : 0
+  const raw = r.base + (COMPLEXITY[route.complexity] || 0) + risk + (A.hard === true ? 1 : 0) + (route.retries || 0)
+  return Math.min(6, Math.max(1, r.min, raw))
+}
+// Lesson: escalation only goes up. A retried work item never runs on a less intelligent point than its last attempt.
+function formulaPick(R, level, prev) {
+  const list = R.candidates[String(level)] || []
+  return list.find((c) => !prev || prev.intelligence == null || c.intelligence >= prev.intelligence) || list[0] || null
+}
+const EXHAUSTED = new Set() // pools whose usage cap was hit in this run
+let exhaustedCleared = !A.modelsFromPhase
+const LAST_POINT = {} // work item -> point of its last attempt (fallbacks included)
+const CALL_N = {}
+const isCapped = (R, p) => !!(p && R.table && R.table.pools && R.table.pools[p.pool] && R.table.pools[p.pool].capped)
+// The fallback of a call: the cheapest point at least as intelligent as its own pick, outside exhausted pools.
+function fallbackFor(R, pick) {
+  if (!pick || pick.intelligence == null || !R.table) return null
+  const pts = (R.table.points || []).filter((p) => p.intelligence >= pick.intelligence && !EXHAUSTED.has(p.pool))
+  pts.sort((a, b) => a.cost_per_task - b.cost_per_task || b.intelligence - a.intelligence || (a.model < b.model ? -1 : a.model > b.model ? 1 : 0) || ((a.effort || '') < (b.effort || '') ? -1 : 1))
+  return pts[0] ? Object.assign({}, pts[0], { effort: pts[0].effort || '' }) : null
+}
+function routeCall(opts, route) {
+  const now = PHASE_ORDER.indexOf(opts.phase) >= MODELS_FROM
+  if (now && !exhaustedCleared) {
+    EXHAUSTED.clear() // the owner resumed after a cap reset; a pool still at its cap is marked again by its first failure
+    exhaustedCleared = true
+  }
+  const R = now ? R_NOW : R_BEFORE
+  const mode = R.mode === 'formula' ? 'formula' : 'tiers'
+  const label = String(opts.label || '')
+  const role = routingRole(opts)
+  const securityCall = summary.securitySensitive && (opts.phase === 'Review' || opts.phase === 'Verify' || /^gate-fix /.test(label))
+  const level = levelOf(role, { complexity: route.complexity || 'medium', risk: route.risk || (securityCall ? 'security' : 'none'), retries: route.retries || 0 }, R)
+  const item = route.item || label
+  let pick = null
+  if (opts.model) pick = { model: opts.model, effort: '' }
+  else if (TIERING && mode === 'formula') pick = formulaPick(R, level, route.retries > 0 ? LAST_POINT[item] : null)
+  else if (TIERING) pick = tierPoint(now ? MODELS_NOW : MODELS_BEFORE, tierFor(role, label), R)
+  return { R, mode, role, level, item, pick }
+}
+const laneRoute = (tasks, item) => ({
+  complexity: tasks.some((t) => t.complexity === 'high') ? 'high' : tasks.every((t) => t.complexity === 'low') ? 'low' : 'medium',
+  risk: tasks.some((t) => t.risk === 'security') ? 'security' : tasks.some((t) => t.risk === 'concurrency') ? 'concurrency' : 'none',
+  item,
+})
 
 // ---------------------------------------------------------------------------
-// Resilient agent call: role fallback, one retry, then pause the run (resumable from the journal).
+// Resilient agent call: role fallback, usage-cap fallback, one retry, then pause the run (resumable from the journal).
+// opts.route = {complexity, risk, retries, item} is a routing hint and never reaches agent().
 // ---------------------------------------------------------------------------
 function agentR(prompt, opts) {
-  const m = pickModel(opts)
-  if (m) opts = Object.assign({}, opts, { model: m })
-  if (opts && opts.agentType && ROLE_FALLBACK) {
+  const route = (opts && opts.route) || {}
+  opts = Object.assign({}, opts)
+  delete opts.route
+  if (PAUSED.value) return Promise.resolve(null)
+  const label0 = opts.label || 'agent'
+  CALL_N[label0] = (CALL_N[label0] || 0) + 1
+  const meta = Object.assign(routeCall(opts, route), { call: `${label0}#${CALL_N[label0]}`, label0 })
+  delete opts.model
+  if (opts.agentType && ROLE_FALLBACK) {
     const role = opts.agentType
-    opts = Object.assign({}, opts, { agentType: 'general-purpose' })
+    opts.agentType = 'general-purpose'
     prompt = `ROLE: you are the "${role}" agent of ${C.project.name}. FIRST read ${AGENTS_DIR}/${role}.md and follow it exactly (scope, boundaries, allowed tools, output rules) for the rest of this task.\n\n` + prompt
   }
-  if (PAUSED.value) return Promise.resolve(null)
-  const attempt = (o) => agent(prompt, o).catch((e) => { log(`agent failed: ${(o && o.label) || 'agent'}: ${String(e).slice(0, 160)}`); return null })
-  return attempt(opts)
-    .then((r) => (r === null || r === undefined ? attempt(Object.assign({}, opts, { label: `${(opts && opts.label) || 'agent'} (retry)` })) : r))
-    .then((r) => {
-      if (r === null || r === undefined) { PAUSED.value = true; log(`pausing run: ${(opts && opts.label) || 'agent'} failed twice (usage limit or outage); resume with the same args`) }
+  return attempts(prompt, opts, meta)
+}
+
+// Lesson: usage-capped calls may return an empty result without any error text, and caps can be weekly.
+// Any null/undefined/thrown result is a failed attempt; a failure on a capped pool exhausts that pool for the
+// run and moves the call to its fallback; the run pauses only when no equal-or-smarter point is left.
+async function attempts(prompt, opts, m) {
+  let point = m.pick
+  let fallbackOf = null
+  let label = m.label0
+  let retried = false
+  if (point && isCapped(m.R, point) && EXHAUSTED.has(point.pool)) {
+    const fb = fallbackFor(m.R, m.pick)
+    if (fb) [fallbackOf, point, label] = [point.model, fb, `${m.label0} (fallback)`]
+  }
+  for (let n = 1; ; n++) {
+    const o = Object.assign({}, opts, { label })
+    if (point) {
+      o.model = point.model
+      if (point.effort) o.effort = point.effort // effort precedence: the tier's or point's, else the call site's
+    }
+    let r = null
+    try {
+      r = await agent(prompt, o)
+    } catch (e) {
+      log(`agent failed: ${label}: ${String(e).slice(0, 160)}`)
+      r = null
+    }
+    LAST_POINT[m.item] = point
+    const outcome = r === null || r === undefined ? null : r.ok === false ? 'fail' : 'ok'
+    summary.telemetry.push({ call: m.call, attempt: n, label, role: m.role, level: m.level, model: point ? point.model : null, effort: o.effort || null, outcome, fallback_of: fallbackOf, mode: m.mode })
+    if (outcome !== null) return r
+    if (isCapped(m.R, point)) {
+      EXHAUSTED.add(point.pool)
+      const fb = fallbackFor(m.R, m.pick)
+      if (fb) {
+        log(`${m.label0}: ${point.model} failed (pool ${point.pool} treated as capped for this run); falling back to ${fb.model}${fb.effort ? '/' + fb.effort : ''}`)
+        ;[fallbackOf, point, label, retried] = [point.model, fb, `${m.label0} (fallback)`, false]
+        continue
+      }
+    }
+    if (retried) {
+      PAUSED.value = true
+      log(`pausing run: ${m.label0} failed twice and no equal-or-smarter model is left (usage limit or outage); resume with the same args`)
       return r
-    })
+    }
+    retried = true
+    label = `${m.label0} (retry)`
+  }
 }
 
 const CTX = [
@@ -214,13 +339,17 @@ const summary = {
   perfException: null,
   final: null,
   nextAction: null,
+  runKey: typeof A.runKey === 'string' && A.runKey ? A.runKey : null,
+  routing: R_NOW, // pass as routingBefore when resuming with a changed models table (with modelsFromPhase)
+  telemetry: [], // one record per agent() attempt; the orchestrator appends them with `sdd routing log` after the run
 }
 
 function finish(status, reason, nextAction) {
   if (PAUSED.value) {
     reason = `agents stopped failing-fast after a usage limit or outage (was: ${status}${reason ? ' - ' + reason : ''})`
     status = 'paused'
-    nextAction = 'Resume with Workflow({scriptPath, resumeFromRunId, args: <same args>}) once usage is available again. To change model tiers for the remaining phases pass models + modelsFromPhase (and modelsBefore for the completed ones).'
+    nextAction = 'Resume with Workflow({scriptPath, resumeFromRunId, args: <same args>}) once usage is available again (caps can be weekly, not only per 5 h). ' +
+      'To change routing for the remaining phases pass modelsFromPhase plus models and modelsBefore (tiers) or routingBefore: summary.routing (formula, after editing the models table).'
   }
   // Tests found only via trace --include: a configuration gap only the owner can close (sdd.config.json is protected).
   if (summary.outsideScan.length) {
@@ -304,6 +433,8 @@ const TASK = {
     verifies: { type: 'array', items: { type: 'string' } },
     depends: { type: 'array', items: { type: 'string' } },
     parallel: { type: 'boolean' },
+    complexity: { type: 'string', enum: ['low', 'medium', 'high'], description: 'planner rating (default medium)' },
+    risk: { type: 'string', enum: ['security', 'concurrency', 'none'], description: 'planner rating (default none)' },
   },
   required: ['id', 'title', 'components', 'files', 'verifies', 'depends', 'parallel'],
 }
@@ -536,7 +667,7 @@ async function gateLoop(tag, ph) {
         (perfGate ? 'A PERFORMANCE regression is never fixed by loosening the threshold: either remove the regression or report it in testDefects as "perf-exception-needed: <measurement>" for an explicit product-owner decision. ' : '') +
         `Re-run \`${SDD} gates --fast --feature ${FID}\`, then commit as "fix(${FID}): gate failures (<gates>)" with the trailer. ` +
         'If a failure is caused by a wrong test, list it in testDefects with the citation instead of touching it.',
-      { label: `gate-fix ${tag} #${round + 1}`, phase: ph, schema: STEP, agentType: 'implementer' },
+      { label: `gate-fix ${tag} #${round + 1}`, phase: ph, schema: STEP, agentType: 'implementer', route: { retries: round, item: `gate-fix ${tag}` } },
     )
     if (fix) {
       const perfEx = (fix.testDefects || []).filter((d) => /perf-exception-needed/i.test(d))
@@ -552,7 +683,7 @@ async function gateLoop(tag, ph) {
           `\n\nReproduce each failing test, then decide per test whether the TEST/expected value (snapshot, fixture, assertion) or the IMPLEMENTATION is wrong, ` +
           `judged against ${DIR}/spec.md and the cited normative source. Fix the wrong side minimally (review snapshots field by field; never blind-accept). ` +
           `Record the reasoning in a "Test amendments" note in ${DIR}/design.md. Run \`${SDD} gates --fast --feature ${FID}\` and commit with the trailer.`,
-        { label: `test-arbiter ${tag} #${round + 1}`, phase: ph, schema: STEP, agentType: 'test-author' },
+        { label: `test-arbiter ${tag} #${round + 1}`, phase: ph, schema: STEP, agentType: 'test-author', route: { retries: 1, item: `test-arbiter ${tag}` } },
       )
     }
   }
@@ -574,6 +705,7 @@ const setup = await agentR(
     'Never stash, restore, reset or delete uncommitted edits: they may be an interrupted worker\'s work. Do not commit.',
   { label: 'setup', phase: 'Setup', schema: SETUP, agentType: 'integrator', effort: 'low' },
 )
+if (!summary.runKey) summary.runKey = `${FID}:${requested[0]}:${String((setup && setup.headSha) || '').slice(0, 12)}`
 // Lesson: interrupted workers leave uncommitted edits in worktrees; they are never discarded automatically.
 if (setup && Array.isArray(setup.dirty) && setup.dirty.length) {
   return finish(
@@ -650,7 +782,7 @@ if (want('critic')) {
             `(with the future feature id) or are deleted. Target about ${BUDGET.min}-${BUDGET.max} requirements. Keep the ids of kept requirements stable.\n` +
             '3. Fix each remaining issue below by a concrete edit (contradictions must be removed).\n' +
             'Never invent normative behaviour. Return ok and a summary of decisions.\n\nRemaining issues:\n' + JSON.stringify(poIssues, null, 1),
-          { label: `product-owner resolve ${pass + 1}`, phase: 'Critic', schema: STEP, agentType: 'product-owner' },
+          { label: `product-owner resolve ${pass + 1}`, phase: 'Critic', schema: STEP, agentType: 'product-owner', route: { retries: pass, item: 'product-owner resolve' } },
         )
         const chk = await agentR(
           readOnly(`${CTX}\n\nFinal check of ${DIR}/spec.md following your spec-critic role. Report ONLY blocking issues ` +
@@ -818,7 +950,7 @@ async function resolveConflicts(conflicted, wave) {
     `${CTX}\n\nResolve these merge conflicts SEMANTICALLY in ${WHERE} on ${BRANCH} (follow your implementer role): ${left.join(', ')}. ` +
       `Read both sides, ${DIR}/spec.md and ${DIR}/design.md; keep the behaviour both lanes intended; never pick a side blindly and never union source files. ` +
       `Then run \`${SDD} gates --fast --feature ${FID}\`, stage the files and complete the merge commit as "merge(${FID}): wave ${wave} lanes (resolved)" with the trailer.`,
-    { label: `merge-resolve wave ${wave}`, phase: 'Implement', schema: STEP, agentType: 'implementer', model: MODELS_NOW.strong || undefined },
+    { label: `merge-resolve wave ${wave}`, phase: 'Implement', schema: STEP, agentType: 'implementer', route: { retries: 1, item: `merge-resolve wave ${wave}` } },
   )
   return sem && sem.ok ? [] : left
 }
@@ -848,7 +980,7 @@ if (want('implement')) {
                 taskBlock(t) +
                 (attempt ? `\n\nPrevious attempt failed: ${r ? r.summary : 'agent died'}. Address that first.` : '') +
                 `\n\nWhen green: mark the task [x] in tasks.md, run \`${SDD} gates --fast --feature ${FID}\`, commit "feat(${FID}): ${t.id} <summary>" with "Implements: <ids>" in the body and the trailer.`,
-              { label: `${t.id} impl${attempt ? ' retry' : ''}`, phase: 'Implement', schema: IMPL, agentType: 'implementer' },
+              { label: `${t.id} impl${attempt ? ' retry' : ''}`, phase: 'Implement', schema: IMPL, agentType: 'implementer', route: { complexity: t.complexity, risk: t.risk, retries: attempt, item: `task ${t.id}` } },
             )
             if (r) await testDefectRoute(r.testDefects, 'Implement', t.id)
           }
@@ -867,7 +999,7 @@ if (want('implement')) {
               `commit after each ("feat(${FID}): <task> <summary>" + "Implements: <ids>" + trailer). Do NOT edit tasks.md (the integrator ticks tasks after merging), ` +
               `then \`git branch -f wip/${FID}-w${w.wave}-l${i + 1} HEAD\` and report branch, headSha and worktreePath. Touch only these tasks' files.\n` +
               lane.tasks.map(taskBlock).join('\n'),
-            { label: `wave ${w.wave} lane ${i + 1}`, phase: 'Implement', schema: IMPL, agentType: 'implementer', isolation: 'worktree' },
+            { label: `wave ${w.wave} lane ${i + 1}`, phase: 'Implement', schema: IMPL, agentType: 'implementer', isolation: 'worktree', route: laneRoute(lane.tasks, `wave ${w.wave} lane ${i + 1}`) },
           ),
         ),
       )
