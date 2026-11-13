@@ -2,8 +2,12 @@
 
 Status: **Draft**. Owner: the architect. The roadmap owns feature numbers: `F<NNN>` is
 unique and never reused, and the slug here is the slug of the feature directory and branch.
-`sdd progress` and `sdd new-feature` parse the `### M<n> — <name>` and `#### F<NNN> <slug>`
-headings (regexes in `sdd.config.json` `features`).
+`sdd progress` and `sdd new-feature` parse the `### M<n> — <name>`, `### Cross-cutting — <name>`
+and `#### F<NNN> <slug> — <title>` headings (regexes in `sdd.config.json` `features`). The title
+after the slug is the feature's display name in `sdd progress` until its spec has an H1 title; a
+trailing note such as `(placeholder, specs later)` or `(TBD)` is not shown. Features under a
+cross-cutting heading belong to no milestone: `sdd progress` shows them as their own group and
+counts them in the overall percentage only.
 
 ## 1. Milestones
 
@@ -35,7 +39,7 @@ graph LR
 
 ### M0 — Foundations
 
-#### F001 <slug>
+#### F001 <slug> — <Feature title>
 - **Goal:** <one sentence>
 - **Scope:** <in-scope items with source sections>
 - **Out of scope:** <items and the feature that owns them>
@@ -45,11 +49,16 @@ graph LR
 - **Security-sensitive:** no
 - **Hard:** no (set yes to run spec/critic/plan/security/verifier roles on the top model tier)
 
-#### F002 <slug>
+#### F002 <slug> — <Feature title>
 - **Goal:** ...
 - **Depends on:** F001
 
 ### M1 — <name>
 
-#### F003 <slug>
+#### F003 <slug> — <Feature title>
 - ...
+
+### Cross-cutting — <name, e.g. operations and packaging>
+
+#### F004 <slug> — <Feature title> (placeholder, specs later)
+- **Goal:** <work that serves every milestone, e.g. container images, observability>

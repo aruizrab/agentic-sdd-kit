@@ -48,6 +48,7 @@ DEFAULTS: Dict[str, Any] = {
         "main_branch": "main",
         "roadmap_milestone_regex": r"^###\s+(M\d+)\s*[—–-]+\s*(.+?)\s*$",
         "roadmap_feature_regex": r"^####\s+(F\d{3})\s+(\S+)(.*)$",
+        "roadmap_cross_cutting_regex": r"(?i)^###\s+Cross-cutting\b\s*(?:[—–:-]+\s*(.*?))?\s*$",
         "done_without_spec": [],
     },
     "requirements": {
@@ -283,7 +284,7 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
         re.compile(cfg["requirements"]["id_regex"])
     except re.error as exc:
         problems.append(f"requirements.id_regex does not compile: {exc}")
-    for name in ("roadmap_milestone_regex", "roadmap_feature_regex"):
+    for name in ("roadmap_milestone_regex", "roadmap_feature_regex", "roadmap_cross_cutting_regex"):
         try:
             re.compile(cfg["features"][name])
         except re.error as exc:

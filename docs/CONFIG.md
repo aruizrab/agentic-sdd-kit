@@ -20,7 +20,8 @@ Workflow script takes as `args.config`.
 | `paths.tools_dir` | where the kit tools are installed | `tools/sdd` |
 | `features.id_prefix`, `id_digits`, `branch_prefix` | `F`, `3`, `feat/` -> `F011`, `feat/F011-slug` | |
 | `features.main_branch` | the integration branch worktrees are created from and merged into (`master`, `trunk`, `develop`...) | `main` |
-| `features.roadmap_milestone_regex`, `roadmap_feature_regex` | how `sdd progress` and `sdd new-feature` parse the roadmap | `### M<n> — name`, `#### F<NNN> slug` |
+| `features.roadmap_milestone_regex`, `roadmap_feature_regex` | how `sdd progress` and `sdd new-feature` parse the roadmap; text after the slug of the form ` — <title>` is the feature's display title until its spec has an H1 title | `### M<n> — name`, `#### F<NNN> slug` |
+| `features.roadmap_cross_cutting_regex` | heading of a roadmap section whose features belong to no milestone: `sdd progress` lists them as one extra group (`kind: "cross-cutting"`, id `CC`), counted in overall only; group 1 (optional) is the group name | `### Cross-cutting — name` |
 | `features.done_without_spec` | feature ids counted as merged although they predate the pipeline | `[]` |
 | `requirements.id_regex` | requirement id syntax (used by trace, spec-info, tasks) | `[A-Z][A-Z0-9]*(?:-[A-Z0-9.]+)*-R\d{2,3}` |
 | `requirements.priorities` | first is the enforced one | `["must","should","may"]` |

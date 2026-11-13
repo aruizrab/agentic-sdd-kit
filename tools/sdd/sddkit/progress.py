@@ -17,7 +17,21 @@ merged               100.0  the feature branch is an ancestor of main, the spec 
                             ``features.done_without_spec``
 =================  =======  ==========================================================
 
-Milestone and overall percentages are the unweighted mean of feature percents.
+Groups: every milestone heading (``features.roadmap_milestone_regex``) is a group with
+``kind: "milestone"``. Features under a cross-cutting heading
+(``features.roadmap_cross_cutting_regex``, default ``### Cross-cutting — <name>``) belong to
+no milestone but to one extra group with id ``CC`` and ``kind: "cross-cutting"``, listed after
+the milestones in the same ``milestones`` array (their ``milestone`` field names ``CC``).
+Features above any heading form the ``unassigned`` group (``kind: "unassigned"``).
+Group and overall percentages are the unweighted mean of feature percents; overall covers
+every feature, cross-cutting ones included.
+
+Display names: a feature's name is the title of its spec's H1 (``# F002 — <title>``, from the
+newest feature branch, else main), else the roadmap heading title after the slug
+(``#### F016 container-images — Container images and charts``), else the slug. A trailing
+placeholder note such as ``(placeholder, specs later)`` or ``(TBD)`` is dropped from feature
+titles and group names.
+
 The evidence ref for an unmerged feature is its newest ``<branch_prefix>F<NNN>-*``
 branch (remote first, then local), else main.
 """
@@ -47,12 +61,47 @@ STAGES = {
 IMPLEMENTING_BASE = 30.0
 IMPLEMENTING_SPAN = 60.0
 _TASK_LINE = re.compile(r"^- \[([ xX])\] T\d{2,3}\b")
+KIND_MILESTONE = "milestone"
+KIND_CROSS_CUTTING = "cross-cutting"
+KIND_UNASSIGNED = "unassigned"
+CROSS_CUTTING_ID = "CC"
+DEFAULT_CROSS_CUTTING = r"(?i)^###\s+Cross-cutting\b\s*(?:[—–:-]+\s*(.*?))?\s*$"
+NAME_MAX = 120
+# A trailing "(placeholder, specs later)", "(placeholder)", "(TBD)", "(to be defined)" note.
+_PLACEHOLDER_NOTE = re.compile(r"\s*\((?:placeholder|tbd|to be defined)\b[^()]*\)\s*$", re.IGNORECASE)
+# Optional display title after the slug: "#### F016 container-images — Container images and charts".
+_ROADMAP_TITLE = re.compile(r"^\s*[—–-]+\s*(\S.*?)\s*$")
+
+
+def display_name(name: str) -> str:
+    """``name`` without a trailing placeholder note; a name that is only the note is kept as is."""
+    stripped = _PLACEHOLDER_NOTE.sub("", name).strip()
+    return stripped or name.strip()
+
+
+def spec_title(text: Optional[str], id_prefix: str) -> Optional[str]:
+    """The title of a spec.md H1 (``# F002 — Runtime scheduler``); None without one or for the template placeholder."""
+    if text is None:
+        return None
+    rx = re.compile(rf"^#\s+{re.escape(id_prefix)}\d+\s*[—–:-]+\s*(\S.*?)\s*$")
+    for line in text.splitlines():
+        if line.startswith("# "):
+            m = rx.match(line)
+            if not m or re.fullmatch(r"<[^>]*>", m.group(1)):
+                return None
+            return display_name(m.group(1))[:NAME_MAX]
+    return None
 
 
 def parse_roadmap(text: str, cfg: Dict[str, Any]) -> Tuple[List[Dict[str, str]], List[Dict[str, str]]]:
+    """``(groups, features)``: milestone groups in roadmap order, then the cross-cutting group (if any),
+    then the unassigned group (if any). Each feature carries its ``slug``, its display ``name``
+    (roadmap title, else slug) and its group id in ``milestone``."""
     m_rx = re.compile(cfg["features"]["roadmap_milestone_regex"])
     f_rx = re.compile(cfg["features"]["roadmap_feature_regex"])
+    c_rx = re.compile(cfg["features"].get("roadmap_cross_cutting_regex") or DEFAULT_CROSS_CUTTING)
     milestones: List[Dict[str, str]] = []
+    cross: Optional[Dict[str, str]] = None
     features: List[Dict[str, str]] = []
     current: Optional[str] = None
     seen_m, seen_f = set(), set()
@@ -62,7 +111,14 @@ def parse_roadmap(text: str, cfg: Dict[str, Any]) -> Tuple[List[Dict[str, str]],
             current = m.group(1)
             if current not in seen_m:
                 seen_m.add(current)
-                milestones.append({"id": current, "name": m.group(2).strip()})
+                milestones.append({"id": current, "name": display_name(m.group(2).strip()), "kind": KIND_MILESTONE})
+            continue
+        c = c_rx.match(line)
+        if c:
+            current = CROSS_CUTTING_ID
+            if cross is None:
+                name = display_name((c.group(1) if c.re.groups else "") or "")
+                cross = {"id": CROSS_CUTTING_ID, "name": (name[:1].upper() + name[1:]) or "Cross-cutting", "kind": KIND_CROSS_CUTTING}
             continue
         f = f_rx.match(line)
         if f:
@@ -70,12 +126,15 @@ def parse_roadmap(text: str, cfg: Dict[str, Any]) -> Tuple[List[Dict[str, str]],
             if fid in seen_f:
                 raise ValueError(f"duplicate feature heading {fid} in the roadmap")
             seen_f.add(fid)
-            features.append({"id": fid, "name": slug, "milestone": current or "unassigned"})
+            t = _ROADMAP_TITLE.match(f.group(3)) if f.re.groups >= 3 and f.group(3) else None
+            title = display_name(t.group(1))[:NAME_MAX] if t else ""
+            features.append({"id": fid, "slug": slug, "name": title or slug, "milestone": current or KIND_UNASSIGNED})
     if not features:
         raise ValueError("no feature headings found in the roadmap (features.roadmap_feature_regex)")
-    if any(f["milestone"] == "unassigned" for f in features) and "unassigned" not in seen_m:
-        milestones.append({"id": "unassigned", "name": "No milestone"})
-    return milestones, features
+    groups = milestones + ([cross] if cross is not None else [])
+    if any(f["milestone"] == KIND_UNASSIGNED for f in features) and KIND_UNASSIGNED not in seen_m:
+        groups.append({"id": KIND_UNASSIGNED, "name": "No milestone", "kind": KIND_UNASSIGNED})
+    return groups, features
 
 
 def count_tasks(text: Optional[str]) -> Tuple[int, int]:
@@ -169,6 +228,19 @@ def feature_stage(repo: Repo, fid: str, main_ref: str, main_dirs: Dict[str, str]
     return stage, STAGES[stage]
 
 
+def feature_name(repo: "Repo", fid: str, fallback: str, main_ref: str, main_dirs: Dict[str, str], branches: List[str]) -> str:
+    """Spec H1 title from the newest feature branch, else main; else ``fallback`` (roadmap title or slug)."""
+    prefix = repo.cfg["features"]["id_prefix"]
+    num = fid[len(prefix):]
+    for ref in branches[:1] + [main_ref]:
+        dirs = main_dirs if ref == main_ref else repo.feature_dirs(ref)
+        fdir = dirs.get(num)
+        title = spec_title(repo.git.show(ref, f"{fdir}/spec.md"), prefix) if fdir else None
+        if title:
+            return title
+    return fallback
+
+
 def _mean(values: List[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
@@ -190,13 +262,15 @@ def build_report(root: Path, cfg: Dict[str, Any], main_ref: Optional[str] = None
     rows, raw = [], {}
     for f in features:
         num = f["id"][len(prefix):]
-        stage, pct = feature_stage(repo, f["id"], resolved, main_dirs, branches.get(num, []), done_set)
+        fbranches = branches.get(num, [])
+        stage, pct = feature_stage(repo, f["id"], resolved, main_dirs, fbranches, done_set)
         raw[f["id"]] = pct
-        rows.append({"id": f["id"], "name": f["name"], "milestone": f["milestone"], "stage": stage, "percent": round(pct, 1)})
+        name = feature_name(repo, f["id"], f["name"], resolved, main_dirs, fbranches)
+        rows.append({"id": f["id"], "name": name, "slug": f["slug"], "milestone": f["milestone"], "stage": stage, "percent": round(pct, 1)})
     ms = []
     for m in milestones:
         ids = [f["id"] for f in features if f["milestone"] == m["id"]]
-        ms.append({"id": m["id"], "name": m["name"], "percent": round(_mean([raw[i] for i in ids]), 1), "features": ids})
+        ms.append({"id": m["id"], "name": m["name"], "kind": m["kind"], "percent": round(_mean([raw[i] for i in ids]), 1), "features": ids})
     if now is None:
         epoch = os.environ.get("SOURCE_DATE_EPOCH")
         now = _dt.datetime.fromtimestamp(int(epoch), tz=_dt.timezone.utc) if epoch else _dt.datetime.now(tz=_dt.timezone.utc)
@@ -204,7 +278,7 @@ def build_report(root: Path, cfg: Dict[str, Any], main_ref: Optional[str] = None
         "schema": SCHEMA,
         "generatedAt": now.astimezone(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "commit": repo.git.run("rev-parse", "--short=7", f"{resolved}^{{commit}}").strip(),
-        "method": "lifecycle-stage weights per roadmap feature, equal feature weights",
+        "method": "lifecycle-stage weights per roadmap feature, equal feature weights; cross-cutting features form their own group and count in overall only",
         "overall": round(_mean(list(raw.values())), 1),
         "milestones": ms,
         "features": rows,
@@ -214,7 +288,8 @@ def build_report(root: Path, cfg: Dict[str, Any], main_ref: Optional[str] = None
 def render_table(report: Dict[str, Any]) -> str:
     lines = [f"overall {report['overall']:.1f}% (commit {report['commit']})"]
     for m in report["milestones"]:
-        lines.append(f"  {m['id']:<4} {m['percent']:5.1f}%  {m['name']} ({len(m['features'])} features)")
+        kind = "" if m.get("kind") == KIND_MILESTONE else f" [{m.get('kind')}]"
+        lines.append(f"  {m['id']:<4} {m['percent']:5.1f}%  {m['name']}{kind} ({len(m['features'])} features)")
     lines.append("")
     for f in report["features"]:
         lines.append(f"  {f['id']:<6} {f['percent']:5.1f}%  {f['stage']:<14} {f['name']}")

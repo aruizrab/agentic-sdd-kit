@@ -93,7 +93,7 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 | `sdd baseline [--report [--json]\|--init\|--update\|--resolve\|--merge-driver O A B]` | the shrink-only violation baseline: report every violation by kind and file, record it once at adoption, shrink it, resolve merge conflicts mechanically |
 | `sdd hooks install [--force]`, `sdd hooks run NAME` | sets `core.hooksPath` to the kit's git hooks (refuses over hooks already in use); the hook logic |
 | `sdd new-feature NNN slug` | scaffolds the feature directory from the templates and prints the feature's requirement id block |
-| `sdd progress [--json]` | lifecycle-stage progress per feature, milestone and overall from the roadmap and git refs |
+| `sdd progress [--json]` | lifecycle-stage progress per feature, milestone, cross-cutting group and overall from the roadmap and git refs; display names from the spec H1, else the roadmap title, else the slug |
 | `sdd union-merge [files]` | resolves additive manifest conflicts only (union); refuses everything else |
 | `sdd spec-info DIR`, `sdd markers FILE` | Status, open clarification markers (ignores comments, code spans, prose), requirement counts |
 | `sdd tasks DIR [--lanes] [--validate]` | tasks.md as JSON: waves, tasks, components, lanes, the planner's `complexity` and `risk` ratings; plan exit criteria |
