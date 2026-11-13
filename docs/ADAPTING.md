@@ -9,8 +9,9 @@ is installed: its `fmt`/`lint`/`test` gates and `tests.run` are placeholders tha
 
 ## 1. Gates
 
-A gate is `{"name", "command", "timeout", "optional"?, "skip_if_missing"?, "env"?}`.
-`sdd gates` runs every gate of the chosen list (fast or full), streams output to the log,
+A gate is `{"name", "command", "timeout", "optional"?, "skip_if_missing"?, "env"?,
+"install"?, "skip_exit"?}`. `sdd gates` runs every gate of the chosen plan (fast, full or
+nightly; section 6 covers the quality checks), streams output to the log,
 prints a summary and exits non-zero if any gate failed. `optional` gates are skipped (not
 failed) when the command exits 127 or `skip_if_missing` names a program that is not on
 PATH. Keep `trace` in both lists.
@@ -118,3 +119,142 @@ memory; secrets never leak into datasets/logs; scenario keys are test data, do n
 re-implement libraries to zeroize transient buffers", and explicit model ids per tier.
 Its constitution articles 7-9 are determinism (sans-IO state machines), performance budgets
 per message/UE, and typed events for every message and transition.
+
+## 6. Quality gates per language
+
+`quality` holds the rules; the gate plans call `python3 -I tools/sdd/sdd.py check <name>`
+with `"skip_exit": 3` so a missing tool shows as SKIP with its `install` hint (a failure
+with `CI=true`). Full examples, including the regexes, are in `examples/configs/`; the
+captured outputs they are tested against are in `tests/fixtures/quality/tools/`. Tool output
+formats change between versions: run each check once on purpose-made violations and adjust
+the regex before relying on it.
+
+**Coverage** needs a report that lists every source file, or a brand-new module no test
+imports is invisible (the gate fails such a changed file as `coverage-unmeasured` unless it
+has no executable code).
+
+| Language | `coverage.command` -> `report` (`format`) | List every file |
+|---|---|---|
+| Rust | `cargo llvm-cov --workspace --lcov --output-path lcov.info` -> `lcov.info` (lcov) | every crate member is compiled, so every file is listed |
+| Python | `coverage run --source=src -m pytest -q && coverage lcov -o lcov.info` -> `lcov.info` (lcov) | `--source=src` (or `[tool.coverage.run] source`) |
+| TypeScript | `npx vitest run --coverage.enabled --coverage.reporter=lcov --coverage.all` -> `coverage/lcov.info` (lcov) | `--coverage.all` / `coverage.include`; Jest: `collectCoverageFrom` |
+| Go | `go test -coverprofile=cover.out ./... && gocover-cobertura < cover.out > coverage.xml` -> `coverage.xml` (cobertura) | `-coverpkg=./...` for cross-package coverage |
+
+**Mutation** must judge only the diff, or at least only report it: survivors on unchanged
+lines are ignored, so a file-level tool works too. `ok_exits` lists the codes that mean "the
+run completed" (any other code, e.g. a failing unmutated baseline, is a tool error, never
+"zero survivors").
+
+| Language | `mutation.command` | Survivors | `ok_exits` |
+|---|---|---|---|
+| Rust | `cargo mutants --workspace --in-diff {diff_file} --no-shuffle` | `report: mutants.out/missed.txt`, regex `^(?P<file>[^:\n]+):(?P<line>\d+):\d+: (?P<mutation>.+)$` | `[0, 2, 3]` (2 = missed mutants, 3 = timeouts; 1 usage error, 4 baseline failed) |
+| Python | `mutmut run --max-children 4 >/dev/null; mutmut results` | stdout, regex on `    <module>.x_<fn>__mutmut_<n>: survived` (file = dotted module, no line: every survivor needs a fix or a justification) | `[0]` |
+| TypeScript | `npx stryker run --incremental --reporters json` | `report: reports/mutation/mutation.json`, `format: mutation-testing-report` | `[0]` |
+| Go | `gremlins unleash ./...` | stdout, regex `LIVED (?P<mutation>\S+) at (?P<file>...):(?P<line>\d+)` | `[0]` |
+
+A survivor that no test can kill is justified in the feature's review.md §6 as
+`- mutant: <file>[:<line>]: <mutation> — <reason>`.
+
+**Command checks** (`quality.checks`, run in the full plan):
+
+| Language | docs / warnings | unused dependencies | flaky tests (`baseline: false`) |
+|---|---|---|---|
+| Rust | `cargo doc --no-deps --workspace` (`warning: ...` + `--> file:line`) | `cargo machete --skip-target-dir` (`ok_exits [0, 1]`; `<crate> -- <Cargo.toml>:` header, tab-indented names) | `cargo nextest run --workspace --retries 2` (`FLAKY n/m [..] <binary> <test>`; `ok_exits [0, 100]`) |
+| Python | `ruff check --select D --output-format concise src` (`ok_exits [0, 1]`) | `deptry src` (`DEP00n` lines; `ok_exits [0, 1]`) | `pytest -p rerunfailures --reruns 2 -rR` (`RERUN <file>::<test>`) |
+| TypeScript | `npx eslint --format unix src` with eslint-plugin-jsdoc (only `[.../jsdoc/...]` lines) | `npx depcheck` (`ok_exits [0, 255]`) | `npx vitest run --retry=2 --reporter=verbose` (`(retry xN)`) |
+| Go | `revive -formatter default ./...` (`exported ...` lines) | `go mod tidy -diff` (Go 1.23+; `ok_exits [0, 1]`) | `gotestsum --rerun-fails=2 --format testname` (`PASS <pkg>.<Test> (re-run n)`) |
+
+The regex has the named groups `file` and `message` and optionally `line`. A match without
+`file` inherits the file of the previous match and a match without `message` only sets the
+file, so "header line, then indented items" outputs need one regex with two alternatives.
+Paths are made relative to the project root.
+
+**Layers** (`quality.arch.modules`): a module is `{name, paths, imports, may_depend_on,
+forbid}`. Relative imports resolve by path; any other specifier is matched against the
+`imports` regexes (`^crate::domain\b`, `^app\.domain\b`, `^@app/domain(/|$)`,
+`^example\.com/app/internal/domain\b`); no match = external, ignored. Forbid third-party
+APIs by **usage**, not by import line, so qualified uses without an import are caught:
+`\btokio::` (also matches `use tokio::...`), `\brequests\.` together with
+`^\s*(import|from)\s+requests\b`.
+
+### Heuristics and their limits
+
+Everything language-specific is in `tools/sdd/sddkit/quality/langs.py`. A lexer blanks
+comments and string/char/template literal contents first, so braces, keywords and imports in
+them never count. Lines of code: non-blank lines that are not comment-only; doc comments
+(`///`, `//!`, `/** */`) and Python docstrings are documentation, not code.
+
+| Language | Functions | Dependencies | Test code |
+|---|---|---|---|
+| Rust | `fn name` with `pub(...)`/`const`/`async`/`unsafe`/`extern "..."`; generics, `->` types and `where` clauses are skipped; `fn f();` has no body | `use` trees (`{a, b::{c}}`), `extern crate`, and qualified paths starting with `crate::`, `super::`, `self::` or a mapped name; `super`/`self` resolve from the file's module path (nearest `lib.rs`/`main.rs`) | `**/benches/**`, `**/examples/**`, `#[cfg(test)]` items |
+| Python | `def`/`async def`; the signature may span lines (Black's `) -> T:`); the body ends at the next code line indented no deeper, outside brackets and multi-line strings | `import a.b [as x]`, `from a.b import c`, relative `from .x import y`, and dotted chains of imported names (`app.infra.db.connect()`) | `**/test_*.py`, `**/*_test.py`, `**/conftest.py` |
+| TS/JS | `function name`, class and object methods (never `if`/`for`/`while`/`switch`/`catch`/...), `const name = (...) => {` with a block body | `import ... from`, `export ... from`, `require()`, `import()` | `**/__tests__/**`, `**/*.test.*`, `**/*.spec.*`; `*.d.ts` has no code |
+| Go | `func name` and `func (recv) name`, type parameters, `interface{...}`/`struct{...}` in signatures | `import "p"`, aliased imports and import blocks | `**/*_test.go` |
+
+Known limits: functions produced by macros; braces inside JavaScript regex literals; a TS
+return type written as an unparenthesised function type (`(): () => T => {`); Allman-style
+TS/JS braces after a newline without a return type are found, other line breaks between `)`
+and `{` are not; Python decorators are not counted. Put such files into
+`quality.size.exclude`. Add an extension with `quality.languages` (`{".pyi": "python",
+".vue": "typescript", ".txt": "none"}`); a `none` file gets the file-size check only.
+
+## 7. Git hooks
+
+`sdd hooks install` sets `core.hooksPath` to the relative `tools/sdd/githooks`, so every
+linked worktree runs its own checkout's hooks. It refuses (and changes nothing) when
+`core.hooksPath` already points elsewhere (husky) or `.git/hooks` holds executable hooks
+(git-lfs, the pre-commit framework), because git would then ignore them. Chain instead:
+
+- **git-lfs / your own hooks directory**: keep it, and add the kit call to each hook:
+  ```sh
+  #!/bin/sh
+  # .git/hooks/pre-push (or .husky/pre-push)
+  git lfs pre-push "$@" || exit 1
+  exec python3 -I tools/sdd/sdd.py hooks run pre-push "$@"
+  ```
+  Do the same for `pre-commit` and `commit-msg` (`hooks run commit-msg "$1"`). `sdd doctor`
+  counts the hooks as installed when each of the three calls `hooks run <name>`.
+- **pre-commit framework**: add local hooks to `.pre-commit-config.yaml`:
+  ```yaml
+  - repo: local
+    hooks:
+      - {id: sdd-pre-commit, name: sdd pre-commit, entry: python3 -I tools/sdd/sdd.py hooks run pre-commit, language: system, pass_filenames: false}
+      - {id: sdd-commit-msg, name: sdd commit-msg, entry: python3 -I tools/sdd/sdd.py hooks run commit-msg, language: system, stages: [commit-msg]}
+      - {id: sdd-pre-push, name: sdd pre-push, entry: python3 -I tools/sdd/sdd.py hooks run pre-push, language: system, pass_filenames: false, stages: [pre-push]}
+  ```
+
+The hooks never stash, reset, check out, or write the index, the working tree or git
+config; the only file they write is the timing note `sdd-hook-time` in the git directory.
+The commit-msg test step runs the configured component tests and must stay below an agent's
+shell limit (`quality.hooks.test_timeout`, default 300 s); agents give `git commit` a 600 s
+shell timeout. Put slow checks in `gates.fast` (pre-push) instead; the hooks warn when
+pre-commit and commit-msg together exceed `quality.hooks.budget_seconds`.
+
+### Optional: a merge driver for the baseline
+
+Parallel lanes that shrink `sdd.baseline.json` conflict on it. `sdd baseline --resolve`
+resolves that after the fact; to avoid the conflict, register the intersection as a merge
+driver (the kit never sets this for you):
+
+```sh
+echo 'sdd.baseline.json merge=sdd-baseline' >> .gitattributes
+git config merge.sdd-baseline.driver 'python3 -I tools/sdd/sdd.py baseline --merge-driver %O %A %B'
+```
+
+Run `sdd baseline --update` after such a merge to drop entries only the merged code fixed.
+
+## 8. CI wiring
+
+The git hooks are a fast local check, not the authority: CI is. A pull-request job runs
+
+```sh
+git fetch --unshallow || true            # merge-base and commit range need full history
+CI=true python3 -I tools/sdd/sdd.py gates --plan full
+```
+
+which includes `sdd check commits` (every commit message on the branch) and `sdd check
+secrets` (added lines and commits, gitleaks when installed). With `CI=true` a missing tool
+fails instead of skipping, so install every tool the plan names. Set `SDD_BASE_REF` when the
+target branch is not `features.main_branch` (for example `SDD_BASE_REF=origin/release-2`).
+Schedule `CI=true python3 -I tools/sdd/sdd.py gates --plan nightly` for the full-repository
+coverage and mutation runs, long fuzzing and benchmarks.

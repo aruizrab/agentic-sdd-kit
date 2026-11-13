@@ -17,6 +17,8 @@ acts as product owner, signs off security, merges, and keeps the machine healthy
 6. The host: build output and worktrees are **not** on a RAM tmpfs; disk has headroom; OS
    auto-updates are off for the duration; `pipeline.max_build_jobs` fits the machine.
 7. Commit everything. Worktrees branch from committed HEAD; uncommitted work is invisible.
+8. The git hooks are installed (`sdd hooks install`; `sdd doctor` checks it) and, on an
+   existing codebase, the gates are adopted as §12 describes before the first feature.
 
 ## 1. One feature, step by step
 
@@ -88,7 +90,10 @@ If it still blocks, resolve it yourself and re-run with `poResolved: true`.
 
 Full gates can exceed an agent's shell time limit. The pipeline runs them detached
 (`sdd gates --detached`) and polls `sdd gates --wait <log>`; a log without `GATES_EXIT=<n>` is
-an incomplete run and is never reported as a result. Keep full gates fast enough to run per
+an incomplete run and is never reported as a result. There are three plans: `gates.fast`
+(pre-push and every task), `gates.full` (the pipeline's Gates stage and pull-request CI: adds
+coverage and mutation of the changed lines and the command checks) and `gates.nightly`
+(full-repository coverage and mutation, long fuzzing, benchmarks; schedule it in CI). Keep full gates fast enough to run per
 feature: budget fuzzing, fuzz only changed targets, use an optimised test profile for heavy
 property tests. Gate logs live in `paths.logs_dir`.
 
@@ -160,3 +165,38 @@ id.
 - [ ] `df -h` headroom checked (a full host disk crashed the VM twice in ferrocore)
 - [ ] `sdd trace --check` and `sdd progress` run on main
 - [ ] nothing under `/tmp` that matters
+
+## 12. Adopting the gates on an existing codebase
+
+The quality gates (size, layers, coverage and mutation of changed lines, command checks, git
+hooks) are meant to be strict from day one for new code, while the code that exists when you
+adopt them is fixed on purpose, not by accident. Three steps, in this order:
+
+1. **Build and configure the gates, install the hooks.** Fill `quality` in `sdd.config.json`
+   (thresholds, `arch.modules`, the coverage and mutation commands and their `ok_exits`, the
+   command checks; start from `examples/configs/<language>.json` and docs/ADAPTING.md), add the
+   `sdd check` gates to `gates.fast`/`gates.full`, and run `sdd hooks install`. It refuses
+   when hooks are already in use (git-lfs, husky, the pre-commit framework): chain them as
+   docs/ADAPTING.md shows instead of forcing. Run `sdd gates --plan full` once and make every
+   tool either run or show its install hint; in CI set `CI=true` so a missing tool fails.
+2. **Record the baseline in the adoption commit.** `sdd baseline --init` writes every current
+   size, arch and baseline-enabled command-check violation to `sdd.baseline.json`; commit it
+   (for example `chore: adopt quality gates`). From then on the baseline only shrinks:
+   `sdd check baseline` refuses new entries and raised values, a violation that grows or a
+   new one fails, and a fixed one must have its entry removed with `sdd baseline --update`.
+   Coverage and mutation need no baseline: they judge only changed lines.
+3. **Run a remediation feature that empties the baseline before new feature work.**
+   `sdd baseline --report` (or `--json`) is its work list, grouped by kind and file; plan
+   one task per file or module (split long functions, move dependencies behind the allowed
+   layer, add the missing docs, remove unused dependencies). Its parallel lanes all shrink
+   the same baseline file, so their merges conflict on it by design: the integrator resolves
+   that mechanically with `sdd baseline --resolve` (the intersection of both sides, then
+   `--update` on the merged tree) and never with `sdd union-merge`, which refuses the file.
+   Projects that prefer no conflict at all can register the optional merge driver
+   (docs/ADAPTING.md). New features start when the report is empty, or when what is left is
+   explicitly accepted by the product owner.
+
+Never grandfather new code: no agent adds baseline entries, raises thresholds or adds exclude
+globs to get a gate green (the code-writing roles cannot edit the config, the hooks or the
+checkers). A `cov:unreachable: <reason>` marker or a mutant justification in review.md §6 is
+reviewed like code.

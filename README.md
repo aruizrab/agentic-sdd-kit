@@ -22,19 +22,23 @@ agentic-sdd-kit/
   tools/sdd/                 the `sdd` CLI (Python 3.8+, standard library only)
     sdd.py, sddkit/          config, trace, gates, new-feature, progress, union-merge,
                              spec-info/markers/tasks, source, hooks, doctor
+    sddkit/quality/          quality checks (size, arch, coverage, mutation, command checks,
+                             commits, secrets), the shrink-only baseline, git hook logic
+    githooks/                pre-commit, commit-msg, pre-push (installed by `sdd hooks install`)
     pipeline/feature-pipeline.js   the per-feature Workflow script (Claude Code Workflow tool)
   claude/                    -> .claude/: 12 agents, 6 skills, 4 hooks, settings.json
   templates/                 CLAUDE.md, docs/{CONSTITUTION,DEVELOPMENT,ROADMAP}.md,
                              specs/templates/{spec,design,tasks,review}.md, sdd.config.json
-  examples/configs/          sdd.config.json for Rust, TypeScript, Python, Go
+  examples/configs/          sdd.config.json for Rust, TypeScript, Python, Go (incl. quality gates)
   docs/                      PLAYBOOK (how to run it), LESSONS (why the rules exist),
                              ADAPTING (per-language gates), CONFIG (reference)
   tests/                     unit tests (python -m unittest) and a pipeline smoke test (node)
 ```
 
 Everything project-specific lives in **one file, `sdd.config.json`** at the project root:
-name and threat model, languages, gate commands (fast/full, each with name, command,
-timeout), test commands, requirement id regex, trace tag keywords and scan globs, component
+name and threat model, languages, gate commands (fast/full/nightly, each with name, command,
+timeout), quality-gate rules (size limits, layers, coverage and mutation tools, command
+checks, hook rules), test commands, requirement id regex, trace tag keywords and scan globs, component
 regex, protected / append-only / role-scoped paths, formatters, normative source lookup,
 explicit model ids per tier, worktree root, parallelism caps, commit trailers.
 
@@ -47,7 +51,11 @@ cd ~/dev/my-project
 $EDITOR sdd.config.json CLAUDE.md docs/CONSTITUTION.md docs/ROADMAP.md
 python3 -I tools/sdd/sdd.py config --validate && python3 -I tools/sdd/sdd.py doctor
 git add -A && git commit -m "chore: install agentic-sdd-kit"
+python3 -I tools/sdd/sdd.py hooks install      # git hooks: pre-commit, commit-msg, pre-push
 ```
+
+On an existing codebase, record today's violations once before the first feature
+(`sdd baseline --init`, see "Quality gates" below and docs/PLAYBOOK.md).
 
 Then, in Claude Code at the project root:
 
@@ -71,7 +79,10 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 |---|---|
 | `sdd config [--validate\|--pipeline [--compact]\|--get key]` | show/validate `sdd.config.json`; `--pipeline` prints the subset the Workflow script takes as `args.config` (`--compact`: one line, for embedding in a prompt) |
 | `sdd trace [--feature NNN] [--check] [--json]` | requirement -> implementation -> test matrix; `--check` is the CI gate (orphans, duplicates, uncovered `must`) |
-| `sdd gates [--fast] [--only g] [--detached] [--wait LOG]` | runs the configured gates, prints a summary table, exit code; every log ends with `GATES_EXIT=<n>` |
+| `sdd gates [--fast\|--plan fast\|full\|nightly] [--only g] [--detached] [--wait LOG]` | runs the configured gate plan, prints a summary table, exit code; every log ends with `GATES_EXIT=<n>`; missing tools SKIP with an install hint, or FAIL when `CI=true` |
+| `sdd check NAME [--json] [--staged] [--no-run]` | one quality check: `size`, `arch`, `coverage`, `mutation`, `commits`, `secrets`, `baseline` or a `quality.checks` entry; exit 0 pass, 1 violations, 2 config/tool error, 3 tool missing |
+| `sdd baseline [--report [--json]\|--init\|--update\|--resolve\|--merge-driver O A B]` | the shrink-only violation baseline: report every violation by kind and file, record it once at adoption, shrink it, resolve merge conflicts mechanically |
+| `sdd hooks install [--force]`, `sdd hooks run NAME` | sets `core.hooksPath` to the kit's git hooks (refuses over hooks already in use); the hook logic |
 | `sdd new-feature NNN slug` | scaffolds the feature directory from the templates and prints the feature's requirement id block |
 | `sdd progress [--json]` | lifecycle-stage progress per feature, milestone and overall from the roadmap and git refs |
 | `sdd union-merge [files]` | resolves additive manifest conflicts only (union); refuses everything else |
@@ -81,10 +92,45 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 | `sdd hook NAME` | the hook logic behind `.claude/hooks/*.sh` (protect-paths, bash-guard, format, stop-check) |
 | `sdd doctor` | checks the installation and the configuration |
 
+## Quality gates
+
+Gates are the law; prompts are not. Besides the project's own fmt/lint/test commands, the kit
+ships language-agnostic quality checks that every plan can run (`sdd check <name>`):
+
+| Check | Rule (defaults) |
+|---|---|
+| `size` | code lines per function (fail above 80) and per file (warn above 600, fail above 1000); blank, comment and doc lines do not count; functions found by documented heuristics for Rust, Python, TypeScript/JavaScript and Go (`quality.languages` maps more extensions) |
+| `arch` | declarative layers: module globs -> allowed dependencies, forbidden APIs per layer as regexes; dependencies extracted from imports and qualified usages per language |
+| `coverage` | 100 % of the hand-written lines changed since the merge-base with the main branch, from any lcov or Cobertura producer; generated code excluded; `cov:unreachable: <reason>` excludes a line and is listed; a marker without a reason fails; a changed file no test loads fails |
+| `mutation` | zero surviving mutants in changed code from any diff-mutation tool (cargo-mutants, mutmut, Stryker, ...) unless review.md §6 justifies one |
+| command checks | `quality.checks`: docs/warnings, unused dependencies, flaky tests, ... as commands whose output a regex turns into violations |
+| `commits`, `secrets` | the git-hook rules re-checked over the whole branch (CI backstop) |
+| `baseline` | the baseline file may only shrink |
+
+**Plans.** `gates.fast` (pre-push, every task) holds fmt, lint, test, trace, size, arch,
+baseline, commits, secrets; `gates.full` (pipeline Gates stage, pull-request CI) adds coverage,
+mutation and the command checks; `gates.nightly` holds the full-repository runs. A check whose
+tool is not installed shows as SKIP with the install command; with `CI=true` it fails.
+
+**Git hooks** (`sdd hooks install`): pre-commit scans the staged lines for secrets (built-in
+rules, plus gitleaks when installed), checks staged sizes and runs the configured fast steps;
+commit-msg enforces Conventional Commits, the required trailer lines and runs the tests of the
+touched components (skipped for `test(...)` commits, docs-only and merge commits); pre-push runs
+`sdd gates --fast`. Agents never bypass them; CI re-runs the same rules.
+
+**Baseline.** Violations that exist when the gates are adopted go into `sdd.baseline.json`
+(`sdd baseline --init`). It only shrinks: a fixed violation's entry must be removed
+(`--update`), a grown or new violation fails, nothing ever adds an entry again. New code is
+never grandfathered. `sdd baseline --report` is the work list of the remediation feature
+(docs/PLAYBOOK.md, "Adopting the gates on an existing codebase").
+
+Configuration: docs/CONFIG.md (`quality.*`); per-language commands and heuristics:
+docs/ADAPTING.md.
+
 ## Testing the kit
 
 ```sh
-python3 -I -m unittest discover -s tests -v     # 31 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
+python3 -I -m unittest discover -s tests -v     # 94 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
 node tests/pipeline_smoke.mjs                   # drives feature-pipeline.js with a fake agent()
 ```
 

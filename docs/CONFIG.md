@@ -34,7 +34,40 @@ Workflow script takes as `args.config`.
 | `trace.attribute_forms` | also recognise `implements("ID")` call/attribute/decorator forms | `true` |
 | `components.path_regex` | first capture group = component of a file (lanes) | `^src/([^/]+)/` |
 | `components.root`, `components.word` | component of root files; the word used in prompts | `workspace`, `component` |
-| `gates.fast` / `gates.full` | gate lists: `{name, command, timeout, optional?, skip_if_missing?, env?}` | `[]` |
+| `gates.fast` / `gates.full` / `gates.nightly` | gate plans (`sdd gates --plan`): `{name, command, timeout, optional?, skip_if_missing?, env?, install?, skip_exit?}`; `install` is the hint shown on a SKIP row; `skip_exit` (0-255) is the exit code that means "tool missing, SKIP" (the templates set `3` on `sdd check` entries only); with `CI=true` every skip fails | `[]` |
+| `quality.baseline_file` | the committed, shrink-only baseline | `sdd.baseline.json` |
+| `quality.base_ref` | base branch for "changed lines" (else `SDD_BASE_REF`, else `features.main_branch`, else `origin/<main_branch>`) | `""` |
+| `quality.generated` | globs of generated files: excluded from size, coverage and mutation | `[]` |
+| `quality.test_globs` | extra test-code globs, added to `tests/**`, `**/tests/**`, `test/**`, `**/test/**` and the language registry's patterns; test code is excluded from coverage and mutation, still size-checked | `[]` |
+| `quality.languages` | extra extension -> language (`rust`, `python`, `typescript`, `go`, or `none` = plain: file size only) | `{}` |
+| `quality.size.globs` / `exclude` | measured files (git-tracked only); `[]` = every extension the registry knows | `[]` / `[]` |
+| `quality.size.function_warn` / `function_fail` | code lines per function; `0` disables | `0` / `80` |
+| `quality.size.file_warn` / `file_fail` | code lines per file; `0` disables | `600` / `1000` |
+| `quality.arch.modules` | `[{name, paths, imports?, may_depend_on?, forbid?: [{pattern, reason}]}]`: a file belongs to the first module whose `paths` match; `imports` regexes map import specifiers to modules | `[]` |
+| `quality.arch.exclude` | files not arch-checked | `[]` |
+| `quality.coverage.command` / `report` / `format` | produces the report (`""` = read an existing one); lcov or Cobertura file; `lcov` or `cobertura` | `""` / `""` / `lcov` |
+| `quality.coverage.globs` | hand-written source; `[]` = the effective size globs | `[]` |
+| `quality.coverage.unmeasured_ok` | changed files that may be absent from the report (no executable code) | `[]` |
+| `quality.coverage.ok_exits` | exit codes meaning "report written"; others are a tool error (exit 2) | `[0]` |
+| `quality.coverage.requires` / `install` / `timeout` | programs needed on PATH, install hint, seconds | `[]` / `""` / `3600` |
+| `quality.mutation.command` | diff-mutation command; `{diff_file}` and `{changed_files}` are substituted (shell-quoted) | `""` |
+| `quality.mutation.report` / `format` | file holding the results (`""` = the command output); `regex` or `mutation-testing-report` (Stryker's JSON schema) | `""` / `regex` |
+| `quality.mutation.survivor_regex` | named groups `file`, `mutation`, optional `line` | `""` |
+| `quality.mutation.ok_exits` | exit codes meaning "ran to completion" (cargo-mutants: `[0, 2, 3]`) | `[0]` |
+| `quality.mutation.globs` / `requires` / `install` / `timeout` | as for coverage | `[]` / `[]` / `""` / `3600` |
+| `quality.checks` | command checks `[{name, command, violation_regex?, baseline?: true, requires?, install?, timeout?, ok_exits?}]`; the regex has groups `file`, `message`, optional `line` (a match without `file` inherits the previous one; a match without `message` only sets the file); `baseline: false` = every match fails | `[]` |
+| `quality.secrets.gitleaks` | also run gitleaks (>= 8.19) when installed | `true` |
+| `quality.secrets.patterns` | extra `[{id, regex}]` rules for the built-in scanner | `[]` |
+| `quality.secrets.allow_globs` | paths whose content is not scanned (published test vectors) | `[]` |
+| `quality.hooks.types` | Conventional Commit types | `build chore ci docs feat fix perf refactor revert style test` |
+| `quality.hooks.scope_regex` | `""` = scope optional and free; else required and must match | `""` |
+| `quality.hooks.required_trailers` | regexes; each must match a line of the message's last paragraph | `[]` |
+| `quality.hooks.required_trailers_env` | trailers are required only when this env var is `1` (agent sessions); `""` = always | `CLAUDECODE` |
+| `quality.hooks.pre_commit` | fast steps `[{name, command, glob?, timeout?: 300}]`; `{files}` = staged files matching `glob` | `[]` |
+| `quality.hooks.commit_tests` | commit-msg runs `tests.run_component` per component of the staged source and test files (`tests.run` for root files) | `true` |
+| `quality.hooks.skip_tests_for_types` | commit types whose test step is skipped (red-by-design test commits) | `["test"]` |
+| `quality.hooks.test_timeout` | seconds for the commit-msg test step (exceeding it rejects; keep below the agent shell limit, 600 s) | `300` |
+| `quality.hooks.budget_seconds` | time budget for pre-commit and commit-msg together; exceeding it warns | `60` |
 | `tests.run`, `tests.run_component` (`{component}`), `tests.red_check` | test commands for the red check | `""` |
 | `sources.kind`, `description`, `citation_format` | what the normative source is and how to cite it | `product-requirements` |
 | `sources.lookup_command` | `{args}`/`{doc}`/`{clause}` placeholders; wins over the built-in reader | `""` |
@@ -42,7 +75,7 @@ Workflow script takes as `args.config`.
 | `protected_paths` | `[{glob, reason}]`, always blocked for agents | constitution, `.claude/**`, `sdd.config.json` |
 | `append_only_paths` | `[{glob, allowed_roles, reason}]`: listed roles may only create new files | `[]` |
 | `role_write_scopes` | role -> globs it may write | spec roles -> `specs/features/**` |
-| `role_denied_paths` | role -> globs it may not write | implementer -> test paths |
+| `role_denied_paths` | role -> globs it may not write | implementer -> test paths and the kit's hooks and checkers (`tools/sdd/githooks/**`, `tools/sdd/sddkit/**`, `tools/sdd/sdd.py`); test-author -> the same kit paths |
 | `formatters` | `[{glob, command with {file}, exclude?, timeout?}]` for the PostToolUse hook | `[]` |
 | `stop_check` | `{command, changed_globs, roles, timeout}` for Stop/SubagentStop | disabled |
 | `models.mechanical|mid|strong|top` | explicit model ids per tier; empty = inherit | `""` |
@@ -59,4 +92,12 @@ Workflow script takes as `args.config`.
 
 Environment variables: `SDD_ROOT` (project root override), `SDD_ALLOW_PROTECTED=1`,
 `SDD_ALLOW_DESTRUCTIVE_GIT=1`, `SDD_STOP_CHECK=0`, `SDD_FEATURE` (set by `sdd gates
---feature`, available to gate commands), `SOURCE_DATE_EPOCH` (deterministic `sdd progress`).
+--feature`, available to gate commands; else the feature is parsed from the branch name),
+`SDD_BASE_REF` (base ref for changed lines, wins over `quality.base_ref`), `CI=true` (CI
+mode: a missing tool fails instead of skipping), `SDD_VERBOSE=1` (also list baselined
+violations), `SOURCE_DATE_EPOCH` (deterministic `sdd progress`).
+
+Exit codes of `sdd check`: `0` pass (warnings allowed), `1` violations, `2` configuration,
+input or tool error (bad regex, unparsable report or baseline, stale or missing report, no
+merge-base, a tool exiting outside its `ok_exits`, a timeout), `3` skipped because a required
+tool is missing (`1` with `CI=true`). A wrapped tool's own exit code is never passed through.
