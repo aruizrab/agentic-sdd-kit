@@ -1,0 +1,6 @@
+{"version": 1,
+ "pools": {"standard": {"capped": false}, "capped": {"capped": true, "scarcity": 3}},
+ "points": [
+  {"model": "cap-c", "effort": "medium", "intelligence": 58, "cost_per_task": 1, "tokens_per_task": 50000, "pool": "capped"},
+  {"model": "std-s", "effort": "medium", "intelligence": 65, "cost_per_task": 2, "tokens_per_task": 60000, "pool": "standard"}
+ ]}

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from . import config as cfgmod
-from . import gates, hooks, new_feature, progress, source, specs, trace, union_merge
+from . import gates, hooks, new_feature, progress, routing, source, specs, trace, union_merge
 from . import quality
 from .quality import arch, baseline, checks, commits, coverage, githooks, mutation, secrets, size, vcs
 
@@ -146,6 +146,18 @@ def cmd_hooks(args: argparse.Namespace) -> int:
     root, cfg = _cfg(args)
     top = vcs.toplevel(Path.cwd()) or root
     return githooks.install(top, cfgmod.load(top) if (top / cfgmod.CONFIG_NAME).is_file() else cfg, args.force)
+
+
+def cmd_routing(args: argparse.Namespace) -> int:
+    root, cfg = _cfg(args)
+    if args.action == "table":
+        return routing.cmd_table(root, cfg, args.json)
+    if args.action == "log":
+        if not (args.output_file or args.file):
+            print("routing log: give --output-file <Workflow output file> or --file <summary JSON | ->", file=sys.stderr)
+            return 2
+        return routing.cmd_log(root, cfg, args.output_file, args.file, args.transcript_dir)
+    return routing.cmd_refit(root, cfg, args.file, args.json, args.min_samples, args.max_fail)
 
 
 def cmd_new_feature(args: argparse.Namespace) -> int:
@@ -293,8 +305,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         check(githooks.installed(root, cfg), "git hooks installed (run `sdd hooks install`, or chain them: docs/ADAPTING.md)", warn=True)
     if "not configured" in (cfg.get("tests", {}).get("run") or ""):
         check(False, "tests.run: still the template placeholder", warn=True)
-    for tier in ("mechanical", "mid", "strong", "top"):
-        check(bool(cfg["models"].get(tier)), f"models.{tier} set (explicit model id)", warn=True)
+    for warning in routing.doctor_warnings(root, cfg):
+        check(False, warning, warn=True)
     mounts = str(root)
     check(not mounts.startswith("/tmp"), "project not under /tmp (RAM tmpfs would lose it on a crash)")
     for key, value in (cfg["build_cache"].get("env") or {}).items():
@@ -389,6 +401,22 @@ def build_parser() -> argparse.ArgumentParser:
     hr.add_argument("hook", choices=list(githooks.HOOK_NAMES))
     hr.add_argument("hook_args", nargs=argparse.REMAINDER)
     hk.set_defaults(fn=cmd_hooks)
+
+    ro = sub.add_parser("routing", help="model routing: models table candidates, telemetry log, refit report")
+    ro_sub = ro.add_subparsers(dest="action", required=True)
+    rt = ro_sub.add_parser("table", help="validate the effective models table and print the candidates per level with E")
+    rt.add_argument("--json", action="store_true")
+    rl = ro_sub.add_parser("log", help="append a run's telemetry (one JSONL line per agent attempt) to <logs_dir>/routing.jsonl")
+    src = rl.add_mutually_exclusive_group()
+    src.add_argument("--output-file", help="the Workflow output file named in the completion notice (summary in 'result', times in 'workflowProgress')")
+    src.add_argument("--file", help="a pipeline summary or telemetry array as JSON ('-' = stdin)")
+    rl.add_argument("--transcript-dir", help="the run's transcript dir (journal.jsonl + agent-*.jsonl) for times when there is no output file")
+    rf = ro_sub.add_parser("refit", help="per-level failure rates and floor suggestions (report only, never writes)")
+    rf.add_argument("--json", action="store_true")
+    rf.add_argument("--file", help="routing JSONL (default: <logs_dir>/routing.jsonl)")
+    rf.add_argument("--min-samples", type=int, default=10)
+    rf.add_argument("--max-fail", type=float, default=0.25)
+    ro.set_defaults(fn=cmd_routing)
 
     n = sub.add_parser("new-feature", help="scaffold <features_dir>/<NNN>-<slug>/ from the templates")
     n.add_argument("number")

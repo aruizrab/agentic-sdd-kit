@@ -1,0 +1,98 @@
+{
+ "runId": "wf_paused",
+ "status": "completed",
+ "result": {
+  "feature": "F011",
+  "status": "paused",
+  "runKey": "F011-20260101T000000",
+  "telemetry": [
+   {
+    "call": "setup#1",
+    "attempt": 1,
+    "label": "setup",
+    "role": "mechanical",
+    "level": 1,
+    "model": "small-a",
+    "effort": "low",
+    "outcome": "ok",
+    "fallback_of": null,
+    "mode": "formula"
+   },
+   {
+    "call": "architect-planner F011#1",
+    "attempt": 1,
+    "label": "architect-planner F011",
+    "role": "architect-planner",
+    "level": 4,
+    "model": "cap-c",
+    "effort": "medium",
+    "outcome": null,
+    "fallback_of": null,
+    "mode": "formula"
+   },
+   {
+    "call": "architect-planner F011#1",
+    "attempt": 2,
+    "label": "architect-planner F011 (fallback)",
+    "role": "architect-planner",
+    "level": 4,
+    "model": "top-e",
+    "effort": "medium",
+    "outcome": null,
+    "fallback_of": "cap-c",
+    "mode": "formula"
+   },
+   {
+    "call": "architect-planner F011#1",
+    "attempt": 3,
+    "label": "architect-planner F011 (retry)",
+    "role": "architect-planner",
+    "level": 4,
+    "model": "top-e",
+    "effort": "medium",
+    "outcome": null,
+    "fallback_of": "cap-c",
+    "mode": "formula"
+   }
+  ]
+ },
+ "workflowProgress": [
+  {
+   "type": "workflow_phase",
+   "index": 0,
+   "title": "Setup"
+  },
+  {
+   "type": "workflow_agent",
+   "index": 1,
+   "label": "setup",
+   "agentId": "a1",
+   "startedAt": 1767225600000,
+   "durationMs": 30000
+  },
+  {
+   "type": "workflow_agent",
+   "index": 2,
+   "label": "architect-planner F011",
+   "agentId": "a2",
+   "startedAt": 1767225630000,
+   "durationMs": 1000
+  },
+  {
+   "type": "workflow_agent",
+   "index": 3,
+   "label": "architect-planner F011 (fallback)",
+   "agentId": "a3",
+   "startedAt": 1767225631000,
+   "durationMs": 2000
+  },
+  {
+   "type": "workflow_agent",
+   "index": 4,
+   "label": "architect-planner F011 (retry)",
+   "agentId": "a4",
+   "startedAt": 1767225633000,
+   "durationMs": 3000
+  }
+ ]
+}

@@ -1,0 +1,33 @@
+{
+  "_comment": "Template models table for the formula router (pipeline.routing = \"formula\"). The points below are ILLUSTRATIVE PLACEHOLDERS (ids start with example-): copy this file to sdd.models.json at the project root and replace every point with your real frontier (intelligence from a public intelligence index, cost and tokens per task measured in your own runs). The project file replaces this one; it is not merged. Reference: docs/CONFIG.md, section Models table.",
+  "version": 1,
+  "params": {"p0": 0.3, "s": 4, "retry_mult": 2},
+  "floors": {"1": 0, "2": 40, "3": 47, "4": 53, "5": 56, "6": 61},
+  "pools": {
+    "standard": {"capped": false},
+    "capped": {"capped": true, "scarcity": 3}
+  },
+  "roles": {
+    "mechanical": {"base": 1, "min": 1},
+    "gate": {"base": 2, "min": 2},
+    "integrator": {"base": 3, "min": 2},
+    "implementer": {"base": 3, "min": 2},
+    "perf-reviewer": {"base": 3, "min": 3},
+    "test-adequacy-reviewer": {"base": 3, "min": 3},
+    "spec-author": {"base": 4, "min": 4},
+    "spec-critic": {"base": 4, "min": 4},
+    "product-owner": {"base": 4, "min": 4},
+    "architect-planner": {"base": 4, "min": 4},
+    "test-author": {"base": 4, "min": 4},
+    "spec-compliance-reviewer": {"base": 4, "min": 4},
+    "security-reviewer": {"base": 4, "min": 4},
+    "verifier": {"base": 4, "min": 4}
+  },
+  "points": [
+    {"model": "example-small", "effort": "", "intelligence": 35, "cost_per_task": 0.05, "tokens_per_task": 40000, "pool": "standard"},
+    {"model": "example-mid", "effort": "medium", "intelligence": 50, "cost_per_task": 0.4, "tokens_per_task": 80000, "pool": "standard"},
+    {"model": "example-top", "effort": "medium", "intelligence": 57, "cost_per_task": 1.0, "tokens_per_task": 90000, "pool": "standard"},
+    {"model": "example-top", "effort": "high", "intelligence": 60, "cost_per_task": 1.6, "tokens_per_task": 140000, "pool": "standard"},
+    {"model": "example-frontier", "effort": "medium", "intelligence": 63, "cost_per_task": 1.2, "tokens_per_task": 90000, "pool": "capped"}
+  ]
+}

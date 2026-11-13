@@ -19,6 +19,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import routing
+
 CONFIG_NAME = "sdd.config.json"
 
 DEFAULTS: Dict[str, Any] = {
@@ -160,6 +162,7 @@ DEFAULTS: Dict[str, Any] = {
     "stop_check": {"command": "", "changed_globs": [], "roles": ["implementer"], "timeout": 240},
     "models": {
         "mechanical": "",
+        "gate": "",
         "mid": "",
         "strong": "",
         "top": "",
@@ -171,6 +174,8 @@ DEFAULTS: Dict[str, Any] = {
         "skeptics": 2,
         "max_build_jobs": 4,
         "gate_poll_seconds": 120,
+        "routing": "tiers",
+        "models_table": "sdd.models.json",
         "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, input parsing of untrusted data",
     },
     "merge": {
@@ -322,11 +327,7 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
         for key, value in cache_env.items():
             if not isinstance(value, str):
                 problems.append(f"build_cache.env.{key} must be a string")
-    models = cfg["models"]
-    for tier in ("mechanical", "mid", "strong", "top"):
-        value = models.get(tier, "")
-        if value and not re.match(r"^[a-z0-9][a-z0-9.-]*$", value):
-            problems.append(f"models.{tier}: use an explicit model id (lower-case, digits, dots, dashes), got {value!r}")
+    problems.extend(routing.config_problems(cfg))
     if not cfg["commit"]["trailers"]:
         problems.append("commit.trailers is empty: add at least the attribution trailer line the project uses")
     for i, trailer in enumerate(cfg["commit"]["trailers"]):
@@ -452,4 +453,5 @@ def pipeline_view(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "nightly": [g["name"] for g in cfg["gates"].get("nightly") or []],
     }
     view["root"] = cfg["_root"]
+    view["routing"] = routing.pipeline_routing(Path(cfg["_root"]), cfg)
     return view
