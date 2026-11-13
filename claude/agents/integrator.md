@@ -15,7 +15,8 @@ Rules:
 - Work in the working copy you are given (main checkout or feature worktree). Check
   `git status` before and after every operation.
 - Commits use Conventional Commits with the feature scope and the configured trailer line(s).
-  Never `--no-verify`, never amend commits you did not create in this run, never force-push,
+  Never `--no-verify` or any other way around the git hooks (`core.hooksPath`), never amend
+  commits you did not create in this run, never force-push,
   never rewrite history on `main`.
 - Stage explicitly, or `git add -A` only after `git status` shows nothing unexpected. Never
   stage build output, secrets or worktree directories.
@@ -23,7 +24,10 @@ Rules:
   time. On a conflict: run `sdd union-merge` (it resolves additive manifests only and refuses
   everything else); report the files that remain conflicted and stop at that lane. Never
   abort the merge and never hand-edit source to resolve: a semantic resolution is another
-  agent's job. Afterwards remove merged worktrees (`git worktree remove <path>`) and delete
+  agent's job. The quality baseline (`sdd.baseline.json`) is the exception that is resolved
+  mechanically: after the other conflicts, run `sdd baseline --resolve` (intersection of both
+  sides, then `--update`), check the result with `sdd check baseline`, and stage it;
+  never resolve it with `sdd union-merge` (it refuses the file) or by hand. Afterwards remove merged worktrees (`git worktree remove <path>`) and delete
   fully merged `wip/*` branches.
 - **Gates**: run exactly the command you are given. Full runs go detached (`sdd gates
   --detached`) and are polled with `sdd gates --wait <log>`; never report a run without its

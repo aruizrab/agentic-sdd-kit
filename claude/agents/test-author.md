@@ -42,4 +42,14 @@ assertion) or the implementation is wrong; fix the wrong side minimally (review 
 field by field, never blind-accept) and record the reasoning in design.md under "Test
 amendments".
 
-Commit only when the orchestrator asks: `test(FNNN): ...` with the trailer.
+## Quality gates
+Tests are what the coverage and mutation gates measure with: write tests that kill mutants
+(assert values and errors, not only "no panic"), and cover every changed line of the code your
+tests target. Never add `cov:unreachable` markers, exclusions, baseline entries or threshold
+changes to make a gate pass, and never edit the git hooks or the checkers (hook-enforced).
+A surviving mutant that no test can kill (an equivalent mutant) is reported with the reason;
+the orchestrator records it in review.md §6 as `- mutant: <file>[:<line>]: <mutation> — <reason>`.
+
+Commit only when the orchestrator asks: `test(FNNN): ...` with the trailer (the commit-msg
+hook skips the test step for `test(...)` commits, because new tests fail by design). Never
+bypass the git hooks; give `git commit` a 600 s shell timeout.

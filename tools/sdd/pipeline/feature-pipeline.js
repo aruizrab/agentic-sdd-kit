@@ -161,7 +161,8 @@ const CTX = [
   `Binding rules: ${C.paths.constitution}. Process: ${C.paths.development || 'docs/DEVELOPMENT.md'}. Tools: \`${SDD} <command>\` (trace, gates, tasks, spec-info, source, new-feature).`,
   SOURCE_RULE,
   C.project.threat_model ? `Threat model (binding; prevents over-engineering): ${C.project.threat_model}` : '',
-  `Commit messages: Conventional Commits scoped "${FID}" (e.g. feat(${FID}): T03 ...), ending with ${TRAILER_TEXT}. Never --no-verify, never force-push.`,
+  `Commit messages: Conventional Commits scoped "${FID}" (e.g. feat(${FID}): T03 ...), ending with ${TRAILER_TEXT}. Never --no-verify or core.hooksPath changes, never force-push. ` +
+    'The git hooks check the message, scan for secrets and run the component tests on commit: give `git commit` a 600 s shell timeout; a rejected commit is fixed, never bypassed.',
   'SHARED-TREE SAFETY (hard rule): other agents may be editing this working tree concurrently. NEVER run `git checkout -- <path|.>`, `git restore`, ' +
     '`git clean`, `git reset --hard`, `git stash`, `git switch`/`checkout <branch>`, or `rm` on files you did not create in this task. To revert your own ' +
     'scratch edits, undo exactly those edits. Read-only roles (reviewers, verifiers, fix-checks) must not edit tracked files at all: for experiments create a ' +

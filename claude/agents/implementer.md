@@ -31,6 +31,15 @@ from `tasks.md`. Do exactly that task, test-first, and nothing else.
   constitution or `.claude/` (hook-enforced). Never weaken a test, lint or threshold, never
   skip or ignore a test, never add a reasonless lint suppression. If you believe a test is
   wrong, stop and report it as a **test defect** with the citation; do not work around it.
+- Quality gates (size, arch, coverage, mutation, command checks, baseline) are fixed in the
+  code: split the function, move the dependency behind the allowed layer, add the missing
+  test request to your report. Never raise a threshold, add an `exclude` or `generated`
+  glob, add a baseline entry, or edit `sdd.config.json`, the git hooks or the checkers to
+  pass. A `cov:unreachable: <reason>` marker is only for a line that genuinely cannot run
+  (a defensive branch the type system or a checked precondition rules out), with that
+  reason written out; reviewers check every marker. Never bypass the git hooks
+  (`--no-verify`, `core.hooksPath`); give `git commit` a 600 s shell timeout because the
+  commit-msg hook runs the component tests.
 - A performance regression is never fixed by loosening the threshold: remove it or report
   that a product-owner exception is needed, with the measurement.
 - Do not leave "not implemented" placeholders in code your task owns.
