@@ -6,8 +6,10 @@ If no hand-written file changed, passes without running. Otherwise writes ``git 
 report first; an exit outside ``ok_exits`` is a tool error) and parses survivors from the
 report or the output: ``regex`` (``survivor_regex`` with groups ``file``, ``mutation`` and
 optional ``line``) or ``mutation-testing-report`` (the JSON Stryker writes; status
-``Survived``). A survivor on a known line that is not a changed line, or in a test region, is
-ignored; any other survivor fails unless the current feature's review.md has a line
+``Survived``). A survivor in a file that is not a changed hand-written file (whether or not it
+has a line), or on a known line that is not a changed line or is in a test region, is ignored;
+a survivor named by dotted module (``app.domain.calc``) is mapped to the changed file of that
+module first. Any other survivor fails unless the current feature's review.md has a line
 ``- mutant: <file>[:<line>]: <mutation> — <reason>`` with a non-empty reason.
 """
 
@@ -48,6 +50,18 @@ def parse_survivors(text: str, cfg: Dict[str, Any], root: Path) -> List[Tuple[st
         line = mm.groupdict().get("line")
         out.append((normalize_path(mm.group("file"), root), int(line) if line else None, mm.group("mutation").strip()))
     return out
+
+
+def module_path(name: str, files: Dict[str, Any]) -> str:
+    """A survivor reported by dotted module name (mutmut: ``app.domain.calc``) mapped to the changed
+    file it names (``src/app/domain/calc.py``); any other name is returned unchanged."""
+    if name in files or "/" in name:
+        return name
+    for path in files:
+        mod = path.rsplit(".", 1)[0].replace("/", ".")
+        if mod == name or mod.endswith("." + name):
+            return path
+    return name
 
 
 def justifications(root: Path, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -91,10 +105,10 @@ def run(root: Path, cfg: Dict[str, Any], no_run: bool = False) -> Result:
     text = (root / m["report"]).read_text(encoding="utf-8", errors="replace") if m["report"] else output
     just = justifications(root, cfg)
     for path, line, mutation in parse_survivors(text, cfg, root):
-        if line is not None:
-            considered = files.get(path)
-            if considered is None or line not in considered[0]:
-                continue  # unchanged line, test region or not hand-written code
+        path = module_path(path, files)
+        considered = files.get(path)
+        if considered is None or (line is not None and line not in considered[0]):
+            continue  # unchanged file or line, test region or not hand-written code
         ok = [j for j in just if j["file"] == path and j["mutation"] == mutation and (j["line"] in (None, line))]
         if ok:
             res.notes.append(f"justified survivor {path}{':' + str(line) if line else ''}: {mutation} — {ok[0]['reason']}")

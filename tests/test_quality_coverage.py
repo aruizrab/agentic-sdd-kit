@@ -7,7 +7,7 @@ import os
 import time
 import unittest
 
-from helpers import GitRepo, make_tmp, rm, run_cli, test_config, write, write_config
+from helpers import KIT, GitRepo, make_tmp, rm, run_cli, test_config, write, write_config
 
 BASE_PY = "def a():\n    return 1\n"
 EDIT_PY = (
@@ -250,6 +250,29 @@ class MutationTest(unittest.TestCase):
         # The current feature comes from SDD_FEATURE before the branch name.
         code, out = self.check(env={"SDD_FEATURE": "F012"})
         self.assertEqual(code, 1)
+
+    def test_survivors_in_unchanged_files_are_ignored(self) -> None:
+        """C5: a survivor without a line in an unchanged file never fails; mutmut's dotted module
+        names map to the changed file."""
+        write(self.root, "src/app/domain/order.py", "def total(a):\n    return a\n")
+        self.repo.commit("order")  # on the feature branch, but not changed by this test's working tree
+        self.repo.git("switch", "-q", "main")
+        self.repo.git("merge", "-q", "--ff-only", "feat/F011-calc")
+        self.repo.git("switch", "-q", "feat/F011-calc")
+        write(self.root, "src/calc.py", MUT_SRC)
+        write(self.root, "mut/out.txt",
+              "SURVIVED src/app/domain/order.py: delete function body\n"  # unchanged file, no line: ignored
+              "SURVIVED src/app/domain/order.py:2: replace a with 0\n")    # unchanged file with a line: ignored
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+        cfg = json.loads((KIT / "examples" / "configs" / "python.json").read_text())
+        self.cfg["quality"]["mutation"].update({"command": "cat mut/out.txt", "survivor_regex": cfg["quality"]["mutation"]["survivor_regex"]})
+        write_config(self.root, self.cfg)
+        write(self.root, "mut/out.txt", (KIT / "tests" / "fixtures" / "quality" / "tools" / "python" / "mutation.txt").read_text()
+              + "    calc.x_sub__mutmut_1: survived\n")
+        code, out = self.check()
+        self.assertEqual(code, 1, out)
+        self.assertEqual([(v["file"], v["key"]["message"]) for v in out["violations"]], [("src/calc.py", "x_sub__mutmut_1")])
 
     def test_mutation_testing_report(self) -> None:
         write(self.root, "src/calc.py", MUT_SRC)

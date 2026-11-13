@@ -161,7 +161,7 @@ run completed" (any other code, e.g. a failing unmutated baseline, is a tool err
 | Language | `mutation.command` | Survivors | `ok_exits` |
 |---|---|---|---|
 | Rust | `cargo mutants --workspace --in-diff {diff_file} --no-shuffle` | `report: mutants.out/missed.txt`, regex `^(?P<file>[^:\n]+):(?P<line>\d+):\d+: (?P<mutation>.+)$` | `[0, 2, 3]` (2 = missed mutants, 3 = timeouts; 1 usage error, 4 baseline failed) |
-| Python | `mutmut run --max-children 4 >/dev/null && mutmut results` (`&&`: a failed run is a tool error, never "no survivors") | stdout, regex on `    <module>.x_<fn>__mutmut_<n>: survived` (file = dotted module, no line: every survivor needs a fix or a justification) | `[0]` |
+| Python | `mutmut run --max-children 4 >/dev/null && mutmut results` (`&&`: a failed run is a tool error, never "no survivors") | stdout, regex on `    <module>.x_<fn>__mutmut_<n>: survived` (file = dotted module, mapped to the changed file of that module; survivors in unchanged modules are ignored; no line: every survivor in a changed module needs a fix or a justification) | `[0]` |
 | TypeScript | `stryker run --incremental --reporters json` | `report: reports/mutation/mutation.json`, `format: mutation-testing-report` | `[0]` |
 | Go | `gremlins unleash ./...` | stdout, regex `LIVED (?P<mutation>\S+) at (?P<file>...):(?P<line>\d+)` | `[0]` |
 
