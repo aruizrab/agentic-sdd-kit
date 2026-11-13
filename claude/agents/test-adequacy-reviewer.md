@@ -26,6 +26,14 @@ Check:
    assertion, deleted test, newly skipped test, changed fixture, or test that now hard-codes
    the implementation's output instead of the source's value is **blocking**.
 6. Property tests and fuzz targets exist for new parsers of untrusted input.
+7. **Coverage exclusions**: every `cov:unreachable: <reason>` marker in the diff
+   (`git diff <range> | grep cov:unreachable`) names a reason that is true: the line really
+   cannot run (a defensive branch the types or the caller rule out), not "hard to test". A
+   marker on reachable code is a finding; on a `must` path it is blocking.
+8. **Mutation justifications**: every surviving mutant justified in review.md §6 is truly
+   equivalent or unobservable (explain why no test can tell it apart); a surviving mutant
+   that a reasonable assertion would kill is blocking. Run `sdd check mutation --json` (or
+   read its report) and compare it with §6: an unlisted survivor is blocking.
 
 Every finding: requirement id, test or `file:line`, and the concrete mutant or scenario that
 would slip through. Report only what you verified.
