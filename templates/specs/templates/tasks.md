@@ -8,7 +8,7 @@ Tests commit (red check): <sha, filled in by the pipeline>
 <!--
 Task line format (one line; parsed by `sdd tasks` and the feature pipeline):
 
-- [ ] T01 [P] <imperative description> — files: <path>, <path> — verifies: <ID>, <ID> — depends: <T ids or ->
+- [ ] T01 [P] <imperative description> — files: <path>, <path> — verifies: <ID>, <ID> — depends: <T ids or -> — complexity: low|medium|high — risk: security|concurrency|none
 
   - `[ ]` / `[x]`       open / done (set by the implementer's commit, or by the integrator after a lane merge)
   - `T01`               task id, unique within the feature, two digits
@@ -17,6 +17,11 @@ Task line format (one line; parsed by `sdd tasks` and the feature pipeline):
   - files:              files the task owns (create/modify). Implementers stay inside them.
   - verifies:           requirement ids this task implements (its tests already exist)
   - depends:            tasks that must be done first (always in an earlier wave), or "-"
+  - complexity:         optional (default medium): low = a local change following an existing pattern;
+                        high = a new algorithm or state machine, a cross-component change, or concurrency
+  - risk:               optional (default none): security (authentication, cryptography, secrets,
+                        untrusted input) or concurrency (shared state, ordering, async/threads)
+                        The model router uses both to pick the model of the task's implementer.
 
 Optional indented context bullets make the task self-contained for an implementer:
   - context: component <name>; source <doc> §<section> (read via `sdd source clause <doc> <section>`)
@@ -31,12 +36,12 @@ Root files count as the root component (`components.root`). Validate with
 
 ## Wave 1
 
-- [ ] T01 <description> — files: <path> — verifies: <ID> — depends: -
+- [ ] T01 <description> — files: <path> — verifies: <ID> — depends: - — complexity: low — risk: none
   - context: <...>
 
 ## Wave 2
 
-- [ ] T02 [P] <description> — files: <path in component a> — verifies: <ID>, <ID> — depends: T01
+- [ ] T02 [P] <description> — files: <path in component a> — verifies: <ID>, <ID> — depends: T01 — complexity: high — risk: security
   - context: <...>
 - [ ] T03 [P] <description> — files: <path in component b> — verifies: <ID> — depends: T01
   - context: <...>
