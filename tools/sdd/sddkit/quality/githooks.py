@@ -173,7 +173,9 @@ def _pre_commit(hook: _Hook) -> int:
     for n in secrets.binary_notes(root, cfg, "--cached"):
         hook.say(n)
     if secrets.gitleaks_available(cfg):
-        found += secrets.gitleaks(root, cfg, ["git", "--pre-commit", "--staged", "."])
+        head = "HEAD" if vcs.git_ok(root, "rev-parse", "--verify", "-q", "HEAD") else ""
+        found += secrets.gitleaks_ignore_problem(root, cfg, head)
+        found += secrets.gitleaks(root, cfg, ["git", "--pre-commit", "--staged", "."], trusted_ref=head)
     elif cfg["quality"]["secrets"]["gitleaks"]:
         res = Result("secrets")
         secrets.gitleaks_note(cfg, res)

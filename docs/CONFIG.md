@@ -58,7 +58,7 @@ Workflow script takes as `args.config`.
 | `quality.mutation.ok_exits` | exit codes meaning "ran to completion" (cargo-mutants: `[0, 2, 3]`) | `[0]` |
 | `quality.mutation.globs` / `requires` / `install` / `timeout` | as for coverage | `[]` / `[]` / `""` / `3600` |
 | `quality.checks` | command checks `[{name, command, violation_regex?, baseline?: true, requires?, install?, timeout?, ok_exits?}]`; the regex has groups `file`, `message`, optional `line` (a match without `file` inherits the previous one; a match without `message` only sets the file); `baseline: false` = every match fails | `[]` |
-| `quality.secrets.gitleaks` | also run gitleaks (>= 8.19) when installed | `true` |
+| `quality.secrets.gitleaks` | also run gitleaks (>= 8.19) when installed; it runs with the `.gitleaks.toml` of a trusted commit (HEAD in the hook, the merge-base in `sdd check secrets`) or its default rules, never the tree's own file, and a `.gitleaksignore` that differs from that commit fails | `true` |
 | `quality.secrets.patterns` | extra `[{id, regex}]` rules for the built-in scanner | `[]` |
 | `quality.secrets.allow_globs` | paths whose content is not scanned (published test vectors) | `[]` |
 | `quality.hooks.types` | Conventional Commit types | `build chore ci docs feat fix perf refactor revert style test` |

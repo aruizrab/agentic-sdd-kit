@@ -332,6 +332,38 @@ class SecretsHookTest(unittest.TestCase):
         self.assertIn("link.txt:1", proc.stdout)
         self.assertIn("nul2.txt:2", proc.stdout)
 
+    def test_branch_cannot_switch_off_gitleaks(self) -> None:
+        """S7: a .gitleaks.toml allowlist in the tree is ignored; a changed .gitleaksignore fails."""
+        if not shutil.which("gitleaks"):
+            self.skipTest("gitleaks not installed")
+        self.r.cfg["quality"]["secrets"]["gitleaks"] = True
+        self.r.set_cfg()
+        self.assertEqual(self.r.commit("chore: gitleaks on", "sdd.config.json").returncode, 0)
+        self.r.git("switch", "-q", "-c", "feat/F001-x")
+        generic = 'api_key = "' + 'Zx8Qw3Lm9Rt2' + 'Vb7Nc4Kp6Hj1Gf5Ds0Ay"\n'  # only gitleaks' generic rule finds it
+        write(self.r.root, "cfg.ini", generic)
+        proc = self.r.commit("chore: cfg", "cfg.ini")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("gitleaks:generic-api-key", proc.stderr)
+        write(self.r.root, ".gitleaks.toml", "[extend]\nuseDefault = true\n[allowlist]\npaths = ['''.*''']\n")
+        proc = self.r.commit("chore: cfg", "cfg.ini", ".gitleaks.toml")
+        self.assertNotEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("gitleaks:generic-api-key", proc.stderr)
+        write(self.r.root, ".gitleaksignore", "cfg.ini:generic-api-key:1\n")
+        proc = self.r.commit("chore: cfg", "cfg.ini", ".gitleaks.toml", ".gitleaksignore")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn(".gitleaksignore differs", proc.stderr)
+        # The CI check: both files committed on the branch without the hooks.
+        self.r.git("commit", "-q", "--no-verify", "-m", "chore: cfg")
+        proc = self.r.sdd("check", "secrets", env={"CI": "true", "SDD_BASE_REF": "main"})
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("secret-config", proc.stdout)
+        (self.r.root / ".gitleaksignore").unlink()
+        self.r.git("commit", "-q", "--no-verify", "-am", "chore: drop ignore")
+        proc = self.r.sdd("check", "secrets", env={"CI": "true", "SDD_BASE_REF": "main"})
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("cfg.ini:1: gitleaks rule generic-api-key", proc.stdout)
+
     def test_gitleaks_missing_skip_and_ci(self) -> None:
         path = no_gitleaks_path()
         if not shutil.which("git", path=path) or not shutil.which("python3", path=path):

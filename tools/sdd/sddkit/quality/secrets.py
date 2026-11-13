@@ -8,7 +8,10 @@ and a note names them.
 Findings are reported as rule id and location (``file:line`` or ``commit message``); the
 matched text is never printed or stored. gitleaks runs with ``--redact`` and its JSON report
 (written under ``<logs_dir>/quality/``) is read for ``RuleID``, ``File`` and ``StartLine`` only
-and deleted right after.
+and deleted right after. gitleaks runs with an explicit ``--config``: the ``.gitleaks.toml`` of a
+trusted commit (HEAD in the hook, the merge-base in ``sdd check secrets``) or its default rules,
+never the scanned tree's own file; a ``.gitleaksignore`` that differs from the trusted commit
+fails.
 """
 
 from __future__ import annotations
@@ -69,10 +72,45 @@ def gitleaks_available(cfg: Dict[str, Any]) -> bool:
     return bool(cfg["quality"]["secrets"]["gitleaks"]) and shutil.which("gitleaks") is not None
 
 
-def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[str] = None, in_message: bool = False) -> List[Violation]:
-    """Run gitleaks with a redacted JSON report; return findings as violations."""
+DEFAULT_GITLEAKS_CONFIG = "[extend]\nuseDefault = true\n"
+
+
+def gitleaks_config(root: Path, cfg: Dict[str, Any], trusted_ref: str) -> Path:
+    """gitleaks' configuration as of ``trusted_ref`` (HEAD in the hook, the merge-base in the check).
+
+    gitleaks reads ``.gitleaks.toml`` from the scanned tree, so a branch could allowlist every
+    path; an explicit ``--config`` wins over that file."""
+    text = vcs.show(root, trusted_ref, ".gitleaks.toml") if trusted_ref else None
+    p = scratch_dir(root, cfg) / "gitleaks-config.toml"
+    p.write_text(text if text is not None else DEFAULT_GITLEAKS_CONFIG, encoding="utf-8")
+    return p
+
+
+def gitleaks_ignore_problem(root: Path, cfg: Dict[str, Any], trusted_ref: str) -> List[Violation]:
+    """gitleaks always honours ``.gitleaksignore`` in the scanned tree: one that differs from
+    ``trusted_ref`` fails (an owner approves with ``override_env=1``)."""
+    import os
+
+    env = cfg.get("override_env") or "SDD_ALLOW_PROTECTED"
+    if os.environ.get(env) == "1":
+        return []
+    p = root / ".gitleaksignore"
+    now = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else None
+    before = vcs.show(root, trusted_ref, ".gitleaksignore") if trusted_ref else None
+    if now == before or (not now and not before):
+        return []
+    return [Violation("secret-config", ".gitleaksignore", None, {"file": ".gitleaksignore", "message": "changed"}, 1,
+                      f".gitleaksignore differs from {trusted_ref[:12]}: it would hide gitleaks findings; change it on the main "
+                      f"branch (owner approval: {env}=1)")]
+
+
+def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[str] = None, in_message: bool = False,
+             trusted_ref: str = "HEAD") -> List[Violation]:
+    """Run gitleaks with a redacted JSON report and the trusted configuration; return findings as violations."""
     report = scratch_dir(root, cfg) / f"gitleaks-{abs(hash((tuple(args), stdin))) % 10**8}.json"
-    cmd = ["gitleaks", *args, "--redact", "--no-banner", "--exit-code", "1", "--report-format", "json", "--report-path", str(report)]
+    conf = gitleaks_config(root, cfg, trusted_ref)
+    cmd = ["gitleaks", *args, "--config", str(conf), "--redact", "--no-banner", "--exit-code", "1", "--report-format", "json",
+           "--report-path", str(report)]
     try:
         proc = subprocess.run(cmd, cwd=str(root), input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=600)
         if proc.returncode not in (0, 1):
@@ -126,9 +164,10 @@ def check(root: Path, cfg: Dict[str, Any]) -> Result:
     res.violations += scan_added(cfg, vcs.added_lines(root, base))
     res.notes += binary_notes(root, cfg, base)
     if gitleaks_available(cfg):
+        res.violations += gitleaks_ignore_problem(root, cfg, base)
         head = vcs.git(root, "rev-parse", "HEAD").strip()
         if head != base:
-            res.violations += gitleaks(root, cfg, ["git", f"--log-opts={base}..HEAD", "."])
+            res.violations += gitleaks(root, cfg, ["git", f"--log-opts={base}..HEAD", "."], trusted_ref=base)
     else:
         gitleaks_note(cfg, res)
     return res.finish()
