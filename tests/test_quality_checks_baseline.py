@@ -161,6 +161,31 @@ class BaselineTest(unittest.TestCase):
         self.assertIn("== size-file", human)
         self.assertIn("baselined", human)
 
+    def test_missing_tool_never_drops_entries(self) -> None:
+        """C6: a baseline-enabled check whose tool is missing leaves its entries alone (also with
+        CI=true), and --init refuses rather than write a baseline without its kind."""
+        tool_dir = self.root / "fakebin"
+        write(self.root, "fakebin/fakelint", "#!/bin/sh\necho 'src/a.py: L1 bad'\necho 'src/b.py: L1 bad'\n")
+        (tool_dir / "fakelint").chmod(0o755)
+        self.cfg["quality"]["checks"] = [{"name": "lint", "command": "fakelint", "requires": ["fakelint"], "install": "pip install fakelint",
+                                          "violation_regex": r"(?m)^(?P<file>\S+): (?P<message>L\d+ .+)$"}]
+        write_config(self.root, self.cfg)
+        with_tool = {"PATH": f"{tool_dir}:{__import__('os').environ['PATH']}", "CI": ""}
+        proc = run_cli(self.root, "baseline", "--init", env={"CI": ""})
+        self.assertEqual(proc.returncode, 3, proc.stdout + proc.stderr)
+        self.assertIn("lint: skipped", proc.stdout)
+        self.assertFalse((self.root / "sdd.baseline.json").exists())
+        self.assertEqual(run_cli(self.root, "baseline", "--init", env=dict(with_tool)).returncode, 0)
+        self.assertEqual(sorted(e["kind"] for e in self.entries()).count("lint"), 2)
+        for env in ({"CI": "true"}, {"CI": ""}):
+            proc = run_cli(self.root, "baseline", "--update", env=env)
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("lint: skipped", proc.stdout)
+            self.assertEqual([e["kind"] for e in self.entries()].count("lint"), 2, env)
+            rep = json.loads(run_cli(self.root, "baseline", "--report", "--json", env=env).stdout)
+            self.assertNotIn("lint", rep["totals"])
+            self.assertEqual(rep["stale"], [])
+
     def test_ratchet(self) -> None:
         self.repo.git("switch", "-q", "-c", "feat/F001-x")
         self.assertEqual(run_cli(self.root, "check", "baseline").returncode, 0)  # no baseline at the merge-base

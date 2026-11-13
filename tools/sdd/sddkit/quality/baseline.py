@@ -135,8 +135,9 @@ def classify(res: Result, entries: Optional[List[Dict[str, Any]]], kinds: Iterab
 def collect(root: Path, cfg: Dict[str, Any]) -> Tuple[List[Violation], List[str], List[str]]:
     """All current violations of size, arch and the baseline-enabled command checks.
 
-    Returns (violations, kinds checked, notes). A check that is skipped (tool missing) is
-    reported in the notes and its kind is not considered (its entries are left alone).
+    Returns (violations, kinds checked, notes). A check whose tool is missing (skipped, or
+    failed in CI mode) is reported in the notes and its kind is not considered (its entries
+    are left alone): a check that did not run never makes entries look stale.
     """
     from . import arch, checks, size
 
@@ -153,7 +154,7 @@ def collect(root: Path, cfg: Dict[str, Any]) -> Tuple[List[Violation], List[str]
         if chk.get("baseline", True) is False:
             continue
         r = checks.execute(root, cfg, chk)
-        if r.status == "skip":
+        if r.tool_missing or r.status == "skip":
             notes.append(f"{chk['name']}: skipped ({'; '.join(r.notes)})")
             continue
         if r.status == "error":
@@ -171,6 +172,11 @@ def init(root: Path, cfg: Dict[str, Any]) -> int:
     violations, _kinds, notes = collect(root, cfg)
     for n in notes:
         print(f"baseline: {n}")
+    if notes:
+        print("baseline: NOT written: every baseline-enabled check must run for the adoption baseline (install the tools "
+              "above, or set `\"baseline\": false` on a check), or its old violations fail forever once the tool is installed",
+              file=sys.stderr)
+        return 3
     entries = [entry_for(vs[0], val) for _ident, (val, vs) in aggregate(violations).items()]
     save(p, entries)
     print(f"baseline: wrote {len(entries)} entr{'y' if len(entries) == 1 else 'ies'} to {cfg['quality']['baseline_file']}")

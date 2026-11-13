@@ -63,6 +63,7 @@ class Result:
     markers: List[Dict[str, Any]] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
     stale: List[Dict[str, Any]] = field(default_factory=list)
+    tool_missing: bool = False  # set by skip(), whatever the CI mode: the check did not run
 
     def failing(self) -> List[Violation]:
         return [v for v in self.violations if v.state in ("new", "grown")]
@@ -77,7 +78,7 @@ class Result:
 
 def skip(check: str, tool: str, install: str = "") -> Result:
     hint = f" (install: {install})" if install else ""
-    res = Result(check, status="skip", notes=[f"{tool} not installed{hint}"])
+    res = Result(check, status="skip", notes=[f"{tool} not installed{hint}"], tool_missing=True)
     if ci_mode():
         res.status = "fail"
         res.notes.append("CI=true: a missing tool is a failure")

@@ -134,7 +134,7 @@ like the existing fmt/lint/test placeholders; `sdd doctor` warns.
 | `sdd check secrets [--json]` | the pre-commit secret scan on the added lines of `git diff <merge-base>` (working tree), plus `gitleaks git --log-opts=<merge-base>..HEAD --redact` when enabled and installed | 0/1/2/3 |
 | `sdd check <name> [--json]` | one command check of `quality.checks` | 0/1/2/3 |
 | `sdd check baseline` | ratchet: working-tree baseline vs the merge-base baseline | 0/1/2 |
-| `sdd baseline --init` | writes all current violations of size, arch and baseline-enabled checks; refuses when the file exists | 0/1/2 |
+| `sdd baseline --init` | writes all current violations of size, arch and baseline-enabled checks; refuses when the file exists (1) or when a baseline-enabled check's tool is missing (3, nothing written) | 0/1/2/3 |
 | `sdd baseline --update` | removes stale entries and lowers recorded values; never adds an identity | 0/2 |
 | `sdd baseline --resolve` | in a merge with a conflicted baseline file: writes the intersection of the two sides (index stages 2 and 3) to the working tree, then applies `--update`; never stages | 0/2 |
 | `sdd baseline --merge-driver O A B` | the same intersection as a git merge driver (`%O %A %B`), without `--update`; optional, documented in ADAPTING.md, never installed by the kit | 0/2 |
