@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import secrets
 import shutil
 import subprocess
 import sys
@@ -49,6 +50,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 MARKER = "GATES_EXIT="
+NONCE_ENV = "SDD_GATES_NONCE"
 
 
 def plan(cfg: Dict[str, Any], fast: bool, only: Optional[List[str]] = None, plan_name: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -65,7 +67,9 @@ def plan(cfg: Dict[str, Any], fast: bool, only: Optional[List[str]] = None, plan
 def _env(cfg: Dict[str, Any], root: Path, extra: Optional[Dict[str, str]]) -> Dict[str, str]:
     from .quality import tool_env
 
-    return tool_env(cfg, root, extra)
+    env = tool_env(cfg, root, extra)
+    env.pop(NONCE_ENV, None)  # a gate's own output must never be able to print the run's final marker
+    return env
 
 
 def _pump(stream, out: "queue.Queue[Optional[str]]") -> None:
@@ -202,7 +206,8 @@ def run(cfg: Dict[str, Any], root: Path, fast: bool, only: Optional[List[str]], 
                     results.append((n, "SKIP", "--fast", 0.0))
         tee.write(summary(results))
         code = 1 if any(r[1] == "FAIL" for r in results) else 0
-    tee.write(f"{MARKER}{code}\n")
+    nonce = os.environ.get(NONCE_ENV)
+    tee.write(f"{MARKER}{code}" + (f" {nonce}" if nonce else "") + "\n")
     tee.flush()
     if log_file:
         log_file.close()
@@ -267,18 +272,28 @@ def runner_alive(rec: Optional[Dict[str, Any]]) -> bool:
     return out.returncode == 0 and out.stdout.strip() == " ".join(str(c) for c in cmdline)
 
 
-def _marker_code(log_path: Path) -> Optional[int]:
+def _marker_code(log_path: Path, nonce: Optional[str] = None) -> Optional[int]:
+    """The exit code of the final marker line; with ``nonce`` only a marker carrying it counts
+    (a gate's own output printing ``GATES_EXIT=0`` or a hand-written log never does)."""
     try:
         text = log_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return None
     for line in reversed(text.splitlines()):
         if line.startswith(MARKER):
+            parts = line[len(MARKER):].split()
+            if nonce is not None and (len(parts) < 2 or parts[1] != nonce):
+                continue
             try:
-                return int(line[len(MARKER):].strip() or "1")
+                return int(parts[0]) if parts else 1
             except ValueError:
                 return 1
     return None
+
+
+def _nonce(rec: Optional[Dict[str, Any]]) -> Optional[str]:
+    n = rec.get("nonce") if rec else None
+    return n if isinstance(n, str) and n else None
 
 
 def _keep(log_path: Path) -> None:
@@ -303,22 +318,24 @@ def detached(root: Path, argv: List[str], log_path: Path, keyed: bool, fresh: bo
     if runner_alive(rec):
         print(json.dumps({"log": str(log_path), "state": "running", "pid": rec["pid"]}))
         return 0
-    code = _marker_code(log_path)
+    # Reuse only a run this tool started: its runner record holds a nonce that the final marker repeats.
+    code = _marker_code(log_path, _nonce(rec)) if _nonce(rec) else None
     if keyed and not fresh and code is not None and not log_path.name.endswith("-dirty.log"):
         print(json.dumps({"log": str(log_path), "state": "done", "pid": rec.get("pid") if rec else None, "exit": code}))
         return 0
     log_path.parent.mkdir(parents=True, exist_ok=True)
     if keyed:
         _keep(log_path)
+    nonce = secrets.token_hex(8)
     with open(log_path, "w", encoding="utf-8") as fh:
-        fh.write(f"# detached gate run started; waiting for {MARKER}<code>\n")
+        fh.write(f"# detached gate run started (nonce {nonce}); waiting for {MARKER}<code> {nonce}\n")
     cmd = [sys.executable, "-I", str(Path(__file__).resolve().parent.parent / "sdd.py"), "gates", *argv, "--log", str(log_path), "--no-stdout"]
     with open(log_path, "a", encoding="utf-8") as fh:
         proc = subprocess.Popen(
             cmd, cwd=str(root), stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-            start_new_session=True,
+            start_new_session=True, env=dict(os.environ, **{NONCE_ENV: nonce}),
         )
-    _pid_file(log_path).write_text(json.dumps({"pid": proc.pid, "cmdline": cmd}) + "\n", encoding="utf-8")
+    _pid_file(log_path).write_text(json.dumps({"pid": proc.pid, "cmdline": cmd, "nonce": nonce}) + "\n", encoding="utf-8")
     print(json.dumps({"log": str(log_path), "state": "started", "pid": proc.pid}))
     return 0
 
@@ -331,11 +348,11 @@ def wait(log_path: Path, poll_seconds: float, timeout: float) -> int:
     """
     deadline = time.monotonic() + timeout
     while True:
-        code = _marker_code(log_path)
+        rec = _read_runner(log_path)
+        code = _marker_code(log_path, _nonce(rec))
         if code is None:
-            rec = _read_runner(log_path)
             if rec and not runner_alive(rec):
-                code = _marker_code(log_path)  # it may have finished between the two reads
+                code = _marker_code(log_path, _nonce(rec))  # it may have finished between the two reads
                 if code is None:
                     print(f"incomplete run: no {MARKER} line in {log_path} and its runner (pid {rec.get('pid')}) is gone; "
                           "re-run it (sdd gates --detached ... --fresh); it is not a gate failure", file=sys.stderr)

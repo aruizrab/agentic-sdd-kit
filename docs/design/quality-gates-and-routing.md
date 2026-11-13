@@ -558,7 +558,9 @@ map, with per-ecosystem examples in ADAPTING.md.
 1. Smoke test: with default args every `agent()` prompt contains `SCOPE RULE (hard rule)`;
    with `strictScope: false` none does.
 2. `sdd gates --detached --feature F011 --tag post-implement-1` writes
-   `<logs_dir>/gates/F011-post-implement-1-<sha7>.log` ending in `GATES_EXIT=<n>`; a second call
+   `<logs_dir>/gates/F011-post-implement-1-<sha7>.log` ending in `GATES_EXIT=<n> <nonce>` (the
+   nonce is in the runner record `<log>.pid` too; a log without a matching record and marker,
+   e.g. a hand-written one or a gate printing `GATES_EXIT=0`, is never reused); a second call
    at the same clean HEAD after completion reports `done` and starts nothing; during a run it
    reports `running`, also for a dirty key; with tracked changes it starts a new `-dirty` run,
    while an untracked `lcov.info` leaves the key clean. With a completed log that ends

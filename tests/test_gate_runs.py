@@ -59,7 +59,8 @@ class KeyedGateRunTest(unittest.TestCase):
         self.assertEqual(second["pid"], first["pid"])
         proc = _wait(self.root, first["log"])
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertTrue(self.clean_log.read_text().rstrip().endswith("GATES_EXIT=0"))
+        nonce = json.loads(Path(first["log"] + ".pid").read_text())["nonce"]
+        self.assertTrue(self.clean_log.read_text().rstrip().endswith(f"GATES_EXIT=0 {nonce}"))
         before = self.clean_log.read_text()
         third = _start(self.root)
         self.assertEqual(third["state"], "done")
@@ -87,17 +88,34 @@ class KeyedGateRunTest(unittest.TestCase):
         clean = _start(self.root)
         self.assertEqual(Path(clean["log"]), self.clean_log)
 
-    def test_fresh_renames_a_killed_log_and_starts_a_new_run(self) -> None:
-        self.gates_dir.mkdir(parents=True)
-        self.clean_log.write_text("==> [2/2] slow\nKilled\n+- 2 gate(s), 1 failed\nGATES_EXIT=1\n")
+    def test_fresh_renames_a_completed_log_and_starts_a_new_run(self) -> None:
+        first = _start(self.root)
+        self.assertEqual(_wait(self.root, first["log"]).returncode, 0)
         reused = _start(self.root)
-        self.assertEqual(reused["state"], "done")
-        self.assertEqual(reused["exit"], 1)
+        self.assertEqual((reused["state"], reused["exit"]), ("done", 0))
         fresh = _start(self.root, "--fresh")
         self.assertEqual(fresh["state"], "started")
         self.assertEqual(Path(fresh["log"]), self.clean_log)
-        self.assertIn("Killed", Path(str(self.clean_log) + ".1").read_text())
+        self.assertIn("GATES_EXIT=0", Path(str(self.clean_log) + ".1").read_text())
         self.assertEqual(_wait(self.root, fresh["log"]).returncode, 0)
+
+    def test_planted_or_forged_logs_are_never_reused(self) -> None:
+        """S15: a log this tool did not start, or a GATES_EXIT line printed by a gate, is no result."""
+        self.gates_dir.mkdir(parents=True)
+        self.clean_log.write_text("==> [2/2] slow\n+- 2 gate(s), 0 failed\nGATES_EXIT=0\n")
+        planted = _start(self.root)
+        self.assertEqual(planted["state"], "started")
+        self.assertIn("GATES_EXIT=0\n", Path(str(self.clean_log) + ".1").read_text())
+        self.assertEqual(_wait(self.root, planted["log"]).returncode, 0)
+        # A record with a nonce, but the log's only marker lacks it (a gate printed it, then the run died).
+        rec = json.loads(Path(str(self.clean_log) + ".pid").read_text())
+        self.clean_log.write_text("==> [1/2] echo\nGATES_EXIT=0\n")
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        rec["pid"] = dead.pid
+        Path(str(self.clean_log) + ".pid").write_text(json.dumps(rec))
+        self.assertEqual(_wait(self.root, str(self.clean_log), timeout="5").returncode, 125)
+        self.assertEqual(_start(self.root)["state"], "started")
 
     def test_reused_pid_counts_as_dead(self) -> None:
         self.gates_dir.mkdir(parents=True)
