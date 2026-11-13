@@ -78,7 +78,18 @@ const FID = (C.features.id_prefix || 'F') + NUM
 const SLUG = A.slug
 const DIR = `${C.paths.features_dir}/${NUM}-${SLUG}`
 const MAIN = (C.features && C.features.main_branch) || 'main'
+// Lesson: absolute paths were pasted unquoted into shell snippets; a project path with a space turned the
+// Finalize hint `rm -rf <root>/<build dir>` into a command that deletes a sibling directory. Every path that
+// reaches a command must be plain (no whitespace or shell metacharacters), and build_dirs stay inside the tree.
+const SAFE_PATH = /^[A-Za-z0-9_./@+:,~-]+$/
+for (const [what, p] of [['root', ROOT], ['project dir', PROJECT_DIR], ['agents dir', AGENTS_DIR], ['paths.tools_dir', C.paths.tools_dir || 'tools/sdd'],
+  ['paths.worktree_root', C.paths.worktree_root || '.wt'], ['paths.features_dir', C.paths.features_dir || '']]) {
+  if (p && !SAFE_PATH.test(p)) throw new Error(`feature-pipeline: ${what} ${JSON.stringify(p)} contains whitespace or shell metacharacters; commands handed to agents would split it. Move the project to a plain path.`)
+}
 const BUILD_DIRS = Array.isArray(C.paths.build_dirs) ? C.paths.build_dirs.filter((d) => typeof d === 'string' && d) : []
+for (const d of BUILD_DIRS) {
+  if (!SAFE_PATH.test(d) || d.startsWith('/') || d.split('/').includes('..')) throw new Error(`feature-pipeline: paths.build_dirs entry ${JSON.stringify(d)} must be a plain path inside the project (no '/' prefix, no '..', no whitespace)`)
+}
 const BUILD_DIRS_HINT = BUILD_DIRS.length && ROOT ? ` (\`rm -rf ${BUILD_DIRS.map((d) => `${ROOT}/${d}`).join(' ')}\`)` : ''
 const BRANCH = A.branch || `${C.features.branch_prefix || 'feat/'}${FID}-${SLUG}`
 const ISOLATION = ROOT ? 'none' : ['auto', 'none', 'worktree'].includes(A.isolation) ? A.isolation : 'auto'
@@ -100,7 +111,8 @@ const TESTS_COMPONENT = (C.tests && C.tests.run_component) || ''
 const SECURITY_HINT = P.security_sensitive_hint || 'authentication, authorization, cryptography, secrets, session/token handling, parsing of untrusted input'
 const COMPONENT_WORD = (C.components && C.components.word) || 'component'
 const WT_ROOT = `${PROJECT_DIR}/${C.paths.worktree_root || '.wt'}`
-const CACHE_VARS = Object.entries((C.build_cache && C.build_cache.env) || {}).map(([k, v]) => `${k}=${v}`)
+const shq = (s) => (/^[A-Za-z0-9_./@+:,=%~-]*$/.test(String(s)) ? String(s) : `'${String(s).replace(/'/g, `'\\''`)}'`)
+const CACHE_VARS = Object.entries((C.build_cache && C.build_cache.env) || {}).map(([k, v]) => `${k}=${shq(v)}`)
 const READ_RULE =
   `READ VIA GIT (hard rule for this read-only task): first record SHA=$(git -C ${ROOT || PROJECT_DIR} rev-parse ${BRANCH}); read files as of that commit with ` +
   '`git show $SHA:<path>`, use `git diff <range>` and `git log`; do not create worktrees and do not edit any file. You may run the existing test command in the ' +

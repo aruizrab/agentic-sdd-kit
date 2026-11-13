@@ -16,7 +16,7 @@ Workflow script takes as `args.config`.
 | `paths.roadmap` / `constitution` / `development` | document paths | `docs/ROADMAP.md`, `docs/CONSTITUTION.md`, `docs/DEVELOPMENT.md` |
 | `paths.logs_dir` | gate logs (`gates-<tag>.log`; pipeline runs keyed by HEAD under `gates/<feature>-<tag>-<sha7>[-dirty].log` with a `.pid` runner record) | `.sdd/logs` |
 | `paths.worktree_root` | per-feature and throwaway worktrees | `.wt` |
-| `paths.build_dirs` | build output to delete after merging | `[]` |
+| `paths.build_dirs` | build output to delete after merging; plain relative paths inside the project (no leading `/`, no `..`, no whitespace: the pipeline refuses them, and also refuses a project root or worktree path with whitespace or shell metacharacters) | `[]` |
 | `paths.tools_dir` | where the kit tools are installed | `tools/sdd` |
 | `features.id_prefix`, `id_digits`, `branch_prefix` | `F`, `3`, `feat/` -> `F011`, `feat/F011-slug` | |
 | `features.main_branch` | the integration branch worktrees are created from and merged into (`master`, `trunk`, `develop`...) | `main` |

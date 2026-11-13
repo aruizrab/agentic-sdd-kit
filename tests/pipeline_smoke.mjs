@@ -254,6 +254,25 @@ async function run(args, rules = [], byModel = null) {
   console.log('ok 11 main_branch and build_dirs')
 }
 
+// 11b. S9: a path that a shell would split never reaches a command; build_dirs stay inside the tree.
+{
+  for (const [args, rx] of [
+    [{ root: '/home/u/My Projects/app/.wt/F011' }, /root .* whitespace or shell metacharacters/],
+    [{ projectDir: '/home/u/My Projects/app' }, /project dir .* whitespace/],
+    [{ config: { ...CONFIG, root: '/p;rm -rf x' } }, /project dir/],
+    [{ config: { ...CONFIG, paths: { ...CONFIG.paths, build_dirs: ['../sibling'] } } }, /build_dirs entry "\.\.\/sibling"/],
+    [{ config: { ...CONFIG, paths: { ...CONFIG.paths, build_dirs: ['/abs'] } } }, /build_dirs entry/],
+  ]) {
+    const rt = makeRuntime([])
+    await assert.rejects(script({ config: CONFIG, feature: 'F011', slug: 'x', ...args }, rt.agent, rt.parallel, rt.pipeline, rt.phase, rt.log), rx)
+    assert.equal(rt.calls.length, 0)
+  }
+  const config = { ...CONFIG, build_cache: { env: { CCACHE_DIR: "/var/cache/my cache", OK: '/var/cache/x' } } }
+  const { calls } = await run({ config, stages: ['specify'] })
+  assert.ok(calls[0].prompt.includes("CCACHE_DIR='/var/cache/my cache' OK=/var/cache/x"), calls[0].prompt)
+  console.log('ok 11b unsafe paths rejected, cache values quoted')
+}
+
 // ----- WI2 pipeline robustness -----
 const SCOPE = 'SCOPE RULE (hard rule)'
 const BLOCKING = { severity: 'blocking', category: 'logic', file: 'a.ts', line: 3, claim: 'c', evidence: 'e' }
