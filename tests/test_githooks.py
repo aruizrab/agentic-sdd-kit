@@ -435,6 +435,23 @@ class SecretsHookTest(unittest.TestCase):
         self.r.git("commit", "-q", "--no-verify", "-m", "chore: y")
         self.assertEqual(self._ci_secrets(), [("secret", "0:x.dat", 1)])
 
+    def test_secret_added_only_in_a_merge_commit(self) -> None:
+        """`gitleaks git` gets no diff for a merge unless git log is told to diff against its first parent."""
+        self._gitleaks_branch()
+        write(self.r.root, "b.md", "b\n")
+        self.r.git("add", "b.md")
+        self.r.git("commit", "-q", "--no-verify", "-m", "docs: b")
+        self.r.git("switch", "-q", "-c", "side", "main")
+        write(self.r.root, "a.md", "a\n")
+        self.r.git("add", "a.md")
+        self.r.git("commit", "-q", "--no-verify", "-m", "docs: a")
+        self.r.git("switch", "-q", "feat/F001-x")
+        self.r.git("merge", "-q", "--no-ff", "--no-commit", "side")
+        write(self.r.root, "cfg.txt", self.GENERIC)
+        self.r.git("add", "cfg.txt")
+        self.r.git("commit", "-q", "--no-verify", "-m", "Merge branch side")
+        self.assertEqual(self._ci_secrets(), [("secret", "cfg.txt", 1)])
+
     def test_many_binary_blobs_take_one_gitleaks_run(self) -> None:
         """Perf: 50 binary blobs are scanned by one `gitleaks dir`, in the hook and in the check;
         a failing gitleaks leaves every one of them `secret-unscanned`."""

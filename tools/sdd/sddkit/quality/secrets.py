@@ -213,8 +213,12 @@ def check(root: Path, cfg: Dict[str, Any]) -> Result:
         res.violations += gitleaks_ignore_problem(root, cfg, base)
         head = vcs.git(root, "rev-parse", "HEAD").strip()
         if head != base:
-            res.violations += gitleaks(root, cfg, ["git", f"--log-opts={base}..{head}", "."], trusted_ref=base)
+            # A merge commit has no patch in `git log -p` unless diffed against its first parent:
+            # content added only while resolving a merge would go unscanned.
+            res.violations += gitleaks(root, cfg, ["git", f"--log-opts=--diff-merges=first-parent {base}..{head}", "."], trusted_ref=base)
             res.violations += gitleaks_blobs(root, cfg, vcs.binary_blobs(root, base, head, cfg["quality"]["secrets"]["allow_globs"]), base)
     else:
         gitleaks_note(cfg, res)
+    # A finding in a side-branch commit shows again in the merge's first-parent diff.
+    res.violations = list({(v.kind, v.file, v.line, v.message): v for v in res.violations}.values())
     return res.finish()
