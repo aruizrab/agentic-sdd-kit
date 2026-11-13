@@ -507,6 +507,27 @@ class TestStepAndPrePushTest(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("a regression", proc.stderr)
 
+    def test_commands_do_not_inherit_git_hook_env(self) -> None:
+        """S6: a test that runs git in a nested repository never writes the committing repo's index
+        (`commit -a` exports GIT_INDEX_FILE=<repo>/.git/index.lock to the hooks)."""
+        nested = ("rm -rf .sdd/nested && mkdir -p .sdd/nested && cd .sdd/nested && git init -q && echo n > NESTED.txt && "
+                  "git add NESTED.txt && git -c user.name=t -c user.email=t@localhost commit -qm n && "
+                  "test -n \"$SDD_GIT_INDEX_FILE\"")
+        self.r.cfg["tests"]["run"] = nested
+        self.r.cfg["quality"]["hooks"]["pre_commit"] = [{"name": "nested-step", "command": nested, "glob": "*.py"}]
+        self.r.set_cfg()
+        self.r.commit("chore: nested tests", "sdd.config.json")
+        write(self.r.root, "src/m.py", "m = 1\n")
+        self.r.commit("feat: m", "src/m.py")
+        for extra in (["-a"], ["src/m.py"]):
+            with self.subTest(extra=extra):
+                write(self.r.root, "src/m.py", f"m = {len(extra[0])}\n")
+                proc = self.r.git("commit", "-m", "feat: change m", *extra, check=False)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+                self.assertEqual(self.r.git("show", "--name-only", "--format=", "HEAD").stdout.split(), ["src/m.py"])
+                self.assertNotIn("NESTED.txt", self.r.git("ls-files").stdout)
+                self.assertEqual(self.r.git("status", "--porcelain", "--untracked-files=no").stdout, "")
+
     def test_pre_push(self) -> None:
         remote = make_tmp("remote-")
         try:

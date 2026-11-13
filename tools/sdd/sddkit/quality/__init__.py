@@ -128,12 +128,26 @@ def emit(res: Result, as_json: bool, out=None) -> int:
 # ----------------------------------------------------------------------------
 
 
+# git exports these to hooks (GIT_INDEX_FILE is the committing repo's index.lock with `commit -a`).
+# A project command that runs git in another repository (a test creating throwaway repos) must
+# not inherit them, or it writes into the committing repo's index. The kit's own git calls use
+# os.environ, not this environment, and keep them.
+GIT_HOOK_ENV = ("GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_PREFIX", "GIT_OBJECT_DIRECTORY",
+                "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_CONFIG_PARAMETERS", "GIT_COMMON_DIR")
+
+
 def tool_env(cfg: Dict[str, Any], root: Path, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     """Environment for every command the kit runs for gates, checks and git hooks.
 
     ``quality.tool_dirs`` (root-relative, e.g. ``node_modules/.bin``) go in front of ``PATH``, so
-    ``requires`` finds project-local tools and a missing one SKIPs instead of being downloaded."""
+    ``requires`` finds project-local tools and a missing one SKIPs instead of being downloaded.
+    git's hook variables (``GIT_HOOK_ENV``) are removed; ``SDD_GIT_INDEX_FILE`` keeps the index
+    git is committing from (absolute) for a step that must read exactly what is staged."""
     env = dict(os.environ)
+    if env.get("GIT_INDEX_FILE"):
+        env["SDD_GIT_INDEX_FILE"] = os.path.abspath(env["GIT_INDEX_FILE"])  # the staged set, for steps that need it
+    for k in GIT_HOOK_ENV:
+        env.pop(k, None)
     dirs = [str(root / d) for d in (cfg.get("quality") or {}).get("tool_dirs") or []]
     if dirs:
         env["PATH"] = os.pathsep.join(dirs + ([env["PATH"]] if env.get("PATH") else []))

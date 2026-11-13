@@ -271,7 +271,10 @@ test command is reported and the task commit is accepted until that command has 
 on the branch (recorded in `sdd-tests-green`); from then on a failure rejects. Without such a
 commit every failure rejects. The step runs the configured component tests and must stay below an agent's
 shell limit (`quality.hooks.test_timeout`, default 300 s); agents give `git commit` a 600 s
-shell timeout. Put slow checks in `gates.fast` (pre-push) instead; the hooks warn when
+shell timeout. Hook-run commands do not inherit git's hook variables (`GIT_INDEX_FILE`,
+`GIT_DIR`, `GIT_WORK_TREE`, ...), so a test suite that creates throwaway repositories never
+writes the committing repository's index; a step that must read exactly what `git commit -a`
+or `git commit <paths>` is committing finds that index in `SDD_GIT_INDEX_FILE`. Put slow checks in `gates.fast` (pre-push) instead; the hooks warn when
 pre-commit and commit-msg together exceed `quality.hooks.budget_seconds`.
 
 ### Optional: a merge driver for the baseline
