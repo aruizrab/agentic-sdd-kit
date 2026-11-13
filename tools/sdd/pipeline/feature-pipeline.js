@@ -340,6 +340,7 @@ const summary = {
   reason: null,
   baseSha: null,
   testsSha: A.testsSha || null,
+  strictScope: STRICT_SCOPE,
   outsideScan: Array.isArray(A.outsideScan) ? A.outsideScan.slice() : [],
   critic: [],
   waves: [],
@@ -355,6 +356,7 @@ const summary = {
   routing: R_NOW, // pass as routingBefore when resuming with a changed models table (with modelsFromPhase)
   telemetry: [], // one record per agent() attempt; the orchestrator appends them with `sdd routing log` after the run
 }
+if (!STRICT_SCOPE) log('WARNING: strictScope: false: the SCOPE RULE is NOT in the agent prompts (agents may act on relayed chat messages); summary.strictScope records it')
 
 function finish(status, reason, nextAction) {
   if (PAUSED.value) {

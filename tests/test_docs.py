@@ -339,5 +339,17 @@ class ReadmeToolsTableTest(unittest.TestCase):
         self.assertEqual(missing, [], "sdd subcommands missing from README's tools table")
 
 
+class ScopeRuleTest(unittest.TestCase):
+    """S10: the scope rule is in every agent definition and in every skill that starts agents."""
+
+    def test_agents_and_skills(self) -> None:
+        agents = sorted((KIT / "claude" / "agents").glob("*.md"))
+        self.assertEqual(len(agents), 12)
+        for p in agents:
+            self.assertIn("SCOPE RULE (hard rule)", p.read_text(encoding="utf-8"), p.name)
+        for skill in ("review-feature", "feature", "gates"):
+            self.assertIn("SCOPE RULE (hard rule)", read(f"claude/skills/{skill}/SKILL.md"), skill)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -290,6 +290,17 @@ const indexOf = (calls, rx) => calls.findIndex((c) => rx.test(c.label))
   const off = await run({ approval: 'agent', strictScope: false })
   assert.equal(off.result.status, 'ready-to-merge')
   for (const c of off.calls) assert.ok(!c.prompt.includes(SCOPE), `scope rule in ${c.label}`)
+  // S10: switching the rule off is visible afterwards.
+  assert.equal(result.strictScope, true)
+  assert.equal(off.result.strictScope, false)
+  assert.ok(off.logs.some((l) => /WARNING: strictScope: false/.test(l)), off.logs.join('\n'))
+  // Every role file the prompts point to carries the rule itself (manual dispatch, role fallback).
+  const agentsDir = path.join(here, '..', 'claude', 'agents')
+  const roles = new Set(calls.map((c) => (c.prompt.match(/^ROLE: you are the "([\w-]+)" agent/) || [])[1]).filter(Boolean))
+  assert.ok(roles.size >= 8, [...roles].join(','))
+  for (const t of roles) {
+    assert.ok(readFileSync(path.join(agentsDir, `${t}.md`), 'utf8').includes(SCOPE), `no scope rule in claude/agents/${t}.md`)
+  }
   console.log('ok 12 scope rule')
 }
 
