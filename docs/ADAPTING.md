@@ -363,3 +363,12 @@ is installed: `RUSTC_WRAPPER=sccache` without sccache breaks every build.
 
 Keep `paths.build_dirs` for the per-worktree output that is deleted after a merge; the shared
 cache is not deleted per feature, its size cap bounds it.
+
+Before enabling a cache, measure it (cold build with an empty cache, the same build after
+deleting the build dir, and a baseline without the wrapper) **on an idle host only**: the
+measurement is a series of cold builds, and next to another heavy job its timings are worthless
+and its memory use can run a small host out of memory (docs/PLAYBOOK.md §14). Expect hits
+across worktrees mainly for registry dependencies (same absolute paths everywhere); the
+project's own packages compile from a different path per worktree and usually hit only on
+rebuilds in the same worktree. Run mutation testing without the wrapper (for example
+`RUSTC_WRAPPER=` empty): every mutant rebuild is a guaranteed miss that evicts useful entries.

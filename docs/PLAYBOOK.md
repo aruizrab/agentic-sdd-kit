@@ -306,3 +306,30 @@ again (cost, and possibly a different answer than the one the later phases built
 The same pattern works for any orchestration script whose host caches calls by their inputs:
 record the calls of old and new under a deterministic stub, and diff them.
 
+## 14. Usage-limit pauses while unattended
+
+The orchestrator acts only when something notifies it (a finished agent, a finished run, a
+message). A run that ends `paused` on a usage limit while the owner is away therefore sits idle
+until somebody looks, even after the limit has reset.
+
+- **Schedule a one-shot wake-up at the reset time** when a run pauses on a usage limit: a
+  scheduled task or timer that sends the orchestrator a message at the time the limit resets
+  (plus a few minutes), with the resume instruction (`Workflow({scriptPath, resumeFromRunId,
+  args: <same args>})` for each paused run). One wake-up per reset, not a polling loop. If the
+  limit is still in force at wake-up, the resumed run pauses again on its first call: schedule
+  the next wake-up then.
+- Record the paused runs, their args and the planned wake-up time where the orchestrator keeps
+  its state, so the wake-up (or a new session) can resume them without guessing.
+- **Never run two heavy build or test jobs at once on a small host** (coverage, mutation
+  testing, full workspace builds, build-cache measurements, full gates): two concurrent cold
+  builds ran a 16 GB host out of memory, the OOM killer took a test process and froze the
+  session. Queue heavy jobs; `pipeline.max_parallel_features` and `pipeline.max_build_jobs`
+  bound the pipeline, but jobs started by hand count too.
+- **Measure build caches only on an idle host**: a cache measurement is a series of cold
+  builds, and its timings are worthless (and its memory use dangerous) next to another build.
+- **Run mutation testing without the compiler-cache wrapper** (for example an empty
+  `RUSTC_WRAPPER=` for Rust): every mutant rebuild is a guaranteed miss that writes a cache
+  entry nobody reuses and evicts useful ones.
+- **Expect cross-worktree cache hits mainly for registry dependencies**: they have the same
+  absolute paths in every worktree; the project's own packages are compiled from a different
+  path per worktree and usually miss across worktrees (hits come from rebuilds in the same one).
