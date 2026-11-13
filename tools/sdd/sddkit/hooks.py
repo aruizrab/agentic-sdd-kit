@@ -12,7 +12,10 @@ Hooks:
   would modify protected paths, and of destructive git commands in shared trees
   (``git checkout -- <path>``, ``git restore``, ``git clean``, ``git reset --hard``,
   ``git stash``): lesson 7, a read-only verifier once wiped another agent's
-  edits with ``git checkout -- . && git clean -fd``.
+  edits with ``git checkout -- . && git clean -fd``. Also blocks bypassing the git
+  hooks: ``git commit -n/--no-verify``, ``git push --no-verify`` and setting or
+  unsetting ``core.hooksPath`` (``git config``, ``git -c``); reading it stays allowed.
+  Best effort: CI re-runs ``sdd check commits`` and ``sdd check secrets``.
 * ``format`` (PostToolUse Edit|Write): runs the ``formatters`` entry whose glob
   matches the edited file; exit 2 with the output when it fails (a syntax
   error from the last edit).
@@ -49,7 +52,48 @@ DESTRUCTIVE_GIT = [
     (re.compile(r"^git(\s+-C\s+\S+)?\s+stash(?!\s+list)(\s|$)"), "git stash removes other agents' in-progress edits from the tree"),
     (re.compile(r"^git(\s+-C\s+\S+)?\s+push\s+(?:.*\s)?(?:-f|--force|--force-with-lease)(\s|$)"), "force-push is forbidden"),
     (re.compile(r"^git(\s+-C\s+\S+)?\s+commit\s+(?:.*\s)?(?:-n|--no-verify)(\s|$)"), "--no-verify skips the gates"),
+    (re.compile(r"^git(\s+-C\s+\S+)?\s+push\s+(?:.*\s)?--no-verify(\s|$)"), "--no-verify skips the pre-push gates"),
 ]
+
+_CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "-l", "--list", "--show-origin", "--show-scope", "get", "list"}
+
+
+def hooks_path_change(cmd: str) -> Optional[str]:
+    """Why a command would set or unset core.hooksPath (git config or git -c), else None."""
+    for seg in _segments(cmd):
+        try:
+            words = shlex.split(seg)
+        except ValueError:
+            words = seg.split()
+        if not words or words[0].rsplit("/", 1)[-1] != "git":
+            continue
+        i = 1
+        while i < len(words) and words[i].startswith("-"):
+            if words[i] == "-c" and i + 1 < len(words):
+                if words[i + 1].lower().startswith("core.hookspath="):
+                    return "git -c core.hooksPath=... switches the git hooks off"
+                i += 2
+                continue
+            if words[i] == "-C" and i + 1 < len(words):
+                i += 2
+                continue
+            if words[i].lower().startswith("-ccore.hookspath="):
+                return "git -c core.hooksPath=... switches the git hooks off"
+            i += 1
+        if i >= len(words) or words[i] != "config":
+            continue
+        args = words[i + 1:]
+        lowered = [a.lower() for a in args]
+        if "core.hookspath" not in lowered:
+            continue
+        if any(a in ("--unset", "--unset-all", "unset") for a in lowered):
+            return "unsetting core.hooksPath switches the SDD git hooks off"
+        if any(a in _CONFIG_READ_FLAGS for a in lowered):
+            continue
+        k = lowered.index("core.hookspath")
+        if k + 1 < len(args):
+            return "changing core.hooksPath switches the SDD git hooks off (use `sdd hooks install`)"
+    return None
 
 
 def _read_input() -> Dict[str, Any]:
@@ -205,7 +249,7 @@ def destructive_git(cmd: str) -> Optional[str]:
         for rx, why in DESTRUCTIVE_GIT:
             if rx.match(s):
                 return why
-    return None
+    return hooks_path_change(cmd)
 
 
 def bash_guard(data: Optional[Dict[str, Any]] = None) -> int:
