@@ -47,6 +47,16 @@ class BypassGuardTest(unittest.TestCase):
             self.assertIn("BLOCKED", err, cmd)
         for cmd in ["python3 -I tools/sdd/sdd.py hooks install", "git config --get core.hooksPath", "git push -n", "git push origin main"]:
             self.assertEqual(self.guard(cmd)[0], 0, cmd)
+        # C9/S13: combined short flags, abbreviated long options, global options with separate
+        # values, --config-env, GIT_CONFIG_* variables, wrappers, removing the core section.
+        for cmd in ['git commit -nm "x"', 'git commit -anm "x"', "git commit --no-verif -m x", "git push --no-verif",
+                    "git --git-dir .git -c core.hooksPath=/dev/null commit -m x", "git --config-env=core.hooksPath=VAR commit -m x",
+                    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x",
+                    "env git push --no-verify", "git config --remove-section core", "git -C . commit --no-v -m x", "git merge --no-verify x"]:
+            self.assertEqual(self.guard(cmd)[0], 2, cmd)
+        for cmd in ['git commit -m "-n"', "git commit -mn", "git commit --amend --no-edit", 'git commit -m "fix --no-verify docs"',
+                    "git commit -cHEAD", "git log -n 3", 'git commit --author "A <a@b>" -m x']:
+            self.assertEqual(self.guard(cmd)[0], 0, cmd)
 
     def test_code_writing_roles_cannot_edit_hooks_or_checkers(self) -> None:
         def edit(path: str, agent: str) -> int:
@@ -75,7 +85,8 @@ class BypassGuardTest(unittest.TestCase):
 
     def test_settings_deny_list(self) -> None:
         deny = json.loads((KIT / "claude" / "settings.json").read_text())["permissions"]["deny"]
-        for entry in ("Bash(git push --no-verify *)", "Bash(git commit --no-verify *)", "Bash(git config core.hooksPath *)"):
+        for entry in ("Bash(git push --no-verify *)", "Bash(git commit --no-verify *)", "Bash(git config core.hooksPath *)",
+                      "Bash(git commit --no-v*)", "Bash(git commit -n*)", "Bash(git * -c core.hooksPath*)"):
             self.assertIn(entry, deny)
 
 
