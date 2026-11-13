@@ -1039,9 +1039,14 @@ Acceptance criteria:
   ambiguous for a path like `0:x.dat`), minus `allow_globs` paths before deduplication. They are
   written under neutral names (so no path allowlist matches) to one scratch directory under the
   logs dir and scanned by a single `gitleaks dir` with the trusted config: one process per blob
-  cost about 0.5 s each and let a large binary commit outlast the gate timeout. A blob that
-  cannot be read, or every blob when gitleaks fails, is `secret-unscanned` (fail closed). `sdd check protected` also fails a branch that adds a `binary` or `-diff` line to
-  any `.gitattributes`: such a line hides content from reviewers' diffs as well. (review S1)
+  cost about 0.5 s each and let a large binary commit outlast the gate timeout. Each copy starts
+  with a newline (reported lines are shifted back): gitleaks sniffs a file's type from its first
+  bytes and silently skips what looks like an application file (ELF, PDF, zip, gzip, 7z, tar,
+  sqlite). A blob that cannot be read, or every blob when gitleaks fails, is
+  `secret-unscanned` (fail closed). Limitation: compressed content (gzip, a deflated zip member)
+  is scanned only as its compressed bytes; the kit does not decompress. `sdd check protected`
+  also fails a branch that adds a `binary` or `-diff` line to any `.gitattributes`: such a line
+  hides content from reviewers' diffs as well. (review S1)
 - D-42 `sdd check protected` does not trust the branch's configuration. It reads
   `protected_paths` and `paths.tools_dir` from the merge-base's `sdd.config.json` (as
   `sdd check baseline` does for `baseline_file`), always protects `sdd.config.json` and the kit

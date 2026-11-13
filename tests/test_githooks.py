@@ -435,6 +435,35 @@ class SecretsHookTest(unittest.TestCase):
         self.r.git("commit", "-q", "--no-verify", "-m", "chore: y")
         self.assertEqual(self._ci_secrets(), [("secret", "0:x.dat", 1)])
 
+    def test_blobs_that_look_like_application_files(self) -> None:
+        """gitleaks skips files whose first bytes look like an application type (ELF, PDF, zip,
+        sqlite); the scratch copies start with a newline, so these are scanned too."""
+        import io
+        import sqlite3
+        import zipfile
+        self._gitleaks_branch()
+        secret = self.GENERIC.encode()
+        (self.r.root / "elf.dat").write_bytes(b"\x7fELF\x02\x01\x01\0\0\0\0\0\0\0\0\0\n" + secret)
+        (self.r.root / "doc.dat").write_bytes(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\0\n" + secret)
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as z:
+            z.writestr("conf.ini", secret)
+        (self.r.root / "pack.dat").write_bytes(buf.getvalue())
+        db = sqlite3.connect(str(self.r.root / "db.dat"))
+        db.execute("create table t (v text)")
+        db.execute("insert into t values (?)", (self.GENERIC,))
+        db.commit()
+        db.close()
+        names = ["db.dat", "doc.dat", "elf.dat", "pack.dat"]
+        self.r.git("add", *names)
+        proc = self.r.commit("chore: binaries")
+        self.assertNotEqual(proc.returncode, 0, proc.stderr)
+        for name in names:
+            self.assertIn(f"gitleaks:generic-api-key at {name}", proc.stderr)
+        self.assertIn("at elf.dat:2 ", proc.stderr)
+        self.r.git("commit", "-q", "--no-verify", "-m", "chore: binaries")
+        self.assertEqual(sorted(f for _, f, _ in self._ci_secrets()), names)
+
     def test_secret_added_only_in_a_merge_commit(self) -> None:
         """`gitleaks git` gets no diff for a merge unless git log is told to diff against its first parent."""
         self._gitleaks_branch()

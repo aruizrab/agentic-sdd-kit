@@ -215,9 +215,9 @@ def staged_content(root: Path, path: str) -> Optional[str]:
     return proc.stdout.decode("utf-8", errors="replace") if proc.returncode == 0 else None
 
 
-def write_blobs(root: Path, files: Dict[str, Path]) -> Set[str]:
-    """Write each blob id's raw bytes to its file with one ``git cat-file --batch`` (streamed, never
-    held in memory); returns the ids written (a missing id is left out)."""
+def write_blobs(root: Path, files: Dict[str, Path], prefix: bytes = b"") -> Set[str]:
+    """Write ``prefix`` and each blob id's raw bytes to its file with one ``git cat-file --batch``
+    (streamed, never held in memory); returns the ids written (a missing id is left out)."""
     if not files:
         return set()
     done: Set[str] = set()
@@ -232,6 +232,7 @@ def write_blobs(root: Path, files: Dict[str, Path]) -> Set[str]:
                 continue  # "<id> missing" / "ambiguous": no body follows
             left = int(header[2])
             with files[oid].open("wb") as fh:
+                fh.write(prefix)
                 while left:
                     chunk = proc.stdout.read(min(left, 1 << 20))
                     if not chunk:

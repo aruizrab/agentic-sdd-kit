@@ -108,10 +108,11 @@ def gitleaks_ignore_problem(root: Path, cfg: Dict[str, Any], trusted_ref: str) -
 
 
 def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[str] = None, in_message: bool = False,
-             trusted_ref: str = "HEAD", names: Optional[Dict[str, str]] = None) -> List[Violation]:
+             trusted_ref: str = "HEAD", names: Optional[Dict[str, str]] = None, line_offset: int = 0) -> List[Violation]:
     """Run gitleaks with a redacted JSON report and the trusted configuration; return findings as violations.
 
-    ``names`` maps the base names of scanned scratch files to the paths they stand for."""
+    ``names`` maps the base names of scanned scratch files to the paths they stand for;
+    ``line_offset`` lines were prepended to each of them."""
     report = scratch_dir(root, cfg) / f"gitleaks-{abs(hash((tuple(args), stdin))) % 10**8}.json"
     conf = gitleaks_config(root, cfg, trusted_ref)
     cmd = ["gitleaks", *args, "--config", str(conf), "--redact", "--no-banner", "--exit-code", "1", "--report-format", "json",
@@ -144,7 +145,8 @@ def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[s
         if any_match(file, allow):
             continue
         line = f.get("StartLine")
-        out.append(Violation("secret", file, int(line) if line else None, {"file": file, "message": f"gitleaks:{rid}"}, 1, f"gitleaks rule {rid}"))
+        line = max(1, int(line) - line_offset) if line else None
+        out.append(Violation("secret", file, line, {"file": file, "message": f"gitleaks:{rid}"}, 1, f"gitleaks rule {rid}"))
     return out
 
 
@@ -167,7 +169,9 @@ def gitleaks_blobs(root: Path, cfg: Dict[str, Any], blobs: List[Tuple[str, str]]
     work = Path(tempfile.mkdtemp(prefix="gitleaks-blobs-", dir=str(scratch_dir(root, cfg))))
     try:
         files = {oid: work / f"b{i:06d}" for i, oid in enumerate(dict.fromkeys(oid for _, oid in todo))}
-        written = vcs.write_blobs(root, files)
+        # gitleaks sniffs a file's type from its first bytes and silently skips what looks like an
+        # application file (ELF, PDF, zip, sqlite, ...): a leading newline defeats the sniffing.
+        written = vcs.write_blobs(root, files, prefix=b"\n")
         names: Dict[str, str] = {}
         for p, oid in todo:
             if oid in written:
@@ -176,7 +180,7 @@ def gitleaks_blobs(root: Path, cfg: Dict[str, Any], blobs: List[Tuple[str, str]]
                 unscanned(p, f"cannot read blob {oid}")
         if names:
             try:
-                found = gitleaks(root, cfg, ["dir", str(work)], trusted_ref=trusted_ref, names=names)
+                found = gitleaks(root, cfg, ["dir", str(work)], trusted_ref=trusted_ref, names=names, line_offset=1)
             except QualityError as exc:
                 for p, oid in todo:
                     if oid in written:
