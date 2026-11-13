@@ -47,7 +47,7 @@ function makeRuntime(rules) {
   const agent = async (prompt, opts) => {
     const label = opts.label || ''
     const base = fromSchema(opts.schema || { properties: {} })
-    calls.push({ label, model: opts.model, agentType: opts.agentType, phase: opts.phase, prompt })
+    calls.push({ label, model: opts.model, agentType: opts.agentType, phase: opts.phase, isolation: opts.isolation, prompt })
     for (const [rx, fn] of rules) if (rx.test(label)) return fn(base, label, prompt, calls)
     if (/^commit/.test(label)) return { ok: true, sha: 'abc1234' }
     if (/^spec status/.test(label)) return { status: 'Approved', needsClarification: 0, requirements: 20 }
@@ -104,7 +104,7 @@ async function run(args, rules = []) {
   assert.match(calls.find((c) => c.label === 'spec-author F011').prompt, /\/proj\/\.claude\/agents\/spec-author\.md/)
   // Nothing project-specific leaked: tools path and source rule come from config.
   assert.match(calls.find((c) => c.label === 'setup').prompt, /python3 -I \/proj\/tools\/sdd\/sdd\.py new-feature 011 x/)
-  assert.match(calls.find((c) => c.label === 'gates post-implement #1').prompt, /gates --feature F011 --detached/)
+  assert.match(calls.find((c) => c.label === 'gates post-implement #1').prompt, /gates --detached --feature F011 --tag post-implement-1/)
   assert.match(calls.find((c) => c.label === 'gates post-implement #1').prompt, /GATES_EXIT/)
   console.log('ok 1 happy path')
 }
@@ -247,6 +247,138 @@ async function run(args, rules = []) {
   assert.match(result.nextAction, /rm -rf \/proj\/\.wt\/F011\/dist \/proj\/\.wt\/F011\/node_modules\/\.cache/)
   assert.doesNotMatch(result.nextAction, /\bmain\b/)
   console.log('ok 11 main_branch and build_dirs')
+}
+
+// ----- WI2 pipeline robustness -----
+const SCOPE = 'SCOPE RULE (hard rule)'
+const BLOCKING = { severity: 'blocking', category: 'logic', file: 'a.ts', line: 3, claim: 'c', evidence: 'e' }
+const indexOf = (calls, rx) => calls.findIndex((c) => rx.test(c.label))
+
+// 12. Scope rule in every prompt by default (also the config-loading call); strictScope: false removes it.
+{
+  const { result, calls } = await run({ approval: 'agent', config: undefined }, [
+    [/^load sdd\.config\.json/, () => ({ ok: true, configJson: JSON.stringify(CONFIG) })],
+    [/^spec-compliance-reviewer$/, () => ({ securitySensitive: false, findings: [BLOCKING] })],
+  ])
+  assert.equal(result.status, 'ready-to-merge', JSON.stringify(result))
+  assert.equal(calls[0].label, 'load sdd.config.json')
+  for (const c of calls) assert.ok(c.prompt.includes(SCOPE), `no scope rule in ${c.label}`)
+  const off = await run({ approval: 'agent', strictScope: false })
+  assert.equal(off.result.status, 'ready-to-merge')
+  for (const c of off.calls) assert.ok(!c.prompt.includes(SCOPE), `scope rule in ${c.label}`)
+  console.log('ok 12 scope rule')
+}
+
+// 13. Incomplete gate runs are re-run (with --fresh) and never spend a fix round.
+{
+  let n = 0
+  const incomplete = { pass: false, infraError: false, incomplete: true, failed: [{ gate: 'runner', excerpt: 'killed' }] }
+  const { result, calls } = await run({ approval: 'agent' }, [
+    [/^gates post-implement/, () => (n++ < 3 ? incomplete : { pass: true, infraError: false, incomplete: false, failed: [] })],
+  ])
+  assert.equal(result.status, 'ready-to-merge', JSON.stringify(result))
+  assert.equal(result.gates.length, 1, JSON.stringify(result.gates))
+  assert.ok(!calls.some((c) => /^gate-fix/.test(c.label)))
+  const runs = calls.filter((c) => /^gates post-implement #1/.test(c.label))
+  assert.deepEqual(runs.map((c) => c.label), ['gates post-implement #1', 'gates post-implement #1 rerun 1', 'gates post-implement #1 rerun 2', 'gates post-implement #1 rerun 3'])
+  assert.doesNotMatch(runs[0].prompt, /--fresh/)
+  for (const r of runs.slice(1)) assert.match(r.prompt, /--fresh/)
+  assert.match(runs[0].prompt, /gates --detached --feature F011 --tag post-implement-1/)
+  assert.match(runs[0].prompt, /--wait/)
+  assert.match(runs[0].prompt, /background/)
+  const four = await run({ approval: 'agent' }, [[/^gates post-implement/, () => incomplete]])
+  assert.equal(four.result.status, 'blocked-infra', JSON.stringify(four.result))
+  assert.ok(!four.calls.some((c) => /^gate-fix/.test(c.label)))
+  assert.equal(four.calls.filter((c) => /^gates post-implement/.test(c.label)).length, 4)
+  console.log('ok 13 incomplete gate runs')
+}
+
+// 14. readViaGit: read-only roles read through git, no worktrees, no Verify isolation; default unchanged.
+{
+  const rules = [[/^spec-compliance-reviewer$/, () => ({ securitySensitive: false, findings: [BLOCKING] })], [/^verify R1 #1/, () => ({ refuted: false, confidence: 'high', reasoning: 'real' })], [/^fix-check/, () => ({ refuted: false, confidence: 'high', reasoning: 'fixed' })]]
+  const readOnly = /reviewer|^verify R|^fix-check|^spec-critic/
+  const on = await run({ approval: 'agent', readViaGit: true }, rules)
+  assert.equal(on.result.status, 'ready-to-merge', JSON.stringify(on.result))
+  const ro = on.calls.filter((c) => readOnly.test(c.label))
+  for (const l of ['spec-critic r1', 'spec-compliance-reviewer', 'security-reviewer', 'test-adequacy-reviewer', 'perf-reviewer', 'verify R1 #1', 'fix-check R1 #1']) assert.ok(ro.some((c) => c.label === l), l)
+  for (const c of ro) {
+    assert.match(c.prompt, /READ VIA GIT/, c.label)
+    assert.doesNotMatch(c.prompt, /git worktree add/, c.label)
+  }
+  for (const c of on.calls.filter((x) => /^verify R/.test(x.label))) assert.equal(c.isolation, undefined)
+  const off = await run({ approval: 'agent' }, rules)
+  for (const c of off.calls.filter((x) => readOnly.test(x.label))) assert.doesNotMatch(c.prompt, /READ VIA GIT/, c.label)
+  for (const c of off.calls.filter((x) => /^verify R/.test(x.label))) assert.equal(c.isolation, 'worktree')
+  console.log('ok 14 read via git')
+}
+
+// 15. Review and Verify records are persisted before Finalize; a run paused in Verify keeps its findings.
+{
+  const rules = [[/^spec-compliance-reviewer$/, () => ({ securitySensitive: false, findings: [BLOCKING] })]]
+  const { result, calls } = await run({ approval: 'agent' }, rules)
+  assert.equal(result.status, 'ready-to-merge')
+  const rf = indexOf(calls, /^review findings$/)
+  const vr = indexOf(calls, /^verify record$/)
+  const fin = indexOf(calls, /^finalize /)
+  assert.ok(rf > indexOf(calls, /^perf-reviewer$/) && rf < indexOf(calls, /^verify R1/), `review findings at ${rf}`)
+  assert.ok(vr > indexOf(calls, /^verify R1 #2/) && vr < fin, `verify record at ${vr}`)
+  assert.match(calls[rf].prompt, /docs\(F011\): review findings/)
+  assert.match(calls[rf].prompt, /"claim": "c"/)
+  assert.match(calls[fin].prompt, /keep the existing §3 rows and §6 justifications/)
+  const paused = await run({ approval: 'agent' }, rules.concat([[/^verify R1/, () => null]]))
+  assert.equal(paused.result.status, 'paused')
+  assert.ok(paused.calls.some((c) => c.label === 'review findings'))
+  assert.ok(!paused.calls.some((c) => /^finalize/.test(c.label)))
+  console.log('ok 15 persisted review record')
+}
+
+// 16. Red check cross-checks with --include; outsideScan blocks Implemented until scan_globs covers it.
+{
+  const red = { compiles: true, failingTests: 3, unexpectedPasses: [], mustWithoutTest: [], outsideScan: ['tools/x/test_a.py'] }
+  const { result, calls } = await run({ approval: 'agent' }, [
+    [/^test-author F011/, () => ({ ok: true, components: ['a'], testsAdded: ['tools/x/test_a.py', 'tests/b.test.ts'], summary: 's' })],
+    [/^red-check/, () => red],
+    [/^finalize/, () => ({ ok: false, traceCheck: 'fail', status: 'Approved', commit: 'fff', notes: 'R1 untested' })],
+  ])
+  const rc = calls.find((c) => c.label === 'red-check #1')
+  assert.match(rc.prompt, /trace --feature 011 --json --include tools\/x\/test_a\.py --include tests\/b\.test\.ts/)
+  assert.ok(calls.some((c) => c.label === 'commit: test(F011): failing tests for x'))
+  assert.deepEqual(result.outsideScan, ['tools/x/test_a.py'])
+  const fin = calls.find((c) => /^finalize/.test(c.label)).prompt
+  assert.match(fin, /trace --check/)
+  assert.doesNotMatch(fin, /--include/)
+  assert.equal(result.status, 'blocked-finalize', JSON.stringify(result))
+  assert.notEqual(result.final.status, 'Implemented')
+  assert.match(result.nextAction, /^add these paths to `trace\.scan_globs` in sdd\.config\.json before merge: tools\/x\/test_a\.py/)
+  assert.match(result.nextAction, /stages: \["finalize"\]/)
+  // A passing run with outsideScan still starts its nextAction with the configuration gap.
+  const ok = await run({ approval: 'agent' }, [[/^red-check/, () => red]])
+  assert.equal(ok.result.status, 'ready-to-merge')
+  assert.match(ok.result.nextAction, /^add these paths to `trace\.scan_globs`/)
+  console.log('ok 16 red check outsideScan')
+}
+
+// 17. Build cache variables in the shared context.
+{
+  const config = { ...CONFIG, build_cache: { env: { RUSTC_WRAPPER: 'sccache', SCCACHE_DIR: '/cache/sccache' } } }
+  const { calls } = await run({ config, stages: ['plan'] })
+  assert.match(calls[0].prompt, /export these before building: RUSTC_WRAPPER=sccache SCCACHE_DIR=\/cache\/sccache/)
+  assert.match(calls[0].prompt, /size-capped and never on tmpfs/)
+  const none = await run({ stages: ['plan'] })
+  assert.doesNotMatch(none.calls[0].prompt, /export these before building/)
+  console.log('ok 17 build cache')
+}
+
+// 18. Interrupted work: uncommitted edits outside the feature dir stop Setup, nothing is discarded.
+{
+  const { result, calls } = await run({ approval: 'agent' }, [[/^setup/, () => ({ ok: true, branch: 'feat/F011-x', baseSha: 'b', headSha: 'h', dirty: ['src/a.ts'] })]])
+  assert.equal(result.status, 'blocked-setup')
+  assert.equal(calls.length, 1)
+  assert.match(result.nextAction, /[Ii]nspect/)
+  assert.match(result.nextAction, /src\/a\.ts/)
+  assert.match(result.nextAction, /never discard/)
+  assert.match(calls[0].prompt, /dirty/)
+  console.log('ok 18 dirty setup')
 }
 
 console.log('pipeline smoke: all ok')
