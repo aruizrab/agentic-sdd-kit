@@ -8,11 +8,18 @@ Gates come from ``sdd.config.json``::
                 "optional": true, "skip_if_missing": "<program>"}]
     }
 
+Three plans: ``fast`` (pre-push, every task), ``full`` (pipeline Gates stage, pull-request
+CI) and ``nightly`` (full-repo coverage and mutation, long fuzzing, benchmarks); select one
+with ``--plan`` (``--fast`` = ``--plan fast``).
+
 Every gate runs even if an earlier one fails ("all gates, then the verdict");
 the exit code is 1 if any gate failed. ``optional`` gates are skipped (not
 failed) when their command exits 127 (tool missing) or when the program named
-in ``skip_if_missing`` is not on PATH. A gate that exceeds ``timeout`` seconds
-fails.
+in ``skip_if_missing`` is not on PATH; a gate with ``skip_exit`` (an integer) is
+skipped when its command exits with that code (the templates set ``"skip_exit": 3``
+on the ``sdd check`` entries: 3 = required tool missing). The row names the
+``install`` hint. In CI mode (``CI=true``) every such skip is a failure. A gate
+that exceeds ``timeout`` seconds fails.
 
 Detached mode (for agents whose shell calls are time-limited)::
 
@@ -39,9 +46,10 @@ from typing import Any, Dict, List, Optional, Tuple
 MARKER = "GATES_EXIT="
 
 
-def plan(cfg: Dict[str, Any], fast: bool, only: Optional[List[str]] = None) -> List[Dict[str, Any]]:
-    gates = cfg["gates"]["fast"] if fast else cfg["gates"]["full"]
-    if fast and not gates:
+def plan(cfg: Dict[str, Any], fast: bool, only: Optional[List[str]] = None, plan_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    plan_name = plan_name or ("fast" if fast else "full")
+    gates = cfg["gates"].get(plan_name) or []
+    if plan_name == "fast" and not gates:
         gates = cfg["gates"]["full"]
     if only:
         wanted = set(only)
@@ -50,12 +58,9 @@ def plan(cfg: Dict[str, Any], fast: bool, only: Optional[List[str]] = None) -> L
 
 
 def _env(cfg: Dict[str, Any], root: Path, extra: Optional[Dict[str, str]]) -> Dict[str, str]:
-    env = dict(os.environ)
-    env["SDD_ROOT"] = str(root)
-    env.setdefault("SDD_FEATURE", "")
-    if extra:
-        env.update(extra)
-    return env
+    from .quality import tool_env
+
+    return tool_env(cfg, root, extra)
 
 
 def _pump(stream, out: "queue.Queue[Optional[str]]") -> None:
@@ -76,8 +81,26 @@ def summary(results: List[Tuple[str, str, str, float]]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def run(cfg: Dict[str, Any], root: Path, fast: bool, only: Optional[List[str]], log_path: Optional[Path], extra_env: Optional[Dict[str, str]] = None, quiet: bool = False) -> int:
-    gates = plan(cfg, fast, only)
+def _skip(name: str, detail: str, gate: Dict[str, Any], took: float) -> Tuple[str, str, str, float]:
+    hint = gate.get("install")
+    if hint and "install:" not in detail:
+        detail += f" (install: {hint})"
+    if os.environ.get("CI") == "true":
+        return (name, "FAIL", f"{detail}; CI=true: a missing tool is a failure", took)
+    return (name, "SKIP", detail, took)
+
+
+def _skip_detail(output: str, rc: int) -> str:
+    for line in reversed(output.splitlines()):
+        if "not installed" in line:
+            return line.split(": ", 1)[-1].strip() if line.count(": ") else line.strip()
+    return f"skipped (exit {rc})"
+
+
+def run(cfg: Dict[str, Any], root: Path, fast: bool, only: Optional[List[str]], log_path: Optional[Path], extra_env: Optional[Dict[str, str]] = None, quiet: bool = False, plan_name: Optional[str] = None) -> int:
+    plan_name = plan_name or ("fast" if fast else "full")
+    fast = plan_name == "fast"
+    gates = plan(cfg, fast, only, plan_name)
     env = _env(cfg, root, extra_env)
     results: List[Tuple[str, str, str, float]] = []
     streams = [] if quiet and log_path else [sys.stdout]
@@ -113,7 +136,7 @@ def run(cfg: Dict[str, Any], root: Path, fast: bool, only: Optional[List[str]], 
             name = gate["name"]
             missing = gate.get("skip_if_missing")
             if missing and shutil.which(missing) is None:
-                results.append((name, "SKIP", f"{missing} not installed", 0.0))
+                results.append(_skip(name, f"{missing} not installed", gate, 0.0))
                 continue
             gate_env = dict(env)
             for k, v in (gate.get("env") or {}).items():
@@ -127,6 +150,7 @@ def run(cfg: Dict[str, Any], root: Path, fast: bool, only: Optional[List[str]], 
                 )
                 deadline = start + float(gate.get("timeout", 1800))
                 assert proc.stdout is not None
+                captured: List[str] = []
                 lines: "queue.Queue[Optional[str]]" = queue.Queue()
                 reader = threading.Thread(target=_pump, args=(proc.stdout, lines), daemon=True)
                 reader.start()
@@ -145,6 +169,8 @@ def run(cfg: Dict[str, Any], root: Path, fast: bool, only: Optional[List[str]], 
                         eof = True
                     else:
                         tee.write(line)
+                        captured.append(line)
+                        del captured[:-40]
                 tee.flush()
                 rc = proc.wait()
                 reader.join(timeout=1)
@@ -158,7 +184,9 @@ def run(cfg: Dict[str, Any], root: Path, fast: bool, only: Optional[List[str]], 
             elif rc == 0:
                 results.append((name, "PASS", "", took))
             elif rc == 127 and gate.get("optional"):
-                results.append((name, "SKIP", "tool not installed (exit 127)", took))
+                results.append(_skip(name, "tool not installed (exit 127)", gate, took))
+            elif "skip_exit" in gate and rc == gate["skip_exit"]:
+                results.append(_skip(name, _skip_detail("".join(captured), rc), gate, took))
             else:
                 results.append((name, "FAIL", f"exit status {rc}", took))
         if fast:

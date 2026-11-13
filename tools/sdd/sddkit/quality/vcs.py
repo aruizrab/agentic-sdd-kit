@@ -1,0 +1,153 @@
+"""Git helpers for the quality checks: base ref, merge-base, changed and staged lines,
+tracked and staged files, staged blobs and the current feature. Read-only: nothing here
+writes the index, the working tree or git config."""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+from . import QualityError
+
+
+def git(root: Path, *args: str, check: bool = True, input_text: Optional[str] = None) -> str:
+    proc = subprocess.run(
+        ["git", "-c", "core.quotePath=false", "-C", str(root), *args],
+        input=input_text, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+    )
+    if check and proc.returncode != 0:
+        raise QualityError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
+    return proc.stdout
+
+
+def git_ok(root: Path, *args: str) -> bool:
+    return subprocess.run(["git", "-C", str(root), *args], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def toplevel(cwd: Path) -> Optional[Path]:
+    proc = subprocess.run(["git", "-C", str(cwd), "rev-parse", "--show-toplevel"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    return Path(proc.stdout.strip()) if proc.returncode == 0 else None
+
+
+def base_ref(root: Path, cfg: Dict[str, Any]) -> str:
+    """``SDD_BASE_REF``, else ``quality.base_ref``, else the local main branch, else origin/<main>."""
+    env = os.environ.get("SDD_BASE_REF")
+    if env:
+        return env
+    configured = (cfg.get("quality") or {}).get("base_ref")
+    if configured:
+        return configured
+    main = cfg["features"].get("main_branch") or "main"
+    if git_ok(root, "rev-parse", "--verify", "-q", f"refs/heads/{main}"):
+        return main
+    return f"origin/{main}"
+
+
+def merge_base(root: Path, cfg: Dict[str, Any]) -> str:
+    ref = base_ref(root, cfg)
+    proc = subprocess.run(["git", "-C", str(root), "merge-base", "HEAD", ref], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        raise QualityError(f"no merge-base between HEAD and {ref!r} (set SDD_BASE_REF or quality.base_ref; CI needs full history)")
+    return proc.stdout.strip()
+
+
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+
+
+def parse_diff(text: str) -> Dict[str, List[Tuple[int, str]]]:
+    """Added lines per new path from a ``git diff -U0`` output: {path: [(line, text)]}."""
+    out: Dict[str, List[Tuple[int, str]]] = {}
+    path: Optional[str] = None
+    line = 0
+    in_hunk = False
+    for raw in text.split("\n"):
+        if raw.startswith("diff --git "):
+            path, in_hunk = None, False
+            continue
+        if not in_hunk and raw.startswith("+++ "):
+            target = raw[4:]
+            path = None if target == "/dev/null" else (target[2:] if target.startswith("b/") else target)
+            if path is not None:
+                out.setdefault(path, [])
+            continue
+        m = _HUNK.match(raw)
+        if m:
+            in_hunk = True
+            line = int(m.group(1))
+            continue
+        if in_hunk and path is not None and raw.startswith("+"):
+            out[path].append((line, raw[1:]))
+            line += 1
+    return out
+
+
+def _diff(root: Path, *args: str) -> str:
+    return git(root, "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--diff-filter=ACMR", *args)
+
+
+def changed_lines(root: Path, base: str) -> Dict[str, Set[int]]:
+    """Lines added or changed in the working tree relative to ``base`` (tracked files)."""
+    return {p: {ln for ln, _ in rows} for p, rows in parse_diff(_diff(root, base)).items()}
+
+
+def added_lines(root: Path, base: str) -> Dict[str, List[Tuple[int, str]]]:
+    return parse_diff(_diff(root, base))
+
+
+def staged_added_lines(root: Path) -> Dict[str, List[Tuple[int, str]]]:
+    return parse_diff(_diff(root, "--cached"))
+
+
+def diff_text(root: Path, base: str) -> str:
+    return git(root, "diff", "--no-color", "--no-ext-diff", base)
+
+
+def tracked_files(root: Path) -> List[str]:
+    return sorted({p for p in git(root, "ls-files", "-z").split("\0") if p})
+
+
+def staged_files(root: Path) -> List[str]:
+    return [p for p in git(root, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR").split("\0") if p]
+
+
+def staged_content(root: Path, path: str) -> Optional[str]:
+    proc = subprocess.run(["git", "-C", str(root), "show", f":{path}"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return proc.stdout.decode("utf-8", errors="replace") if proc.returncode == 0 else None
+
+
+def show(root: Path, ref: str, path: str) -> Optional[str]:
+    proc = subprocess.run(["git", "-C", str(root), "show", f"{ref}:{path}"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return proc.stdout.decode("utf-8", errors="replace") if proc.returncode == 0 else None
+
+
+def git_path(root: Path, name: str) -> Path:
+    p = Path(git(root, "rev-parse", "--git-path", name).strip())
+    return p if p.is_absolute() else root / p
+
+
+def current_feature(root: Path, cfg: Dict[str, Any]) -> Optional[str]:
+    """``SDD_FEATURE``, else parsed from the branch ``<branch_prefix><id_prefix><digits>-<slug>``."""
+    env = os.environ.get("SDD_FEATURE")
+    if env:
+        return env
+    branch = git(root, "rev-parse", "--abbrev-ref", "HEAD", check=False).strip()
+    f = cfg["features"]
+    m = re.match(re.escape(f["branch_prefix"]) + "(" + re.escape(f["id_prefix"]) + r"\d+)(?:-|$)", branch)
+    return m.group(1) if m else None
+
+
+def feature_dir(root: Path, cfg: Dict[str, Any], fid: str) -> Optional[Path]:
+    digits = re.sub(r"\D", "", fid)
+    if not digits:
+        return None
+    base = root / cfg["paths"]["features_dir"]
+    if not base.is_dir():
+        return None
+    for d in sorted(base.iterdir()):
+        m = re.match(r"(\d+)-", d.name)
+        if d.is_dir() and m and int(m.group(1)) == int(digits):
+            return d
+    return None
