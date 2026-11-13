@@ -316,8 +316,12 @@ resolves to HEAD while the branch has its own commits, and `sdd check baseline` 
 controls: the full plan's `protected` gate (`sdd check protected`) fails a branch that
 changes `protected_paths`, the installed kit or `.gitleaks.toml`/`.gitleaksignore`, or adds
 a `binary`/`-diff` line to a `.gitattributes` (gitleaks and reviewers' diffs skip such files;
-`sdd check secrets` still scans them, with gitleaks too), until an owner approves (set `SDD_ALLOW_PROTECTED=1` in the job only on that approval, e.g. a label);
-and run that check from the target branch's copy of the kit, which the branch cannot edit:
+`sdd check secrets` still scans them, with gitleaks too), until an owner approves (set
+`SDD_ALLOW_PROTECTED=1` in the job only on that approval, e.g. a label; the name is fixed,
+`override_env` does not rename it). The check takes `protected_paths` and `paths.tools_dir`
+from the merge-base's `sdd.config.json` and always protects `sdd.config.json` and the kit
+directories of both configurations, so a branch cannot unprotect anything; and run that check from the target branch's copy of
+the kit, which the branch cannot edit:
 
 ```sh
 base=$(git merge-base HEAD "$SDD_BASE_REF")

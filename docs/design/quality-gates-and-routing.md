@@ -134,7 +134,7 @@ like the existing fmt/lint/test placeholders; `sdd doctor` warns.
 | `sdd check secrets [--json]` | the pre-commit secret scan on the added lines of `git diff <merge-base>` (working tree), plus `gitleaks git --log-opts=<merge-base>..HEAD --redact` when enabled and installed, and `gitleaks stdin` on every distinct blob the branch's commits add at a path git treats as binary | 0/1/2/3 |
 | `sdd check <name> [--json]` | one command check of `quality.checks` | 0/1/2/3 |
 | `sdd check baseline` | ratchet: working-tree baseline vs the merge-base baseline (file name from the merge-base's config) | 0/1/2 |
-| `sdd check protected` | fails for files changed since the merge-base that match `protected_paths`, `<tools_dir>/**`, `.gitleaks.toml` or `.gitleaksignore`, or that add a `binary`/`-diff` line to a `.gitattributes`, unless `override_env=1` (owner approval); CI runs it from the target branch's copy of the kit | 0/1/2 |
+| `sdd check protected` | fails for files changed since the merge-base that match `protected_paths` or `<tools_dir>/**` (both from the merge-base's config), `sdd.config.json`, the branch config's `<tools_dir>/**`, `.gitleaks.toml` or `.gitleaksignore`, or that add a `binary`/`-diff` line to a `.gitattributes`, unless `SDD_ALLOW_PROTECTED=1` (owner approval; a fixed name, not `override_env`); CI runs it from the target branch's copy of the kit | 0/1/2 |
 | `sdd baseline --init` | writes all current violations of size, arch and baseline-enabled checks; refuses when the file exists (1) or when a baseline-enabled check's tool is missing (3, nothing written) | 0/1/2/3 |
 | `sdd baseline --update` | removes stale entries and lowers recorded values; never adds an identity | 0/2 |
 | `sdd baseline --resolve` | in a merge with a conflicted baseline file: writes the intersection of the two sides (index stages 2 and 3) to the working tree, then applies `--update`; never stages | 0/2 |
@@ -1038,6 +1038,14 @@ Acceptance criteria:
   blob that cannot be read or scanned fails closed (`secret-unscanned`) unless `allow_globs`
   covers it. `sdd check protected` also fails a branch that adds a `binary` or `-diff` line to
   any `.gitattributes`: such a line hides content from reviewers' diffs as well. (review S1)
+- D-42 `sdd check protected` does not trust the branch's configuration. It reads
+  `protected_paths` and `paths.tools_dir` from the merge-base's `sdd.config.json` (as
+  `sdd check baseline` does for `baseline_file`), always protects `sdd.config.json` and the kit
+  directories of both configurations, and takes the owner's approval only from the fixed
+  `SDD_ALLOW_PROTECTED=1`, as does the `.gitleaksignore` rule of `sdd check secrets`.
+  `override_env` keeps naming the Claude Code hooks' override for a local human session;
+  otherwise a branch could unprotect the config, move `tools_dir`, or point the approval at a
+  variable that CI always sets to 1 (`SHLVL`). (review S5)
 
 ### Critic round 1: where each finding is addressed
 

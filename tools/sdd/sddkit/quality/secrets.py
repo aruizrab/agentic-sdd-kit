@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from . import QualityError, Result, Violation, ci_mode, scratch_dir, vcs
+from .protected import APPROVAL_ENV, approved
 from ..util import any_match
 
 BUILTIN_RULES: List[Tuple[str, str]] = [
@@ -90,11 +91,9 @@ def gitleaks_config(root: Path, cfg: Dict[str, Any], trusted_ref: str) -> Path:
 
 def gitleaks_ignore_problem(root: Path, cfg: Dict[str, Any], trusted_ref: str) -> List[Violation]:
     """gitleaks always honours ``.gitleaksignore`` in the scanned tree: one that differs from
-    ``trusted_ref`` fails (an owner approves with ``override_env=1``)."""
-    import os
-
-    env = cfg.get("override_env") or "SDD_ALLOW_PROTECTED"
-    if os.environ.get(env) == "1":
+    ``trusted_ref`` fails (an owner approves with ``SDD_ALLOW_PROTECTED=1``; a configuration
+    cannot rename that variable)."""
+    if approved():
         return []
     p = root / ".gitleaksignore"
     now = p.read_text(encoding="utf-8", errors="replace") if p.is_file() else None
@@ -103,7 +102,7 @@ def gitleaks_ignore_problem(root: Path, cfg: Dict[str, Any], trusted_ref: str) -
         return []
     return [Violation("secret-config", ".gitleaksignore", None, {"file": ".gitleaksignore", "message": "changed"}, 1,
                       f".gitleaksignore differs from {trusted_ref[:12]}: it would hide gitleaks findings; change it on the main "
-                      f"branch (owner approval: {env}=1)")]
+                      f"branch (owner approval: {APPROVAL_ENV}=1)")]
 
 
 def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[Union[str, bytes]] = None, in_message: bool = False,

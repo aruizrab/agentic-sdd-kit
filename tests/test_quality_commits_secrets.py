@@ -177,6 +177,26 @@ class CommitsAndSecretsCheckTest(unittest.TestCase):
         proc = run_cli(self.root, "check", "protected", "--json", env=e)
         return proc.returncode, sorted((v["kind"], v["file"]) for v in json.loads(proc.stdout)["violations"])
 
+    def test_protected_rules_come_from_the_merge_base(self) -> None:
+        """S5: a branch cannot unprotect the config, move the kit or rename the approval variable."""
+        cfg = json.loads((self.root / "sdd.config.json").read_text())
+        cfg["protected_paths"] = [e for e in cfg["protected_paths"] if e["glob"] != "sdd.config.json"]
+        cfg["paths"]["tools_dir"] = "elsewhere"
+        write_config(self.root, cfg)
+        write(self.root, "tools/sdd/sddkit/quality/secrets.py", "def check(*a):\n    pass\n")
+        write(self.root, "elsewhere/x.py", "x = 1\n")
+        self.repo.commit("chore: move the kit and unprotect the config")
+        self.assertEqual(self._protected(), (1, [("protected-changed", "elsewhere/x.py"), ("protected-changed", "sdd.config.json"),
+                                                 ("protected-changed", "tools/sdd/sddkit/quality/secrets.py")]))
+        self.repo.git("switch", "-q", "main")
+        self.repo.git("switch", "-q", "-c", "feat/F002-y")
+        cfg = json.loads((self.root / "sdd.config.json").read_text())
+        cfg["override_env"] = "SHLVL"
+        write_config(self.root, cfg)
+        self.repo.commit("chore: rename the approval variable")
+        self.assertEqual(self._protected(), (1, [("protected-changed", "sdd.config.json")]))
+        self.assertEqual(self._protected(SDD_ALLOW_PROTECTED="1"), (0, []))
+
     def test_gitattributes_hiding_content_is_protected(self) -> None:
         """S1: a branch that marks files `binary` or `-diff` needs the owner's approval."""
         write(self.root, ".gitattributes", "*.png filter=lfs diff=lfs merge=lfs -text\n")
