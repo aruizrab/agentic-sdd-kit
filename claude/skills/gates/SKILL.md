@@ -10,7 +10,7 @@ Run from the repository root (in a worktree, its root):
 
 ```sh
 python3 -I tools/sdd/sdd.py gates --fast $ARGUMENTS     # fast gates: before every commit
-python3 -I tools/sdd/sdd.py gates --detached            # full gates, in the background
+python3 -I tools/sdd/sdd.py gates --detached --feature F011 --tag manual-1   # full gates, in the background
 python3 -I tools/sdd/sdd.py gates --wait <log> --poll 60   # block until GATES_EXIT=<n>
 ```
 
@@ -24,9 +24,15 @@ python3 -I tools/sdd/sdd.py gates --wait <log> --poll 60   # block until GATES_E
   `grown`, stale). Baselined violations pass; new or grown ones fail; a fixed violation fails as
   stale until `sdd baseline --update` removes its entry. Nothing ever adds a baseline entry
   except `sdd baseline --init` at adoption.
-- Full runs can exceed a single shell call's time limit: always run them detached and poll.
-  A log without a `GATES_EXIT=<n>` line is an incomplete run; never report it as a result.
-- Logs are in `<paths.logs_dir>/`.
+- Full runs can exceed a single shell call's time limit: always run them detached and run
+  the `--wait` with the Bash tool in the background; do not end your turn before it returns.
+  `--detached --feature F --tag T` keys the log on HEAD (`<logs_dir>/gates/F-T-<sha7>[-dirty].log`):
+  a second call attaches to the live run or reuses the completed one (`--fresh` forces a new
+  run and keeps the old log as `<log>.<n>`).
+- `--wait` exits with the run's code; 124 = still running (wait again); 125 = incomplete (no
+  `GATES_EXIT=<n>` line and the runner is gone): re-run with `--fresh`; never report an
+  incomplete run as a result or as a gate failure.
+- Logs are in `<paths.logs_dir>/` (keyed runs in `<paths.logs_dir>/gates/`).
 
 Report per failing gate: the gate name, the first decisive error (file:line), and the likely
 cause; report a SKIP row with its install hint as an infrastructure gap. Fix root causes.

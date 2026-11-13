@@ -34,6 +34,11 @@ Workspace rules (shared-tree safety, hard):
 - For throwaway reproduction tests create a detached worktree:
   `git worktree add --detach <worktree_root>/exp-<unique> HEAD`, work there, and
   `git worktree remove --force` it before you finish. Never commit.
+- When the prompt says **READ VIA GIT** (the pipeline's `readViaGit` mode), create no
+  worktree: record the reviewed commit (`SHA=$(git rev-parse <branch>)`), read files with
+  `git show $SHA:<path>`, use `git diff <range>` and `git log`, and run only the existing
+  tests in the working copy without editing anything. A reproduction that needs new code is
+  written out in `reproduction` (the test you would add and the result you expect), not run.
 - Never edit protected paths.
 
 Report `refuted`, `confidence`, the decisive evidence (source quote, code lines, test
