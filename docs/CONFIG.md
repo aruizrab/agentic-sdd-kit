@@ -75,7 +75,7 @@ Workflow script takes as `args.config`.
 | `sources.kind`, `description`, `citation_format` | what the normative source is and how to cite it | `product-requirements` |
 | `sources.lookup_command` | `{args}`/`{doc}`/`{clause}` placeholders; wins over the built-in reader | `""` |
 | `sources.text_dir`, `sources.heading_regex` | built-in Markdown clause reader | `""`, `^#+\s+{clause}\b` |
-| `protected_paths` | `[{glob, reason}]`, always blocked for agents | constitution, `.claude/**`, `sdd.config.json` |
+| `protected_paths` | `[{glob, reason}]`, always blocked for agents; `sdd check protected` also fails a branch that changes them (and the installed kit, `.gitleaks.toml`, `.gitleaksignore`) until the owner approves with `override_env=1`. The kit's hooks and checkers (`<tools_dir>/githooks/**`, `<tools_dir>/sddkit/**`, `<tools_dir>/sdd.py`) are always denied to every subagent | constitution, `.claude/**`, `sdd.config.json` |
 | `append_only_paths` | `[{glob, allowed_roles, reason}]`: listed roles may only create new files | `[]` |
 | `role_write_scopes` | role -> globs it may write | `spec-author`, `architect-planner`, `product-owner`, `integrator` -> `specs/features/**` |
 | `role_denied_paths` | role -> globs it may not write | implementer -> test paths and the kit's hooks and checkers (`tools/sdd/githooks/**`, `tools/sdd/sddkit/**`, `tools/sdd/sdd.py`); test-author -> the same kit paths |

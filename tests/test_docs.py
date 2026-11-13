@@ -249,7 +249,7 @@ class HygieneScanTest(unittest.TestCase):
 WRAPPERS = {"npx", "cargo", "go", "npm", "pnpm", "yarn", "uv", "poetry", "coverage", "mutmut"}
 NOOP = {"test", "true", "false", "!"}
 COMMAND_KEYS = {"command", "run", "run_component", "red_check", "lookup_command", "after_union"}
-BUILTIN_CHECKS = {"size", "arch", "coverage", "mutation", "baseline", "commits", "secrets"}
+BUILTIN_CHECKS = {"size", "arch", "coverage", "mutation", "baseline", "commits", "secrets", "protected"}
 
 
 def commands(obj):

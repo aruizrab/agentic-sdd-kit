@@ -195,7 +195,7 @@ DEFAULTS: Dict[str, Any] = {
 
 # Sections whose keys are free-form (role names), and known keys that have no default.
 _FREE_FORM_SECTIONS = {"role_write_scopes", "role_denied_paths", "quality.languages", "build_cache.env"}
-_BUILTIN_CHECKS = ("size", "arch", "coverage", "mutation", "baseline", "commits", "secrets")
+_BUILTIN_CHECKS = ("size", "arch", "coverage", "mutation", "baseline", "commits", "secrets", "protected")
 _GATE_KEYS = {"name", "command", "timeout", "optional", "skip_if_missing", "env", "install", "skip_exit"}
 _EXTRA_KEYS = {"components": {"word"}, "pipeline": {"role_tiers"}}
 
@@ -437,6 +437,12 @@ def _validate_quality(q: Dict[str, Any]) -> List[str]:
         if not isinstance(h.get(key), (int, float)) or h.get(key) <= 0:
             problems.append(f"quality.hooks.{key} must be a positive number of seconds")
     return problems
+
+
+def kit_checker_globs(cfg: Dict[str, Any]) -> List[str]:
+    """The kit's git hooks and checkers, derived from ``paths.tools_dir``: no subagent may edit them."""
+    d = (cfg.get("paths") or {}).get("tools_dir", "tools/sdd").strip().strip("/") or "tools/sdd"
+    return [f"{d}/githooks/**", f"{d}/sddkit/**", f"{d}/sdd.py"]
 
 
 def public(cfg: Dict[str, Any]) -> Dict[str, Any]:

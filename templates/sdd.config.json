@@ -69,6 +69,7 @@
       {"name": "baseline", "command": "python3 -I tools/sdd/sdd.py check baseline", "timeout": 600, "skip_exit": 3},
       {"name": "commits", "command": "python3 -I tools/sdd/sdd.py check commits", "timeout": 600, "skip_exit": 3},
       {"name": "secrets", "command": "python3 -I tools/sdd/sdd.py check secrets", "timeout": 600, "skip_exit": 3},
+      {"name": "protected", "command": "python3 -I tools/sdd/sdd.py check protected", "timeout": 600, "skip_exit": 3},
       {"name": "coverage", "command": "python3 -I tools/sdd/sdd.py check coverage", "timeout": 3600, "skip_exit": 3},
       {"name": "mutation", "command": "python3 -I tools/sdd/sdd.py check mutation", "timeout": 3600, "skip_exit": 3}
     ],

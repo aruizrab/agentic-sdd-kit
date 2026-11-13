@@ -116,16 +116,18 @@ ships language-agnostic quality checks that every plan can run (`sdd check <name
 | command checks | `quality.checks`: docs/warnings, unused dependencies, flaky tests, ... as commands whose output a regex turns into violations |
 | `commits`, `secrets` | the git-hook rules re-checked over the whole branch (CI backstop) |
 | `baseline` | the baseline file may only shrink |
+| `protected` | a branch that changes `protected_paths`, the installed kit (`tools/sdd/**`) or gitleaks' configuration fails until the owner approves (`SDD_ALLOW_PROTECTED=1`) |
 
 **Plans.** `gates.fast` (pre-push, every task) holds fmt, lint, test, trace, size, arch,
-baseline, commits, secrets; `gates.full` (pipeline Gates stage, pull-request CI) adds coverage,
-mutation and the command checks; `gates.nightly` holds the full-repository runs. A check whose
+baseline, commits, secrets; `gates.full` (pipeline Gates stage, pull-request CI) adds protected,
+coverage, mutation and the command checks; `gates.nightly` holds the full-repository runs. A check whose
 tool is not installed shows as SKIP with the install command; with `CI=true` it fails.
 
 **Git hooks** (`sdd hooks install`): pre-commit scans the staged lines for secrets (built-in
 rules, plus gitleaks when installed), checks staged sizes and runs the configured fast steps;
 commit-msg enforces Conventional Commits, the required trailer lines and runs the tests of the
-touched components (skipped for `test(...)` commits, docs-only and merge commits); pre-push runs
+touched components (skipped for `test(...)` commits, docs-only and merge commits; after a
+red-by-design `test(...)` commit only a regression rejects); pre-push runs
 `sdd gates --fast`. Agents never bypass them; CI re-runs the same rules.
 
 **Baseline.** Violations that exist when the gates are adopted go into `sdd.baseline.json`

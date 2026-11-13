@@ -6,7 +6,9 @@ functions. Keeping the logic here makes it unit-testable and language-neutral.
 Hooks:
 
 * ``protect-paths`` (PreToolUse Edit|Write|MultiEdit|NotebookEdit): exit 2 for
-  ``protected_paths`` (always), ``append_only_paths`` (only listed roles may
+  ``protected_paths`` (always), the kit's hooks and checkers
+  (``<tools_dir>/{githooks/**,sddkit/**,sdd.py}``, every subagent, so role fallback to
+  ``general-purpose`` cannot lift it), ``append_only_paths`` (only listed roles may
   *create* new files), ``role_denied_paths`` and ``role_write_scopes``.
 * ``bash-guard`` (PreToolUse Bash): best-effort block of shell commands that
   would modify protected paths, and of destructive git commands in shared trees
@@ -150,6 +152,11 @@ def protection_reason(rel: str, agent: str, tool: str, exists: bool, cfg: Dict[s
             if agent in roles and tool == "Write" and not exists:
                 return None
             return entry.get("reason") or f"{entry['glob']} is append-only (only {', '.join(roles) or 'nobody'} may add NEW files)"
+    # Every subagent, whatever its agent_type: under the pipeline's role fallback all roles run
+    # as general-purpose, so a role-keyed denial alone would never fire. The main session (no
+    # agent_type) may still patch the kit (lesson 14).
+    if agent and any_match(rel, cfgmod.kit_checker_globs(cfg)):
+        return f"no subagent may edit the git hooks or checkers ({rel}); CI runs them (report the problem instead)"
     for role, globs in cfg["role_denied_paths"].items():
         if role == agent and any_match(rel, globs):
             return f"{agent} may not edit {rel} (owned by another role; report the problem instead of editing)"

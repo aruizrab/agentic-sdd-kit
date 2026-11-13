@@ -305,6 +305,23 @@ the pull request's target branch (for example `SDD_BASE_REF=origin/main` or
 resolves to HEAD while the branch has its own commits, and `sdd check baseline` takes
 `quality.baseline_file` from the merge-base's configuration (a renamed baseline fails as
 `baseline-moved`).
+**Do not let the branch grade itself.** The plan above runs the branch's own `tools/sdd` and
+`sdd.config.json`, so a branch that weakens a checker or drops a gate would pass. Two
+controls: the full plan's `protected` gate (`sdd check protected`) fails a branch that
+changes `protected_paths`, the installed kit or `.gitleaks.toml`/`.gitleaksignore` until an
+owner approves (set `SDD_ALLOW_PROTECTED=1` in the job only on that approval, e.g. a label);
+and run that check from the target branch's copy of the kit, which the branch cannot edit:
+
+```sh
+base=$(git merge-base HEAD "$SDD_BASE_REF")
+mkdir -p .sdd/base-tools && git archive "$base" tools/sdd | tar -x -C .sdd/base-tools
+CI=true python3 -I .sdd/base-tools/tools/sdd/sdd.py --root . check protected
+```
+
+Agents cannot edit the hooks and checkers locally either: `<tools_dir>/githooks/**`,
+`<tools_dir>/sddkit/**` and `<tools_dir>/sdd.py` are denied to every subagent (the pipeline's
+role fallback runs all roles as `general-purpose`, so a role-keyed denial would never fire).
+
 Schedule `CI=true python3 -I tools/sdd/sdd.py gates --plan nightly` for the full-repository
 coverage and mutation runs, long fuzzing and benchmarks.
 

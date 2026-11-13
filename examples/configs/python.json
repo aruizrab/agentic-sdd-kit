@@ -220,6 +220,12 @@
         "skip_exit": 3
       },
       {
+        "name": "protected",
+        "command": "python3 -I tools/sdd/sdd.py check protected",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
         "name": "coverage",
         "command": "python3 -I tools/sdd/sdd.py check coverage",
         "timeout": 3600,

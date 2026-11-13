@@ -13,7 +13,7 @@ from typing import List, Optional
 from . import config as cfgmod
 from . import gates, hooks, new_feature, progress, routing, source, specs, trace, union_merge
 from . import quality
-from .quality import arch, baseline, checks, commits, coverage, githooks, mutation, secrets, size, vcs
+from .quality import arch, baseline, checks, commits, coverage, githooks, mutation, protected, secrets, size, vcs
 
 VERSION = "0.1.0"
 
@@ -116,6 +116,8 @@ def cmd_check(args: argparse.Namespace) -> int:
             res = secrets.check(root, cfg)
         elif name == "baseline":
             res = baseline.ratchet(root, cfg)
+        elif name == "protected":
+            res = protected.check(root, cfg)
         else:
             res = checks.run(root, cfg, name)
     except quality.QualityError as exc:
@@ -384,7 +386,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--no-stdout", action="store_true", help=argparse.SUPPRESS)
     g.set_defaults(fn=cmd_gates)
 
-    ck = sub.add_parser("check", help="run one quality check: size, arch, coverage, mutation, commits, secrets, baseline or a quality.checks entry")
+    ck = sub.add_parser("check", help="run one quality check: size, arch, coverage, mutation, commits, secrets, baseline, protected or a quality.checks entry")
     ck.add_argument("name")
     ck.add_argument("--json", action="store_true")
     ck.add_argument("--staged", action="store_true", help="size: check the staged content of staged files only")

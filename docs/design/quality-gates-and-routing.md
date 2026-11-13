@@ -133,7 +133,8 @@ like the existing fmt/lint/test placeholders; `sdd doctor` warns.
 | `sdd check commits [--json]` | the commit-msg rules (format, message secret scan, and trailers on commits whose author or committer matches `quality.hooks.trailer_authors`; never decided by the checker's environment) on every non-merge commit in `<merge-base>..HEAD` | 0/1/2 |
 | `sdd check secrets [--json]` | the pre-commit secret scan on the added lines of `git diff <merge-base>` (working tree), plus `gitleaks git --log-opts=<merge-base>..HEAD --redact` when enabled and installed | 0/1/2/3 |
 | `sdd check <name> [--json]` | one command check of `quality.checks` | 0/1/2/3 |
-| `sdd check baseline` | ratchet: working-tree baseline vs the merge-base baseline | 0/1/2 |
+| `sdd check baseline` | ratchet: working-tree baseline vs the merge-base baseline (file name from the merge-base's config) | 0/1/2 |
+| `sdd check protected` | fails for files changed since the merge-base that match `protected_paths`, `<tools_dir>/**`, `.gitleaks.toml` or `.gitleaksignore`, unless `override_env=1` (owner approval); CI runs it from the target branch's copy of the kit | 0/1/2 |
 | `sdd baseline --init` | writes all current violations of size, arch and baseline-enabled checks; refuses when the file exists (1) or when a baseline-enabled check's tool is missing (3, nothing written) | 0/1/2/3 |
 | `sdd baseline --update` | removes stale entries and lowers recorded values; never adds an identity | 0/2 |
 | `sdd baseline --resolve` | in a merge with a conflicted baseline file: writes the intersection of the two sides (index stages 2 and 3) to the working tree, then applies `--update`; never stages | 0/2 |

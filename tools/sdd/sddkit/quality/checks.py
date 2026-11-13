@@ -72,7 +72,7 @@ def execute(root: Path, cfg: Dict[str, Any], chk: Dict[str, Any]) -> Result:
 def run(root: Path, cfg: Dict[str, Any], name: str) -> Result:
     chk = find(cfg, name)
     if chk is None:
-        raise QualityError(f"no check named {name!r} (built-in: size, arch, coverage, mutation, baseline, commits, secrets; "
+        raise QualityError(f"no check named {name!r} (built-in: size, arch, coverage, mutation, baseline, commits, secrets, protected; "
                            f"configured: {', '.join(c['name'] for c in cfg['quality']['checks']) or 'none'})")
     res = execute(root, cfg, chk)
     if res.status != "pass":

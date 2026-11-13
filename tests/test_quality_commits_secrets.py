@@ -58,6 +58,20 @@ class BypassGuardTest(unittest.TestCase):
                 self.assertEqual(edit(path, agent), 2, (agent, path))
         self.assertEqual(edit("tools/sdd/sddkit/quality/size.py", ""), 0)  # the orchestrator may (lesson 14)
         self.assertEqual(edit("src/app.py", "implementer"), 0)
+        # S5: under the pipeline's role fallback every role runs as general-purpose.
+        for path in ("tools/sdd/githooks/pre-commit", "tools/sdd/sddkit/quality/secrets.py", "tools/sdd/sdd.py"):
+            self.assertEqual(edit(path, "general-purpose"), 2, path)
+        for cmd in ("git rm -r tools/sdd/githooks", "rm -r tools/sdd/githooks", "git mv tools/sdd/githooks tools/sdd/old",
+                    "sed -i s/x/y/ tools/sdd/sddkit/quality/secrets.py"):
+            with redirect_stderr(io.StringIO()):
+                code = hooks.bash_guard({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(self.root), "agent_type": "general-purpose"})
+            self.assertEqual(code, 2, cmd)
+        # C13: the denial follows paths.tools_dir.
+        cfg = test_config()
+        cfg["paths"]["tools_dir"] = "scripts/sdd"
+        write_config(self.root, cfg)
+        self.assertEqual(edit("scripts/sdd/sddkit/quality/size.py", "implementer"), 2)
+        self.assertEqual(edit("scripts/sdd/githooks/pre-commit", "general-purpose"), 2)
 
     def test_settings_deny_list(self) -> None:
         deny = json.loads((KIT / "claude" / "settings.json").read_text())["permissions"]["deny"]
@@ -125,6 +139,26 @@ class CommitsAndSecretsCheckTest(unittest.TestCase):
         self.repo.commit("docs(F001): agent commit\n\nCo-Authored-By: Agent <agent@example.com>")
         proc = run_cli(self.root, "check", "commits", "--json", env=ci)
         self.assertEqual(len(json.loads(proc.stdout)["violations"]), 1)
+
+    def test_protected_changes_need_owner_approval(self) -> None:
+        """S5/S4/S7: CI flags a branch that changes the kit, the configuration or gitleaks' files."""
+        self.assertEqual(run_cli(self.root, "check", "protected").returncode, 0)
+        write(self.root, "src/app.py", "x = 1\n")
+        self.repo.commit("feat: ordinary change")
+        self.assertEqual(run_cli(self.root, "check", "protected").returncode, 0)
+        write(self.root, "tools/sdd/sddkit/quality/secrets.py", "def check(*a):\n    pass\n")
+        write(self.root, ".gitleaks.toml", "[allowlist]\npaths = ['.*']\n")
+        self.repo.commit("chore: weaken the checker")
+        cfg = json.loads((self.root / "sdd.config.json").read_text())
+        cfg["quality"]["secrets"]["allow_globs"] = ["**"]
+        write_config(self.root, cfg)  # uncommitted counts too
+        proc = run_cli(self.root, "check", "protected", "--json", env={"SDD_ALLOW_PROTECTED": ""})
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertEqual(sorted(v["file"] for v in json.loads(proc.stdout)["violations"]),
+                         [".gitleaks.toml", "sdd.config.json", "tools/sdd/sddkit/quality/secrets.py"])
+        proc = run_cli(self.root, "check", "protected", env={"SDD_ALLOW_PROTECTED": "1"})
+        self.assertEqual(proc.returncode, 0)
+        self.assertIn("owner-approved", proc.stdout)
 
     def test_diff_paths_with_spaces_and_quotes(self) -> None:
         """S11: names git prints with a trailing TAB or C-quoted are normalised."""

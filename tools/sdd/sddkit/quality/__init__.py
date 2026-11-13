@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 EXIT_PASS, EXIT_FAIL, EXIT_ERROR, EXIT_SKIP = 0, 1, 2, 3
 
-BUILTIN_CHECKS = ("size", "arch", "coverage", "mutation", "baseline", "commits", "secrets")
+BUILTIN_CHECKS = ("size", "arch", "coverage", "mutation", "baseline", "commits", "secrets", "protected")
 
 
 class QualityError(Exception):
