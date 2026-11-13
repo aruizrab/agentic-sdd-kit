@@ -171,6 +171,24 @@ class CommitsAndSecretsCheckTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertIn("owner-approved", proc.stdout)
 
+    def _protected(self, **env) -> tuple:
+        e = {"SDD_ALLOW_PROTECTED": "", "SHLVL": "1", "CI": "true", "SDD_BASE_REF": "main"}
+        e.update(env)
+        proc = run_cli(self.root, "check", "protected", "--json", env=e)
+        return proc.returncode, sorted((v["kind"], v["file"]) for v in json.loads(proc.stdout)["violations"])
+
+    def test_gitattributes_hiding_content_is_protected(self) -> None:
+        """S1: a branch that marks files `binary` or `-diff` needs the owner's approval."""
+        write(self.root, ".gitattributes", "*.png filter=lfs diff=lfs merge=lfs -text\n")
+        self.repo.commit("chore: lfs")
+        self.assertEqual(self._protected(), (0, []))
+        write(self.root, "sub/.gitattributes", "# -diff in a comment\n*.cfg binary\n")
+        write(self.root, ".gitattributes", "*.png filter=lfs diff=lfs merge=lfs -text\ncreds.txt -diff\n")
+        self.repo.commit("chore: hide")
+        self.assertEqual(self._protected(), (1, [("protected-gitattributes", ".gitattributes"),
+                                                 ("protected-gitattributes", "sub/.gitattributes")]))
+        self.assertEqual(self._protected(SDD_ALLOW_PROTECTED="1"), (0, []))
+
     def test_diff_paths_with_spaces_and_quotes(self) -> None:
         """S11: names git prints with a trailing TAB or C-quoted are normalised."""
         from sddkit.quality import vcs

@@ -140,6 +140,26 @@ def binary_paths(root: Path, *args: str) -> List[str]:
     return out
 
 
+EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+
+def binary_blobs(root: Path, base: str, head: str) -> List[Tuple[str, str]]:
+    """Every distinct blob a commit in ``base..head`` adds or changes at a path git treats as
+    binary, oldest first: [(path, ``<commit>:<path>``)]. Each commit is compared with its first
+    parent, so a secret added and removed again on the branch is still found."""
+    out: List[Tuple[str, str]] = []
+    seen: Set[str] = set()
+    for c in git(root, "rev-list", "--reverse", f"{base}..{head}").split():
+        parent = f"{c}^" if git_ok(root, "rev-parse", "--verify", "-q", f"{c}^") else EMPTY_TREE
+        for p in binary_paths(root, parent, c):
+            oid = git(root, "rev-parse", f"{c}:{p}", check=False).strip()
+            if oid and oid in seen:
+                continue
+            seen.add(oid)
+            out.append((p, f"{c}:{p}"))
+    return out
+
+
 def changed_lines(root: Path, base: str) -> Dict[str, Set[int]]:
     """Lines added or changed in the working tree relative to ``base`` (tracked files)."""
     return {p: {ln for ln, _ in rows} for p, rows in parse_diff(_diff(root, base)).items()}
@@ -168,6 +188,12 @@ def staged_files(root: Path) -> List[str]:
 def staged_content(root: Path, path: str) -> Optional[str]:
     proc = subprocess.run(["git", "-C", str(root), "show", f":{path}"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     return proc.stdout.decode("utf-8", errors="replace") if proc.returncode == 0 else None
+
+
+def blob(root: Path, spec: str) -> Optional[bytes]:
+    """The raw bytes of ``<rev>:<path>`` (``:<path>`` is the staged blob), or None."""
+    proc = subprocess.run(["git", "-C", str(root), "cat-file", "blob", spec], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    return proc.stdout if proc.returncode == 0 else None
 
 
 def show(root: Path, ref: str, path: str) -> Optional[str]:

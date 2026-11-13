@@ -170,12 +170,12 @@ def _pre_commit(hook: _Hook) -> int:
     cfg, root = hook.cfg, hook.root
     t0 = time.monotonic()
     found = secrets.scan_added(cfg, vcs.staged_added_lines(root))
-    for n in secrets.binary_notes(root, cfg, "--cached"):
-        hook.say(n)
     if secrets.gitleaks_available(cfg):
         head = "HEAD" if vcs.git_ok(root, "rev-parse", "--verify", "-q", "HEAD") else ""
         found += secrets.gitleaks_ignore_problem(root, cfg, head)
         found += secrets.gitleaks(root, cfg, ["git", "--pre-commit", "--staged", "."], trusted_ref=head)
+        # gitleaks git skips paths git treats as binary: scan their staged blobs too.
+        found += secrets.gitleaks_blobs(root, cfg, [(p, f":{p}") for p in vcs.binary_paths(root, "--cached")], head)
     elif cfg["quality"]["secrets"]["gitleaks"]:
         res = Result("secrets")
         secrets.gitleaks_note(cfg, res)

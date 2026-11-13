@@ -131,10 +131,10 @@ like the existing fmt/lint/test placeholders; `sdd doctor` warns.
 | `sdd check coverage [--no-run] [--json]` | runs `coverage.command` (not with `--no-run`), parses the report, checks changed lines | 0/1/2/3 |
 | `sdd check mutation [--no-run] [--json]` | writes the diff, runs `mutation.command` on changed hand-written files, fails on unjustified survivors | 0/1/2/3 |
 | `sdd check commits [--json]` | the commit-msg rules (format, message secret scan, and trailers on commits whose author or committer matches `quality.hooks.trailer_authors`; never decided by the checker's environment) on every non-merge commit in `<merge-base>..HEAD` | 0/1/2 |
-| `sdd check secrets [--json]` | the pre-commit secret scan on the added lines of `git diff <merge-base>` (working tree), plus `gitleaks git --log-opts=<merge-base>..HEAD --redact` when enabled and installed | 0/1/2/3 |
+| `sdd check secrets [--json]` | the pre-commit secret scan on the added lines of `git diff <merge-base>` (working tree), plus `gitleaks git --log-opts=<merge-base>..HEAD --redact` when enabled and installed, and `gitleaks stdin` on every distinct blob the branch's commits add at a path git treats as binary | 0/1/2/3 |
 | `sdd check <name> [--json]` | one command check of `quality.checks` | 0/1/2/3 |
 | `sdd check baseline` | ratchet: working-tree baseline vs the merge-base baseline (file name from the merge-base's config) | 0/1/2 |
-| `sdd check protected` | fails for files changed since the merge-base that match `protected_paths`, `<tools_dir>/**`, `.gitleaks.toml` or `.gitleaksignore`, unless `override_env=1` (owner approval); CI runs it from the target branch's copy of the kit | 0/1/2 |
+| `sdd check protected` | fails for files changed since the merge-base that match `protected_paths`, `<tools_dir>/**`, `.gitleaks.toml` or `.gitleaksignore`, or that add a `binary`/`-diff` line to a `.gitattributes`, unless `override_env=1` (owner approval); CI runs it from the target branch's copy of the kit | 0/1/2 |
 | `sdd baseline --init` | writes all current violations of size, arch and baseline-enabled checks; refuses when the file exists (1) or when a baseline-enabled check's tool is missing (3, nothing written) | 0/1/2/3 |
 | `sdd baseline --update` | removes stale entries and lowers recorded values; never adds an identity | 0/2 |
 | `sdd baseline --resolve` | in a merge with a conflicted baseline file: writes the intersection of the two sides (index stages 2 and 3) to the working tree, then applies `--update`; never stages | 0/2 |
@@ -310,7 +310,8 @@ active hooks directory calls `hooks run <name>`.
 - **pre-commit**: (1) secret scan of the staged added lines: built-in high-precision rules
   (private-key blocks, cloud access key ids, common token prefixes) plus
   `quality.secrets.patterns`, then `gitleaks git --pre-commit --staged --redact` when enabled
-  and installed (missing: SKIP note; CI mode: fail); `allow_globs` paths are skipped; output is
+  and installed (missing: SKIP note; CI mode: fail), and `gitleaks stdin` on the staged blob of
+  each path git treats as binary, which `gitleaks git` skips (unscannable: `secret-unscanned`); `allow_globs` paths are skipped; output is
   rule id and `file:line`, never the matched text. (2) `sdd check size --staged`.
   (3) `quality.hooks.pre_commit` steps whose `glob` matches a staged file, each with its timeout.
 - **commit-msg**: (1) secret scan of the message (built-in rules, `gitleaks stdin --redact`).
@@ -1030,6 +1031,13 @@ Acceptance criteria:
   Lesson 9: completed calls must keep their cache keys. (QGR-17)
 - D-40 Gate re-runs: the initial run plus up to 3 re-runs; the fourth incomplete result ends
   `blocked-infra`. This follows the brief's "re-run up to 3 times". (QGR-16)
+- D-41 Paths git treats as binary (a NUL byte, `binary` or `-diff` in `.gitattributes`) are
+  scanned by gitleaks too. `gitleaks git` reads git's patches and skips them, so the hook pipes
+  each staged blob, and `sdd check secrets` every distinct blob a branch commit adds (a secret
+  added and removed again stays in history), to `gitleaks stdin` with the trusted config. A
+  blob that cannot be read or scanned fails closed (`secret-unscanned`) unless `allow_globs`
+  covers it. `sdd check protected` also fails a branch that adds a `binary` or `-diff` line to
+  any `.gitattributes`: such a line hides content from reviewers' diffs as well. (review S1)
 
 ### Critic round 1: where each finding is addressed
 

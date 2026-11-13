@@ -2,8 +2,10 @@
 (>= 8.19) when it is installed and ``quality.secrets.gitleaks`` is true.
 
 The built-in rules read ``git diff --text --no-textconv``: a file git treats as binary (a NUL
-byte, ``-diff`` or ``binary`` in .gitattributes) is still scanned; gitleaks skips such files
-and a note names them.
+byte, ``-diff`` or ``binary`` in .gitattributes) is still scanned. ``gitleaks git`` skips such
+files, so each one's blob (the staged blob in the hook; every distinct blob the branch's commits
+add in ``sdd check secrets``) is piped to ``gitleaks stdin`` with the same trusted config; a blob
+that cannot be read or scanned fails as ``secret-unscanned`` unless ``allow_globs`` covers it.
 
 Findings are reported as rule id and location (``file:line`` or ``commit message``); the
 matched text is never printed or stored. gitleaks runs with ``--redact`` and its JSON report
@@ -21,7 +23,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from . import QualityError, Result, Violation, ci_mode, scratch_dir, vcs
 from ..util import any_match
@@ -104,17 +106,23 @@ def gitleaks_ignore_problem(root: Path, cfg: Dict[str, Any], trusted_ref: str) -
                       f"branch (owner approval: {env}=1)")]
 
 
-def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[str] = None, in_message: bool = False,
-             trusted_ref: str = "HEAD") -> List[Violation]:
-    """Run gitleaks with a redacted JSON report and the trusted configuration; return findings as violations."""
-    report = scratch_dir(root, cfg) / f"gitleaks-{abs(hash((tuple(args), stdin))) % 10**8}.json"
+def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[Union[str, bytes]] = None, in_message: bool = False,
+             trusted_ref: str = "HEAD", path: Optional[str] = None) -> List[Violation]:
+    """Run gitleaks with a redacted JSON report and the trusted configuration; return findings as violations.
+
+    ``path`` names the file whose content arrives on stdin (gitleaks reports no file for stdin)."""
+    report = scratch_dir(root, cfg) / f"gitleaks-{abs(hash((tuple(args), stdin, path))) % 10**8}.json"
     conf = gitleaks_config(root, cfg, trusted_ref)
     cmd = ["gitleaks", *args, "--config", str(conf), "--redact", "--no-banner", "--exit-code", "1", "--report-format", "json",
            "--report-path", str(report)]
+    data_in = stdin.encode("utf-8") if isinstance(stdin, str) else stdin
     try:
-        proc = subprocess.run(cmd, cwd=str(root), input=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=600)
+        try:
+            proc = subprocess.run(cmd, cwd=str(root), input=data_in, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise QualityError(f"gitleaks did not run: {exc}")
         if proc.returncode not in (0, 1):
-            raise QualityError(f"gitleaks exited {proc.returncode}: {proc.stderr.strip()[-400:]}")
+            raise QualityError(f"gitleaks exited {proc.returncode}: {proc.stderr.decode('utf-8', 'replace').strip()[-400:]}")
         try:
             data = json.loads(report.read_text(encoding="utf-8")) if report.is_file() else []
         except json.JSONDecodeError as exc:
@@ -129,21 +137,34 @@ def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[s
         if in_message:
             out.append(Violation("secret", "commit message", None, {"file": "commit message", "message": f"gitleaks:{rid}"}, 1, f"gitleaks rule {rid}"))
             continue
-        path = str(f.get("File", ""))
-        if any_match(path, allow):
+        file = path if path is not None else str(f.get("File", ""))
+        if any_match(file, allow):
             continue
         line = f.get("StartLine")
-        out.append(Violation("secret", path, int(line) if line else None, {"file": path, "message": f"gitleaks:{rid}"}, 1, f"gitleaks rule {rid}"))
+        out.append(Violation("secret", file, int(line) if line else None, {"file": file, "message": f"gitleaks:{rid}"}, 1, f"gitleaks rule {rid}"))
     return out
 
 
-def binary_notes(root: Path, cfg: Dict[str, Any], *diff_args: str) -> List[str]:
-    """Paths git treats as binary: the built-in rules scan their bytes as text, gitleaks skips them."""
-    if not gitleaks_available(cfg):
-        return []
+def gitleaks_blobs(root: Path, cfg: Dict[str, Any], blobs: List[Tuple[str, str]], trusted_ref: str) -> List[Violation]:
+    """Scan blobs that ``gitleaks git`` skips (paths git treats as binary: a NUL byte, ``-diff`` or
+    ``binary`` in .gitattributes) with ``gitleaks stdin``. ``blobs``: (path, ``<rev>:<path>`` or
+    ``:<path>``). A blob that cannot be read or scanned fails closed as ``secret-unscanned``."""
     allow = cfg["quality"]["secrets"]["allow_globs"]
-    return [f"{p}: binary to git (NUL byte or a .gitattributes `-diff`/`binary`): built-in rules scanned it as text, gitleaks did not"
-            for p in vcs.binary_paths(root, *diff_args) if not any_match(p, allow)]
+    out: List[Violation] = []
+    for path, spec in blobs:
+        if any_match(path, allow):
+            continue
+        data = vcs.blob(root, spec)
+        problem = "" if data is not None else f"cannot read {spec}"
+        if data is not None:
+            try:
+                out += gitleaks(root, cfg, ["stdin"], stdin=data, trusted_ref=trusted_ref, path=path)
+            except QualityError as exc:
+                problem = str(exc)
+        if problem:
+            out.append(Violation("secret-unscanned", path, None, {"file": path, "message": "unscanned"}, 1,
+                                 f"{path}: binary to git and gitleaks could not scan it ({problem}); secret scan incomplete"))
+    return out
 
 
 def gitleaks_note(cfg: Dict[str, Any], res: Result) -> None:
@@ -162,12 +183,12 @@ def check(root: Path, cfg: Dict[str, Any]) -> Result:
     res = Result("secrets")
     base = vcs.merge_base(root, cfg)
     res.violations += scan_added(cfg, vcs.added_lines(root, base))
-    res.notes += binary_notes(root, cfg, base)
     if gitleaks_available(cfg):
         res.violations += gitleaks_ignore_problem(root, cfg, base)
         head = vcs.git(root, "rev-parse", "HEAD").strip()
         if head != base:
-            res.violations += gitleaks(root, cfg, ["git", f"--log-opts={base}..HEAD", "."], trusted_ref=base)
+            res.violations += gitleaks(root, cfg, ["git", f"--log-opts={base}..{head}", "."], trusted_ref=base)
+            res.violations += gitleaks_blobs(root, cfg, vcs.binary_blobs(root, base, head), base)
     else:
         gitleaks_note(cfg, res)
     return res.finish()

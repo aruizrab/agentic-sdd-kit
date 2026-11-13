@@ -365,6 +365,38 @@ class SecretsHookTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, proc.stdout)
         self.assertIn("cfg.ini:1: gitleaks rule generic-api-key", proc.stdout)
 
+    def test_gitleaks_scans_binary_to_git_paths(self) -> None:
+        """S1: gitleaks git skips paths git treats as binary; their blobs are scanned with gitleaks stdin."""
+        if not shutil.which("gitleaks"):
+            self.skipTest("gitleaks not installed")
+        self.r.cfg["quality"]["secrets"]["gitleaks"] = True
+        self.r.set_cfg()
+        self.assertEqual(self.r.commit("chore: gitleaks on", "sdd.config.json").returncode, 0)
+        self.r.git("switch", "-q", "-c", "feat/F001-x")
+        generic = 'api_key = "' + 'u8jzPde0IgxL' + 'd6GncfBAepfJBd0Kh8oO"\n'  # only gitleaks' generic rule finds it
+        write(self.r.root, ".gitattributes", "*.cfg binary\nvectors/** binary\n")
+        write(self.r.root, "app.cfg", "x = 1\n" + generic)
+        proc = self.r.commit("chore: app config", ".gitattributes", "app.cfg")
+        self.assertNotEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("gitleaks:generic-api-key at app.cfg:2", proc.stderr)
+        self.assertNotIn("u8jzPde0", proc.stdout + proc.stderr)
+        write(self.r.root, "vectors/v.cfg", generic)  # allow_globs
+        self.r.git("rm", "-q", "--cached", "app.cfg")
+        self.assertEqual(self.r.commit("test: vector", ".gitattributes", "vectors/v.cfg").returncode, 0)
+        # The CI check: added on the branch without the hooks, then removed again.
+        self.r.git("add", "app.cfg")
+        self.r.git("commit", "-q", "--no-verify", "-m", "chore: app config")
+        self.r.git("rm", "-q", "app.cfg")
+        self.r.git("commit", "-q", "--no-verify", "-m", "chore: drop app config")
+        proc = self.r.sdd("check", "secrets", "--json", env={"CI": "true", "SDD_BASE_REF": "main"})
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertEqual([(v["kind"], v["file"], v["line"], v["message"]) for v in json.loads(proc.stdout)["violations"]],
+                         [("secret", "app.cfg", 2, "gitleaks rule generic-api-key")])
+        # A binary path gitleaks cannot scan fails closed.
+        from sddkit.quality import secrets
+        found = secrets.gitleaks_blobs(self.r.root, self.r.cfg, [("gone.cfg", "HEAD:gone.cfg"), ("vectors/gone.cfg", "HEAD:vectors/gone.cfg")], "HEAD")
+        self.assertEqual([(v.kind, v.file) for v in found], [("secret-unscanned", "gone.cfg")])
+
     def test_gitleaks_missing_skip_and_ci(self) -> None:
         path = no_gitleaks_path()
         if not shutil.which("git", path=path) or not shutil.which("python3", path=path):

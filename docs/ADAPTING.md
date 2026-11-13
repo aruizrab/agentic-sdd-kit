@@ -314,8 +314,9 @@ resolves to HEAD while the branch has its own commits, and `sdd check baseline` 
 **Do not let the branch grade itself.** The plan above runs the branch's own `tools/sdd` and
 `sdd.config.json`, so a branch that weakens a checker or drops a gate would pass. Two
 controls: the full plan's `protected` gate (`sdd check protected`) fails a branch that
-changes `protected_paths`, the installed kit or `.gitleaks.toml`/`.gitleaksignore` until an
-owner approves (set `SDD_ALLOW_PROTECTED=1` in the job only on that approval, e.g. a label);
+changes `protected_paths`, the installed kit or `.gitleaks.toml`/`.gitleaksignore`, or adds
+a `binary`/`-diff` line to a `.gitattributes` (gitleaks and reviewers' diffs skip such files;
+`sdd check secrets` still scans them, with gitleaks too), until an owner approves (set `SDD_ALLOW_PROTECTED=1` in the job only on that approval, e.g. a label);
 and run that check from the target branch's copy of the kit, which the branch cannot edit:
 
 ```sh
