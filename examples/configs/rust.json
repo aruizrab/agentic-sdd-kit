@@ -100,6 +100,36 @@
         "name": "trace",
         "command": "python3 -I tools/sdd/sdd.py trace --check",
         "timeout": 60
+      },
+      {
+        "name": "size",
+        "command": "python3 -I tools/sdd/sdd.py check size",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "arch",
+        "command": "python3 -I tools/sdd/sdd.py check arch",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "baseline",
+        "command": "python3 -I tools/sdd/sdd.py check baseline",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "commits",
+        "command": "python3 -I tools/sdd/sdd.py check commits",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "secrets",
+        "command": "python3 -I tools/sdd/sdd.py check secrets",
+        "timeout": 600,
+        "skip_exit": 3
       }
     ],
     "full": [
@@ -154,8 +184,273 @@
         "command": "scripts/bench-compare.sh benches/baseline.json 5",
         "timeout": 1800,
         "optional": true
+      },
+      {
+        "name": "size",
+        "command": "python3 -I tools/sdd/sdd.py check size",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "arch",
+        "command": "python3 -I tools/sdd/sdd.py check arch",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "baseline",
+        "command": "python3 -I tools/sdd/sdd.py check baseline",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "commits",
+        "command": "python3 -I tools/sdd/sdd.py check commits",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "secrets",
+        "command": "python3 -I tools/sdd/sdd.py check secrets",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "protected",
+        "command": "python3 -I tools/sdd/sdd.py check protected",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "coverage",
+        "command": "python3 -I tools/sdd/sdd.py check coverage",
+        "timeout": 3600,
+        "skip_exit": 3
+      },
+      {
+        "name": "mutation",
+        "command": "python3 -I tools/sdd/sdd.py check mutation",
+        "timeout": 3600,
+        "skip_exit": 3
+      },
+      {
+        "name": "docs",
+        "command": "python3 -I tools/sdd/sdd.py check docs",
+        "timeout": 1800,
+        "skip_exit": 3
+      },
+      {
+        "name": "unused-deps",
+        "command": "python3 -I tools/sdd/sdd.py check unused-deps",
+        "timeout": 1800,
+        "skip_exit": 3
+      },
+      {
+        "name": "flaky",
+        "command": "python3 -I tools/sdd/sdd.py check flaky",
+        "timeout": 1800,
+        "skip_exit": 3
+      }
+    ],
+    "nightly": [
+      {
+        "name": "coverage-full",
+        "command": "cargo llvm-cov --workspace --fail-under-lines 90",
+        "timeout": 7200,
+        "skip_if_missing": "cargo-llvm-cov"
+      },
+      {
+        "name": "mutation-full",
+        "command": "cargo mutants --workspace --no-shuffle",
+        "timeout": 21600,
+        "skip_if_missing": "cargo-mutants"
+      },
+      {
+        "name": "fuzz-long",
+        "command": "FUZZ_BUDGET_SECS=3600 scripts/fuzz-changed.sh",
+        "timeout": 7200,
+        "optional": true,
+        "skip_if_missing": "cargo-fuzz"
       }
     ]
+  },
+  "quality": {
+    "baseline_file": "sdd.baseline.json",
+    "base_ref": "",
+    "generated": [],
+    "test_globs": [],
+    "languages": {},
+    "size": {
+      "globs": [],
+      "exclude": [
+        "**/target/**"
+      ],
+      "function_warn": 0,
+      "function_fail": 80,
+      "file_warn": 600,
+      "file_fail": 1000
+    },
+    "arch": {
+      "modules": [
+        {
+          "name": "domain",
+          "paths": [
+            "crates/domain/**"
+          ],
+          "imports": [
+            "^domain::"
+          ],
+          "may_depend_on": [],
+          "forbid": [
+            {
+              "pattern": "\\bSystemTime::now\\b",
+              "reason": "domain logic takes time as input"
+            },
+            {
+              "pattern": "\\btokio::",
+              "reason": "the domain crate is runtime-free"
+            }
+          ]
+        },
+        {
+          "name": "infra",
+          "paths": [
+            "crates/infra/**"
+          ],
+          "imports": [
+            "^infra::"
+          ],
+          "may_depend_on": [
+            "domain"
+          ],
+          "forbid": []
+        }
+      ],
+      "exclude": [
+        "tests/**",
+        "**/tests/**",
+        "test/**",
+        "**/test/**"
+      ]
+    },
+    "coverage": {
+      "command": "cargo llvm-cov --workspace --lcov --output-path lcov.info",
+      "report": "lcov.info",
+      "format": "lcov",
+      "globs": [],
+      "unmeasured_ok": [],
+      "ok_exits": [
+        0
+      ],
+      "requires": [
+        "cargo-llvm-cov"
+      ],
+      "install": "cargo install cargo-llvm-cov",
+      "timeout": 3600
+    },
+    "mutation": {
+      "command": "cargo mutants --workspace --in-diff {diff_file} --no-shuffle",
+      "report": "mutants.out/missed.txt",
+      "format": "regex",
+      "survivor_regex": "(?m)^(?P<file>[^:\\n]+):(?P<line>\\d+):\\d+: (?P<mutation>.+)$",
+      "ok_exits": [
+        0,
+        2,
+        3
+      ],
+      "globs": [],
+      "requires": [
+        "cargo-mutants"
+      ],
+      "install": "cargo install cargo-mutants",
+      "timeout": 3600
+    },
+    "checks": [
+      {
+        "name": "docs",
+        "command": "cargo doc --no-deps --workspace",
+        "violation_regex": "(?m)^warning: (?P<message>.+)\\n\\s*--> (?P<file>[^:\\n]+):(?P<line>\\d+)",
+        "baseline": true,
+        "requires": [
+          "cargo"
+        ],
+        "install": "rustup toolchain install stable",
+        "timeout": 1800,
+        "ok_exits": [
+          0
+        ]
+      },
+      {
+        "name": "unused-deps",
+        "command": "cargo machete --skip-target-dir",
+        "violation_regex": "(?m)^\\S+ -- (?P<file>\\S+?):$|^\\t(?P<message>\\S+)$",
+        "baseline": true,
+        "requires": [
+          "cargo-machete"
+        ],
+        "install": "cargo install cargo-machete",
+        "timeout": 600,
+        "ok_exits": [
+          0,
+          1
+        ]
+      },
+      {
+        "name": "flaky",
+        "command": "cargo nextest run --workspace --retries 2 --no-tests=pass",
+        "violation_regex": "(?m)^\\s*FLAKY \\d+/\\d+ \\[\\s*[\\d.]+s\\] (?P<file>\\S+) (?P<message>\\S+)\\s*$",
+        "baseline": false,
+        "requires": [
+          "cargo-nextest"
+        ],
+        "install": "cargo install cargo-nextest",
+        "timeout": 3600,
+        "ok_exits": [
+          0,
+          100
+        ]
+      }
+    ],
+    "secrets": {
+      "gitleaks": true,
+      "patterns": [],
+      "allow_globs": []
+    },
+    "hooks": {
+      "types": [
+        "build",
+        "chore",
+        "ci",
+        "docs",
+        "feat",
+        "fix",
+        "perf",
+        "refactor",
+        "revert",
+        "style",
+        "test"
+      ],
+      "scope_regex": "",
+      "required_trailers": [
+        "^Co-Authored-By: .+ <.+>$"
+      ],
+      "required_trailers_env": "CLAUDECODE",
+      "trailer_authors": "",
+      "pre_commit": [
+        {
+          "name": "rustfmt",
+          "command": "rustfmt --edition 2024 --check {files}",
+          "glob": "*.rs",
+          "timeout": 60
+        }
+      ],
+      "commit_tests": true,
+      "skip_tests_for_types": [
+        "test"
+      ],
+      "test_timeout": 300,
+      "budget_seconds": 60
+    }
   },
   "tests": {
     "run": "cargo nextest run --workspace --no-tests=pass || cargo test --workspace",
@@ -215,7 +510,15 @@
   "role_denied_paths": {
     "implementer": [
       "crates/*/tests/**",
-      "tests/**"
+      "tests/**",
+      "tools/sdd/githooks/**",
+      "tools/sdd/sddkit/**",
+      "tools/sdd/sdd.py"
+    ],
+    "test-author": [
+      "tools/sdd/githooks/**",
+      "tools/sdd/sddkit/**",
+      "tools/sdd/sdd.py"
     ]
   },
   "formatters": [
@@ -227,6 +530,9 @@
       ]
     }
   ],
+  "build_cache": {
+    "env": {}
+  },
   "stop_check": {
     "command": "cargo check -q --workspace --all-targets --message-format short",
     "changed_globs": [
@@ -240,6 +546,7 @@
   },
   "models": {
     "mechanical": "",
+    "gate": "",
     "mid": "",
     "strong": "",
     "top": ""
@@ -251,6 +558,8 @@
     "skeptics": 2,
     "max_build_jobs": 4,
     "gate_poll_seconds": 120,
+    "routing": "tiers",
+    "models_table": "sdd.models.json",
     "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, parsing of untrusted input"
   },
   "merge": {

@@ -1,0 +1,9 @@
+{"type": "launched"}
+{"type": "started", "key": "v2:a1", "agentId": "a1", "label": "setup", "phase": "x"}
+{"type": "result", "key": "v2:a1", "agentId": "a1", "result": null}
+{"type": "started", "key": "v2:a2", "agentId": "a2", "label": "architect-planner F011", "phase": "x"}
+{"type": "result", "key": "v2:a2", "agentId": "a2", "result": null}
+{"type": "started", "key": "v2:a3", "agentId": "a3", "label": "architect-planner F011 (fallback)", "phase": "x"}
+{"type": "result", "key": "v2:a3", "agentId": "a3", "result": null}
+{"type": "started", "key": "v2:a4", "agentId": "a4", "label": "architect-planner F011 (retry)", "phase": "x"}
+{"type": "result", "key": "v2:a4", "agentId": "a4", "result": null}

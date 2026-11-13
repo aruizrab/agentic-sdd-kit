@@ -1,0 +1,61 @@
+{
+ "result": {
+  "feature": "F011",
+  "status": "stopped",
+  "runKey": "k2",
+  "telemetry": [
+   {
+    "call": "gates post-implement #1#1",
+    "attempt": 1,
+    "label": "gates post-implement #1",
+    "role": "gate",
+    "level": 2,
+    "model": "mid-b",
+    "effort": "medium",
+    "outcome": "ok",
+    "fallback_of": null,
+    "mode": "formula"
+   },
+   {
+    "call": "gates post-implement #1#2",
+    "attempt": 1,
+    "label": "gates post-implement #1",
+    "role": "gate",
+    "level": 2,
+    "model": "mid-b",
+    "effort": "medium",
+    "outcome": "ok",
+    "fallback_of": null,
+    "mode": "formula"
+   },
+   {
+    "call": "unknown-label#1",
+    "attempt": 1,
+    "label": "unknown-label",
+    "role": "gate",
+    "level": 2,
+    "model": "mid-b",
+    "effort": "medium",
+    "outcome": "ok",
+    "fallback_of": null,
+    "mode": "formula"
+   }
+  ]
+ },
+ "workflowProgress": [
+  {
+   "type": "workflow_agent",
+   "index": 7,
+   "label": "gates post-implement #1",
+   "startedAt": 1767225700000,
+   "durationMs": 7000
+  },
+  {
+   "type": "workflow_agent",
+   "index": 3,
+   "label": "gates post-implement #1",
+   "startedAt": 1767225600000,
+   "durationMs": 3000
+  }
+ ]
+}

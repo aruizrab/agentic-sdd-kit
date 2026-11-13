@@ -6,13 +6,20 @@ functions. Keeping the logic here makes it unit-testable and language-neutral.
 Hooks:
 
 * ``protect-paths`` (PreToolUse Edit|Write|MultiEdit|NotebookEdit): exit 2 for
-  ``protected_paths`` (always), ``append_only_paths`` (only listed roles may
+  ``protected_paths`` (always), the kit's hooks and checkers
+  (``<tools_dir>/{githooks/**,sddkit/**,sdd.py}``, every subagent, so role fallback to
+  ``general-purpose`` cannot lift it), ``append_only_paths`` (only listed roles may
   *create* new files), ``role_denied_paths`` and ``role_write_scopes``.
 * ``bash-guard`` (PreToolUse Bash): best-effort block of shell commands that
   would modify protected paths, and of destructive git commands in shared trees
   (``git checkout -- <path>``, ``git restore``, ``git clean``, ``git reset --hard``,
   ``git stash``): lesson 7, a read-only verifier once wiped another agent's
-  edits with ``git checkout -- . && git clean -fd``.
+  edits with ``git checkout -- . && git clean -fd``. Also blocks bypassing the git
+  hooks (``git_hook_bypass`` parses the git argv): ``--no-verify`` and its abbreviations on
+  commit/push/merge, ``-n`` in a commit short-option cluster (``-nm``), setting or unsetting
+  ``core.hooksPath`` (``git config``, ``git -c``/``--config-env`` after any global options,
+  ``GIT_CONFIG_*`` variables), removing git's ``core`` config section; reading it stays allowed.
+  Best effort: CI re-runs ``sdd check commits`` and ``sdd check secrets``.
 * ``format`` (PostToolUse Edit|Write): runs the ``formatters`` entry whose glob
   matches the edited file; exit 2 with the output when it fails (a syntax
   error from the last edit).
@@ -48,8 +55,47 @@ DESTRUCTIVE_GIT = [
     (re.compile(r"^git(\s+-C\s+\S+)?\s+reset\s+(?:.*\s)?--(?:hard|merge)(\s|$)"), "git reset --hard/--merge rewrites the shared working tree"),
     (re.compile(r"^git(\s+-C\s+\S+)?\s+stash(?!\s+list)(\s|$)"), "git stash removes other agents' in-progress edits from the tree"),
     (re.compile(r"^git(\s+-C\s+\S+)?\s+push\s+(?:.*\s)?(?:-f|--force|--force-with-lease)(\s|$)"), "force-push is forbidden"),
-    (re.compile(r"^git(\s+-C\s+\S+)?\s+commit\s+(?:.*\s)?(?:-n|--no-verify)(\s|$)"), "--no-verify skips the gates"),
 ]
+
+_CONFIG_READ_FLAGS = {"--get", "--get-all", "--get-regexp", "-l", "--list", "--show-origin", "--show-scope", "get", "list"}
+
+
+def hooks_path_change(cmd: str) -> Optional[str]:
+    """Why a command would set or unset core.hooksPath (git config or git -c), else None."""
+    for seg in _segments(cmd):
+        try:
+            words = shlex.split(seg)
+        except ValueError:
+            words = seg.split()
+        if not words or words[0].rsplit("/", 1)[-1] != "git":
+            continue
+        i = 1
+        while i < len(words) and words[i].startswith("-"):
+            if words[i] == "-c" and i + 1 < len(words):
+                if words[i + 1].lower().startswith("core.hookspath="):
+                    return "git -c core.hooksPath=... switches the git hooks off"
+                i += 2
+                continue
+            if words[i] == "-C" and i + 1 < len(words):
+                i += 2
+                continue
+            if words[i].lower().startswith("-ccore.hookspath="):
+                return "git -c core.hooksPath=... switches the git hooks off"
+            i += 1
+        if i >= len(words) or words[i] != "config":
+            continue
+        args = words[i + 1:]
+        lowered = [a.lower() for a in args]
+        if "core.hookspath" not in lowered:
+            continue
+        if any(a in ("--unset", "--unset-all", "unset") for a in lowered):
+            return "unsetting core.hooksPath switches the SDD git hooks off"
+        if any(a in _CONFIG_READ_FLAGS for a in lowered):
+            continue
+        k = lowered.index("core.hookspath")
+        if k + 1 < len(args):
+            return "changing core.hooksPath switches the SDD git hooks off (use `sdd hooks install`)"
+    return None
 
 
 def _read_input() -> Dict[str, Any]:
@@ -106,6 +152,11 @@ def protection_reason(rel: str, agent: str, tool: str, exists: bool, cfg: Dict[s
             if agent in roles and tool == "Write" and not exists:
                 return None
             return entry.get("reason") or f"{entry['glob']} is append-only (only {', '.join(roles) or 'nobody'} may add NEW files)"
+    # Every subagent, whatever its agent_type: under the pipeline's role fallback all roles run
+    # as general-purpose, so a role-keyed denial alone would never fire. The main session (no
+    # agent_type) may still patch the kit (lesson 14).
+    if agent and any_match(rel, cfgmod.kit_checker_globs(cfg)):
+        return f"no subagent may edit the git hooks or checkers ({rel}); CI runs them (report the problem instead)"
     for role, globs in cfg["role_denied_paths"].items():
         if role == agent and any_match(rel, globs):
             return f"{agent} may not edit {rel} (owned by another role; report the problem instead of editing)"
@@ -199,13 +250,93 @@ def command_targets(cmd: str) -> List[str]:
     return [t.strip("\"'") for t in targets if t and not t.startswith("-") and not t.startswith("/dev/")]
 
 
+_GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--exec-path", "--super-prefix"}
+_COMMIT_VALUE_SHORT = set("mFcCt")
+_COMMIT_VALUE_LONG = {"--message", "--file", "--author", "--date", "--reuse-message", "--reedit-message", "--fixup", "--squash",
+                      "--template", "--cleanup", "--trailer", "--pathspec-from-file", "--gpg-sign"}
+_GIT_CONFIG_ENV = re.compile(r"^(GIT_CONFIG_PARAMETERS|GIT_CONFIG_COUNT|GIT_CONFIG_KEY_\d+|GIT_CONFIG_VALUE_\d+)=")
+
+
+def _is_no_verify(arg: str) -> bool:
+    """``--no-verify`` or an abbreviation git accepts (``--no-v``, ``--no-ver``, ...)."""
+    name = arg.split("=", 1)[0]
+    return len(name) >= len("--no-v") and "--no-verify".startswith(name)
+
+
+def git_hook_bypass(cmd: str) -> Optional[str]:
+    """Why a command would skip or switch off the git hooks, else None (best effort).
+
+    Parses each segment's argv: leading ``VAR=value`` assignments and wrappers (``env``,
+    ``command``, ...), git's global options in both ``--opt=value`` and ``--opt value`` forms,
+    ``-c``/``--config-env`` and ``GIT_CONFIG_*`` assignments that set core.hooksPath,
+    ``--no-verify`` and its abbreviations on commit/push/merge, ``-n`` in a commit short-option
+    cluster (``-nm``, ``-anm``), and ``git config`` removing or renaming the ``core`` section.
+    """
+    for seg in _segments(cmd):
+        try:
+            words = shlex.split(seg)
+        except ValueError:
+            words = seg.split()
+        i = 0
+        while i < len(words):
+            w = words[i]
+            if _GIT_CONFIG_ENV.match(w) and "hookspath" in seg.lower():
+                return "GIT_CONFIG_* environment variables that set core.hooksPath switch the git hooks off"
+            if ("=" in w and not w.startswith("-")) or w in WRAPPERS or (i > 0 and words[i - 1] in WRAPPERS and w.startswith("-")):
+                i += 1
+                continue
+            break
+        if i >= len(words) or words[i].rsplit("/", 1)[-1] != "git":
+            continue
+        i += 1
+        while i < len(words) and words[i].startswith("-"):
+            opt, _, inline = words[i].partition("=")
+            if opt in ("-c", "--config-env") or words[i].startswith("-c"):
+                value = inline if inline else (words[i][2:] if opt.startswith("-c") and len(opt) > 2 else (words[i + 1] if i + 1 < len(words) else ""))
+                if "hookspath" in value.lower():
+                    return "git -c/--config-env core.hooksPath=... switches the git hooks off"
+            if opt in _GIT_VALUE_OPTS and not inline and not (opt.startswith("-c") and len(opt) > 2):
+                i += 2
+            else:
+                i += 1
+        if i >= len(words):
+            continue
+        sub, args = words[i], words[i + 1:]
+        if sub in ("commit", "push", "merge", "cherry-pick", "revert", "am", "rebase"):
+            j = 0
+            while j < len(args):
+                a = args[j]
+                if a == "--":
+                    break
+                if a.startswith("--"):
+                    if _is_no_verify(a):
+                        return f"git {sub} --no-verify skips the git hooks"
+                    if sub == "commit" and a.split("=", 1)[0] in _COMMIT_VALUE_LONG and "=" not in a:
+                        j += 1
+                elif sub == "commit" and a.startswith("-") and len(a) > 1:
+                    for ch in a[1:]:
+                        if ch == "n":
+                            return "git commit -n skips the git hooks"
+                        if ch in _COMMIT_VALUE_SHORT:
+                            if a.endswith(ch):
+                                j += 1  # the value is the next word
+                            break
+                j += 1
+        if sub == "config":
+            low = [a.lower() for a in args]
+            for k, a in enumerate(low):
+                if a in ("--remove-section", "--rename-section", "remove-section", "rename-section") and k + 1 < len(low) and low[k + 1] == "core":
+                    return "removing or renaming git's core section unsets core.hooksPath"
+    return None
+
+
 def destructive_git(cmd: str) -> Optional[str]:
     for seg in _segments(cmd):
         s = seg.strip()
         for rx, why in DESTRUCTIVE_GIT:
             if rx.match(s):
                 return why
-    return None
+    return hooks_path_change(cmd) or git_hook_bypass(cmd)
 
 
 def bash_guard(data: Optional[Dict[str, Any]] = None) -> int:

@@ -1,0 +1,11 @@
+{"version": 1,
+ "params": {"p0": 0.3, "s": 4, "retry_mult": 2},
+ "floors": {"1": 0, "2": 40, "3": 47, "4": 53, "5": 56, "6": 61},
+ "pools": {"standard": {"capped": false}, "capped": {"capped": true, "scarcity": 3}},
+ "points": [
+  {"model": "small-a", "effort": "", "intelligence": 35, "cost_per_task": 0.05, "tokens_per_task": 40000, "pool": "standard"},
+  {"model": "mid-b", "effort": "medium", "intelligence": 50, "cost_per_task": 0.4, "tokens_per_task": 80000, "pool": "standard"},
+  {"model": "slow-d", "effort": "high", "intelligence": 48, "cost_per_task": 0.9, "tokens_per_task": 120000, "pool": "standard"},
+  {"model": "cap-c", "effort": "medium", "intelligence": 60, "cost_per_task": 0.8, "tokens_per_task": 90000, "pool": "capped"},
+  {"model": "top-e", "effort": "medium", "intelligence": 63, "cost_per_task": 1.5, "tokens_per_task": 100000, "pool": "standard"}
+ ]}

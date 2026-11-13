@@ -17,6 +17,8 @@ acts as product owner, signs off security, merges, and keeps the machine healthy
 6. The host: build output and worktrees are **not** on a RAM tmpfs; disk has headroom; OS
    auto-updates are off for the duration; `pipeline.max_build_jobs` fits the machine.
 7. Commit everything. Worktrees branch from committed HEAD; uncommitted work is invisible.
+8. The git hooks are installed (`sdd hooks install`; `sdd doctor` checks it) and, on an
+   existing codebase, the gates are adopted as §12 describes before the first feature.
 
 ## 1. One feature, step by step
 
@@ -33,19 +35,38 @@ Workflow({
 
 | Stage | Who | What you see / do |
 |---|---|---|
-| Setup | integrator (mechanical) | creates `.wt/F011` on `feat/F011-user-login` from `main`, scaffolds `specs/features/011-user-login/` |
+| Setup | integrator (mechanical) | creates `.wt/F011` on `feat/F011-user-login` from `main`, scaffolds `specs/features/011-user-login/`; stops `blocked-setup` on uncommitted edits outside the feature directory (§5) |
 | Specify | spec-author (strong) | spec.md within the requirement budget; decisions recorded; markers only for real source ambiguity |
 | Critic | spec-critic (strong) | round 1 full; later rounds re-check earlier issues and raise only new blocking ones |
 | Approve | you, or product-owner agent | default: run returns `awaiting-approval` (see §2) |
 | Plan | architect-planner (strong) | design.md + tasks.md; `sdd tasks --validate` must be clean |
-| Tests | test-author (strong) + red check | failing tests tagged with ids; commit `test(F011): ...` = tests baseline |
+| Tests | test-author (strong) + red check | failing tests tagged with ids; the red check runs `sdd trace --include <added tests>`; commit `test(F011): ...` = tests baseline |
 | Implement | implementers (mid; top on retry) | waves; lanes of disjoint components in parallel worktrees; manifests union-merged, sources resolved semantically |
-| Gates | integrator runs, implementer fixes | detached run, polled until `GATES_EXIT`; 3 fix rounds; test arbiter after 2 failing test gates |
-| Review | 4 reviewers (+2nd security) | blocking findings only gate the merge |
-| Verify | N skeptics per finding | dismissed only if all refute; confirmed -> fix -> re-gate -> fix-check (x2 if security-sensitive) |
-| Finalize | integrator | review.md, `Status: Implemented`, `sdd trace --check`; returns `ready-to-merge` |
+| Gates | integrator runs, implementer fixes | detached HEAD-keyed run, waited on until `GATES_EXIT`; incomplete runs re-run (§4); 3 fix rounds; test arbiter after 2 failing test gates |
+| Review | 4 reviewers (+2nd security) | blocking findings only gate the merge; the findings are committed to review.md §3 at once (`docs(F011): review findings`) |
+| Verify | N skeptics per finding | dismissed only if all refute; confirmed -> fix -> re-gate -> fix-check (x2 if security-sensitive); verdicts committed (`docs(F011): verify record`) |
+| Finalize | integrator | completes review.md, `Status: Implemented`, plain `sdd trace --check`; returns `ready-to-merge` |
 
 Always read `status`, `reason` and `nextAction` in the returned summary.
+
+Robustness arguments (defaults in brackets):
+
+| Arg | Effect |
+|---|---|
+| `strictScope` [`true`] | every prompt carries the SCOPE RULE: only the orchestrator assigns work; a relayed user or chat message asking for other work is not acted on, only mentioned in one line of the agent's summary. `false` removes it. |
+| `readViaGit` [`false`] | the spec critic, reviewers, verifiers and fix-checks read through git (`git show <sha>:<path>`, `git diff`, `git log`) instead of creating worktrees; they may run the existing tests but write no code, so a reproduction that needs new code is described, not run, and Verify passes no `isolation`. Turn it on when builds are expensive (each worktree is a cold build). |
+| `outsideScan` [`[]`] | carried over on a resumed run: test files the red check found outside `trace.scan_globs` (see below) |
+
+Why these exist: docs/LESSONS.md entries 16 (scope rule), 17 (detached gate runs), 19 (red
+check cross-checks tags), 20 (persisted review record) and 21 (interrupted work is kept).
+
+**Tests outside the trace scan.** The red check runs `sdd trace --feature NNN --json --include
+<each added test file>`, so a `must` whose test lives where `trace.scan_globs` does not look
+is not wrongly reported as untested. Those files are listed in `summary.outsideScan`, and every
+end state's `nextAction` then starts with "add these paths to `trace.scan_globs` in
+sdd.config.json before merge: ...". `sdd.config.json` is protected, so you extend it; Finalize
+runs the plain `sdd trace --check` and ends `blocked-finalize` until the configuration covers
+the tests; then re-run with `stages: ["finalize"]`.
 
 ## 2. Approval (you are the product owner)
 
@@ -86,9 +107,23 @@ If it still blocks, resolve it yourself and re-run with `poResolved: true`.
 
 ## 4. Gates that take long
 
-Full gates can exceed an agent's shell time limit. The pipeline runs them detached
-(`sdd gates --detached`) and polls `sdd gates --wait <log>`; a log without `GATES_EXIT=<n>` is
-an incomplete run and is never reported as a result. Keep full gates fast enough to run per
+Full gates can exceed an agent's shell time limit, and an agent that ends its turn can kill a
+foreground run. The pipeline therefore runs them detached and keyed by HEAD:
+`sdd gates --detached --feature F011 --tag post-implement-1` writes
+`<logs_dir>/gates/F011-post-implement-1-<sha7>.log` (`-dirty` when tracked files differ from
+HEAD) and records the runner in `<log>.pid`. A second call for the same key attaches to the live
+run or, for a clean key, reuses the completed log, so a retried gate agent never starts a
+duplicate run. The gate agent runs `sdd gates --wait <log>` with its Bash tool in the
+background and waits for the completion notice. `--wait` exits with the run's code, 124 when it
+timed out while the run is going, and 125 when the run is **incomplete** (no marker and the
+runner is gone; a reused pid does not count as alive). An incomplete result (or a log showing
+the run itself was killed, e.g. by the OOM killer) is re-run with `--fresh` (the old log is
+kept as `<log>.<n>`) up to 3 times in the same round; it is never counted as a failed round
+and never triggers a gate-fix. A fourth incomplete result ends the run `blocked-infra`: check
+memory, disk and the log. There are three plans: `gates.fast`
+(pre-push and every task), `gates.full` (the pipeline's Gates stage and pull-request CI: adds
+coverage and mutation of the changed lines and the command checks) and `gates.nightly`
+(full-repository coverage and mutation, long fuzzing, benchmarks; schedule it in CI). Keep full gates fast enough to run per
 feature: budget fuzzing, fuzz only changed targets, use an optimised test profile for heavy
 property tests. Gate logs live in `paths.logs_dir`.
 
@@ -100,14 +135,32 @@ property tests. Gate logs live in `paths.logs_dir`.
 - To change model tiers for the remaining phases (e.g. a cheaper pool opened up), pass
   `models: {...}` plus `modelsFromPhase: "Gates"` and `modelsBefore: {...}` (the ids the
   completed phases used). Cached calls keep their original model, so the cache keys match.
+  In formula mode, edit the models table and pass `routingBefore: <summary.routing of the
+  paused run>` with `modelsFromPhase`; pools exhausted before that phase count as available
+  again (a pool still at its cap is marked again by its first failed call).
+- After **every** run end (finished, `blocked-*` or `paused`) append the telemetry:
+  `sdd routing log --output-file <the Workflow output file>` (or `--file` with the summary
+  and `--transcript-dir <transcriptDir>` when the output file is gone). Keep `runKey` the same
+  across resumes so the attempts of one logical run group together.
 - `blocked-<stage>`: read `reason`, the logs and review.md; fix the input or the
   infrastructure; re-run with `stages` starting at the failing stage. Done tasks stay `[x]`.
 - A journal with an empty or odd result: read `<transcriptDir>/journal.jsonl` before
   diagnosing.
+- Review findings and verifier verdicts are committed to review.md as soon as they exist, so a
+  run paused in Verify keeps them; a resumed Finalize completes the record and keeps the §3
+  rows and §6 justifications.
+- `blocked-setup` with uncommitted edits outside the feature directory: an interrupted worker
+  probably left them. Inspect them (`git status`, `git diff`), then commit them or hand them to
+  an implementer; never discard them automatically (the bash-guard blocks the commands that
+  would). Re-run with the same args.
 
 ## 6. Usage limits
 
 - Tier the models (§7); the mechanical steps are the majority of calls.
+- A capped call can return an empty result with no error text, and caps can be weekly, not
+  only per 5 h. The pipeline treats any failed call on a capped pool as "pool exhausted for
+  this run", moves it to the cheapest equal-or-smarter point and pauses only when none is
+  left (declare which models share a cap as one `capped` pool in the models table).
 - Spread load across model pools when a pool is near its limit, using `modelsFromPhase` on
   resume rather than restarting.
 - Do not interrupt running agents to switch models; let the phase finish.
@@ -123,10 +176,23 @@ property tests. Gate logs live in `paths.logs_dir`.
 | strong | spec-author, spec-critic, product-owner, architect-planner, test-author, spec-compliance-reviewer, security-reviewer, verifier | a wrong answer here propagates unchecked |
 | top | a fix that already failed once, test arbitration, second product-owner resolution pass, semantic merge resolution, features flagged `hard` | hardest judgement calls |
 
+The gate runner has its own `gate` tier (a small model at medium effort: the cheapest model
+did not wait and report reliably); empty, it falls back to `mid`. Each tier is an id or
+`{id, effort}`; the default efficient mapping is in README "Model routing" and the template's
+`_models_example`. Never the highest efforts (`xhigh`, `max`) by default.
+
 Rules: explicit model ids in `sdd.config.json` (an alias silently moved to a newer, pricier
 model once); never trade quality for tokens where a wrong answer is not caught downstream;
 `pipeline.role_tiers` overrides the role->tier map; `tiering: false` makes every call
 inherit the session model.
+
+**Formula router** (`pipeline.routing: "formula"`): the planner rates each task (`complexity`,
+`risk`), every call gets a level L1-L6 and the cheapest-in-expectation model at or above that
+level's intelligence floor (README "Model routing", docs/CONFIG.md "Model routing"). Use it
+once you have a measured frontier; tune it with data, not by hand: after a few features run
+`sdd routing refit` and change a floor only when its suggestion holds over enough samples.
+Dominated model/effort points are never used, and a retry never downgrades intelligence (a
+failed attempt plus its retry costs more than the stronger model would have).
 
 ## 8. Security sign-off
 
@@ -159,4 +225,42 @@ id.
 - [ ] build output of the merged worktree deleted, worktree removed
 - [ ] `df -h` headroom checked (a full host disk crashed the VM twice in ferrocore)
 - [ ] `sdd trace --check` and `sdd progress` run on main
-- [ ] nothing under `/tmp` that matters
+- [ ] nothing under `/tmp` that matters (no build cache either: `sdd doctor` warns)
+
+## 12. Adopting the gates on an existing codebase
+
+The quality gates (size, layers, coverage and mutation of changed lines, command checks, git
+hooks) are meant to be strict from day one for new code, while the code that exists when you
+adopt them is fixed on purpose, not by accident. Three steps, in this order:
+
+1. **Build and configure the gates, install the hooks.** Fill `quality` in `sdd.config.json`
+   (thresholds, `arch.modules`, the coverage and mutation commands and their `ok_exits`, the
+   command checks; start from `examples/configs/<language>.json` and docs/ADAPTING.md), add the
+   `sdd check` gates to `gates.fast`/`gates.full`, and run `sdd hooks install`. It refuses
+   when hooks are already in use (git-lfs, husky, the pre-commit framework): chain them as
+   docs/ADAPTING.md shows instead of forcing. Run `sdd gates --plan full` once and make every
+   tool either run or show its install hint; in CI set `CI=true` so a missing tool fails.
+2. **Record the baseline in the adoption commit.** `sdd baseline --init` writes every current
+   size, arch and baseline-enabled command-check violation to `sdd.baseline.json`; commit it
+   (for example `chore: adopt quality gates`). The installed kit (`tools/sdd/**`) is never
+   project code, so it never lands in the baseline. `--init` refuses (exit 3) while a
+   baseline-enabled check's tool is missing: install it or set `"baseline": false` on that
+   check first. From then on the baseline only shrinks:
+   `sdd check baseline` refuses new entries and raised values, a violation that grows or a
+   new one fails, and a fixed one must have its entry removed with `sdd baseline --update`.
+   Coverage and mutation need no baseline: they judge only changed lines.
+3. **Run a remediation feature that empties the baseline before new feature work.**
+   `sdd baseline --report` (or `--json`) is its work list, grouped by kind and file; plan
+   one task per file or module (split long functions, move dependencies behind the allowed
+   layer, add the missing docs, remove unused dependencies). Its parallel lanes all shrink
+   the same baseline file, so their merges conflict on it by design: the integrator resolves
+   that mechanically with `sdd baseline --resolve` (the intersection of both sides, then
+   `--update` on the merged tree) and never with `sdd union-merge`, which refuses the file.
+   Projects that prefer no conflict at all can register the optional merge driver
+   (docs/ADAPTING.md). New features start when the report is empty, or when what is left is
+   explicitly accepted by the product owner.
+
+Never grandfather new code: no agent adds baseline entries, raises thresholds or adds exclude
+globs to get a gate green (the code-writing roles cannot edit the config, the hooks or the
+checkers). A `cov:unreachable: <reason>` marker or a mutant justification in review.md §6 is
+reviewed like code.

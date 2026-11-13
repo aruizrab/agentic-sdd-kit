@@ -51,15 +51,75 @@
       {"name": "fmt", "command": "sh -c 'echo \"gate fmt not configured: set gates.fast in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 120},
       {"name": "lint", "command": "sh -c 'echo \"gate lint not configured: set gates.fast in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 1200},
       {"name": "test", "command": "sh -c 'echo \"gate test not configured: set gates.fast in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 1800},
-      {"name": "trace", "command": "python3 -I tools/sdd/sdd.py trace --check", "timeout": 60}
+      {"name": "trace", "command": "python3 -I tools/sdd/sdd.py trace --check", "timeout": 60},
+      {"name": "size", "command": "python3 -I tools/sdd/sdd.py check size", "timeout": 600, "skip_exit": 3},
+      {"name": "arch", "command": "python3 -I tools/sdd/sdd.py check arch", "timeout": 600, "skip_exit": 3},
+      {"name": "baseline", "command": "python3 -I tools/sdd/sdd.py check baseline", "timeout": 600, "skip_exit": 3},
+      {"name": "commits", "command": "python3 -I tools/sdd/sdd.py check commits", "timeout": 600, "skip_exit": 3},
+      {"name": "secrets", "command": "python3 -I tools/sdd/sdd.py check secrets", "timeout": 600, "skip_exit": 3}
     ],
     "full": [
       {"name": "fmt", "command": "sh -c 'echo \"gate fmt not configured: set gates.full in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 120},
       {"name": "lint", "command": "sh -c 'echo \"gate lint not configured: set gates.full in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 1200},
       {"name": "test", "command": "sh -c 'echo \"gate test not configured: set gates.full in sdd.config.json (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 3600},
       {"name": "trace", "command": "python3 -I tools/sdd/sdd.py trace --check", "timeout": 60},
-      {"name": "audit", "command": "sh -c 'echo \"gate audit not configured: dependency audit for your language (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 600, "optional": true}
-    ]
+      {"name": "audit", "command": "sh -c 'echo \"gate audit not configured: dependency audit for your language (see docs/ADAPTING.md)\" >&2; exit 2'", "timeout": 600, "optional": true},
+      {"name": "size", "command": "python3 -I tools/sdd/sdd.py check size", "timeout": 600, "skip_exit": 3},
+      {"name": "arch", "command": "python3 -I tools/sdd/sdd.py check arch", "timeout": 600, "skip_exit": 3},
+      {"name": "baseline", "command": "python3 -I tools/sdd/sdd.py check baseline", "timeout": 600, "skip_exit": 3},
+      {"name": "commits", "command": "python3 -I tools/sdd/sdd.py check commits", "timeout": 600, "skip_exit": 3},
+      {"name": "secrets", "command": "python3 -I tools/sdd/sdd.py check secrets", "timeout": 600, "skip_exit": 3},
+      {"name": "protected", "command": "python3 -I tools/sdd/sdd.py check protected", "timeout": 600, "skip_exit": 3},
+      {"name": "coverage", "command": "python3 -I tools/sdd/sdd.py check coverage", "timeout": 3600, "skip_exit": 3},
+      {"name": "mutation", "command": "python3 -I tools/sdd/sdd.py check mutation", "timeout": 3600, "skip_exit": 3}
+    ],
+    "nightly": []
+  },
+  "quality": {
+    "baseline_file": "sdd.baseline.json",
+    "base_ref": "",
+    "generated": [],
+    "test_globs": [],
+    "languages": {},
+    "tool_dirs": [],
+    "size": {"globs": [], "exclude": [], "function_warn": 0, "function_fail": 80, "file_warn": 600, "file_fail": 1000},
+    "arch": {"modules": [], "exclude": ["tests/**", "**/tests/**", "test/**", "**/test/**"]},
+    "coverage": {
+      "command": "",
+      "report": "",
+      "format": "lcov",
+      "globs": [],
+      "unmeasured_ok": [],
+      "ok_exits": [0],
+      "requires": [],
+      "install": "",
+      "timeout": 3600
+    },
+    "mutation": {
+      "command": "",
+      "report": "",
+      "format": "regex",
+      "survivor_regex": "",
+      "ok_exits": [0],
+      "globs": [],
+      "requires": [],
+      "install": "",
+      "timeout": 3600
+    },
+    "checks": [],
+    "secrets": {"gitleaks": true, "patterns": [], "allow_globs": []},
+    "hooks": {
+      "types": ["build", "chore", "ci", "docs", "feat", "fix", "perf", "refactor", "revert", "style", "test"],
+      "scope_regex": "",
+      "required_trailers": ["^Co-Authored-By: .+ <.+>$"],
+      "required_trailers_env": "CLAUDECODE",
+      "trailer_authors": "",
+      "pre_commit": [],
+      "commit_tests": true,
+      "skip_tests_for_types": ["test"],
+      "test_timeout": 300,
+      "budget_seconds": 60
+    }
   },
   "tests": {
     "run": "sh -c 'echo \"tests.run not configured in sdd.config.json\" >&2; exit 2'",
@@ -90,17 +150,30 @@
     "integrator": ["specs/features/**", "package-lock.json", "Cargo.lock", "go.sum", "poetry.lock", "uv.lock"]
   },
   "role_denied_paths": {
-    "implementer": ["**/tests/**", "**/test/**", "**/*_test.*", "**/*.test.*", "**/test_*.py"]
+    "implementer": ["**/tests/**", "**/test/**", "**/*_test.*", "**/*.test.*", "**/test_*.py", "tools/sdd/githooks/**", "tools/sdd/sddkit/**", "tools/sdd/sdd.py"],
+    "test-author": ["tools/sdd/githooks/**", "tools/sdd/sddkit/**", "tools/sdd/sdd.py"]
   },
   "formatters": [],
+  "build_cache": {
+    "env": {}
+  },
   "stop_check": {
     "command": "",
     "changed_globs": [],
     "roles": ["implementer"],
     "timeout": 240
   },
+  "_models_example": {
+    "_comment": "The default efficient mapping (README \"Model routing\"). Copy the tiers into \"models\" with your provider's explicit model ids (never aliases); \"\" inherits the session model. effort is one of low|medium|high|xhigh|max or \"\" (the call site decides); the highest efforts are never defaults.",
+    "mechanical": "<cheapest-model-id>",
+    "gate": {"id": "<small-model-id>", "effort": "medium"},
+    "mid": {"id": "<mid-model-id>", "effort": "medium"},
+    "strong": {"id": "<top-model-id>", "effort": "medium"},
+    "top": {"id": "<top-model-id>", "effort": "high"}
+  },
   "models": {
     "mechanical": "",
+    "gate": "",
     "mid": "",
     "strong": "",
     "top": ""
@@ -112,6 +185,8 @@
     "skeptics": 2,
     "max_build_jobs": 4,
     "gate_poll_seconds": 120,
+    "routing": "tiers",
+    "models_table": "sdd.models.json",
     "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, parsing of untrusted input"
   },
   "merge": {

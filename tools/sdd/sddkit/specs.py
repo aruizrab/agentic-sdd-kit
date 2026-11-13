@@ -6,7 +6,9 @@
   open question and blocked approval).
 * ``spec_info``: the ``Status:`` header, marker count and requirement count.
 * ``parse_tasks``: the wave/task structure of ``tasks.md`` as data, with the
-  component of each task derived from its files (``components.path_regex``).
+  component of each task derived from its files (``components.path_regex``) and the
+  planner's ratings ``complexity`` (low|medium|high, default medium) and ``risk``
+  (security|concurrency|none, default none) used by the model router.
 """
 
 from __future__ import annotations
@@ -22,7 +24,9 @@ TASK_LINE = re.compile(
     r"^- \[(?P<done>[ xX])\] (?P<id>T\d{2,3})(?P<par>\s+\[P\])?\s+(?P<rest>.*)$"
 )
 WAVE_HEADING = re.compile(r"^##\s+Wave\s+(?P<n>\d+)", re.IGNORECASE)
-FIELD_SPLIT = re.compile(r"\s+[—–-]{1,2}\s+(?=(?:files|verifies|depends)\s*:)", re.IGNORECASE)
+FIELD_SPLIT = re.compile(r"\s+[—–-]{1,2}\s+(?=(?:files|verifies|depends|complexity|risk)\s*:)", re.IGNORECASE)
+COMPLEXITIES = ("low", "medium", "high")
+RISKS = ("security", "concurrency", "none")
 
 
 def count_markers(text: str, marker: str = "[NEEDS CLARIFICATION:") -> int:
@@ -114,11 +118,13 @@ def parse_tasks(text: str, cfg: Dict[str, Any], include_done: bool = False) -> D
             continue
         parts = FIELD_SPLIT.split(m.group("rest"))
         title = parts[0].strip()
-        fields = {"files": [], "verifies": [], "depends": []}
+        fields: Dict[str, Any] = {"files": [], "verifies": [], "depends": [], "complexity": "medium", "risk": "none"}
         for part in parts[1:]:
             k, _, v = part.partition(":")
             k = k.strip().lower()
-            if k in fields:
+            if k in ("complexity", "risk"):
+                fields[k] = v.strip().strip("`").lower()
+            elif k in fields:
                 fields[k] = _split_list(v)
         comps = sorted({component_of(f, cfg) for f in fields["files"]}) or [cfg["components"].get("root", "workspace")]
         waves.setdefault(wave, []).append(
@@ -131,6 +137,8 @@ def parse_tasks(text: str, cfg: Dict[str, Any], include_done: bool = False) -> D
                 "verifies": fields["verifies"],
                 "depends": fields["depends"],
                 "components": comps,
+                "complexity": fields["complexity"],
+                "risk": fields["risk"],
                 "wave": wave,
             }
         )
@@ -187,6 +195,10 @@ def validate_tasks(plan: Dict[str, Any], known_ids: Optional[List[str]] = None) 
                     files_seen[f] = t["id"]
             if not t["files"]:
                 problems.append(f"{t['id']} lists no files")
+            if t.get("complexity", "medium") not in COMPLEXITIES:
+                problems.append(f"{t['id']} complexity {t['complexity']!r} must be low, medium or high")
+            if t.get("risk", "none") not in RISKS:
+                problems.append(f"{t['id']} risk {t['risk']!r} must be security, concurrency or none")
             if known_ids is not None:
                 for rid in t["verifies"]:
                     if rid not in known_ids:

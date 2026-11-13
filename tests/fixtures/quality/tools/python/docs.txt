@@ -1,0 +1,3 @@
+src/app/domain/order.py:1:1: D100 Missing docstring in public module
+src/app/infra/db.py:12:5: D103 Missing docstring in public function
+Found 2 errors.

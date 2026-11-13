@@ -54,7 +54,7 @@ class ConfigTest(unittest.TestCase):
             self.assertEqual([p for p in problems if "placeholder" in p],
                              ["commit.trailers[0]: still the template placeholder ('Co-Authored-By: <agent> <noreply@example.com>'); set the real attribution line"])
             view = cfgmod.pipeline_view(cfg)
-            self.assertEqual(view["gates"], {"fast": [], "full": ["t"]})
+            self.assertEqual(view["gates"], {"fast": [], "full": ["t"], "nightly": []})
             self.assertEqual(view["root"], str(root))
             write(root, "sdd.config.json", "{not json")
             with self.assertRaises(cfgmod.ConfigError):

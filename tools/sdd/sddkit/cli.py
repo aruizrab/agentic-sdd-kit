@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import List, Optional
 
 from . import config as cfgmod
-from . import gates, hooks, new_feature, progress, source, specs, trace, union_merge
+from . import gates, hooks, new_feature, progress, routing, source, specs, trace, union_merge
+from . import quality
+from .quality import arch, baseline, checks, commits, coverage, githooks, mutation, protected, secrets, size, vcs
 
 VERSION = "0.1.0"
 
@@ -65,7 +67,7 @@ def cmd_config(args: argparse.Namespace) -> int:
 
 def cmd_trace(args: argparse.Namespace) -> int:
     root, cfg = _cfg(args)
-    return trace.run(root, cfg, args.feature, args.check, args.json, args.allow_missing_impl)
+    return trace.run(root, cfg, args.feature, args.check, args.json, args.allow_missing_impl, args.include)
 
 
 def cmd_gates(args: argparse.Namespace) -> int:
@@ -73,19 +75,99 @@ def cmd_gates(args: argparse.Namespace) -> int:
     logs_dir = root / cfg["paths"]["logs_dir"]
     if args.wait:
         return gates.wait(Path(args.wait), float(args.poll), float(args.timeout))
-    tag = args.tag or ("fast" if args.fast else "full")
-    log_path = Path(args.log) if args.log else logs_dir / f"gates-{tag}.log"
+    plan_name = args.plan or ("fast" if args.fast else "full")
+    tag = args.tag or plan_name
     if args.detached:
-        argv = []
-        if args.fast:
-            argv.append("--fast")
+        argv = ["--plan", plan_name]
         for o in args.only or []:
             argv += ["--only", o]
-        if args.tag:
-            argv += ["--tag", args.tag]
-        return gates.start_detached(root, argv, log_path)
+        if args.feature:
+            argv += ["--feature", args.feature]
+        if args.log:
+            return gates.detached(root, argv, Path(args.log), keyed=False, fresh=True)
+        if args.feature:
+            try:
+                log_path = gates.keyed_log(root, logs_dir, args.feature, tag)
+            except gates.GateRunError as exc:
+                print(f"gates: {exc}", file=sys.stderr)
+                return 2
+            return gates.detached(root, argv, log_path, keyed=True, fresh=args.fresh)
+        return gates.detached(root, argv, logs_dir / f"gates-{tag}.log", keyed=False, fresh=True)
+    log_path = Path(args.log) if args.log else logs_dir / f"gates-{tag}.log"
     extra = {"SDD_FEATURE": args.feature} if args.feature else None
-    return gates.run(cfg, root, args.fast, args.only, log_path, extra, quiet=args.no_stdout)
+    return gates.run(cfg, root, plan_name == "fast", args.only, log_path, extra, quiet=args.no_stdout, plan_name=plan_name)
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    root, cfg = _cfg(args)
+    name = args.name
+    try:
+        if name == "size":
+            res = size.run(root, cfg, staged=args.staged)
+        elif name == "arch":
+            res = arch.run(root, cfg)
+        elif name == "coverage":
+            res = coverage.run(root, cfg, no_run=args.no_run)
+        elif name == "mutation":
+            res = mutation.run(root, cfg, no_run=args.no_run)
+        elif name == "commits":
+            res = commits.check(root, cfg)
+        elif name == "secrets":
+            res = secrets.check(root, cfg)
+        elif name == "baseline":
+            res = baseline.ratchet(root, cfg)
+        elif name == "protected":
+            res = protected.check(root, cfg)
+        else:
+            res = checks.run(root, cfg, name)
+    except quality.QualityError as exc:
+        res = quality.error(name, str(exc))
+    return quality.emit(res, args.json)
+
+
+def cmd_baseline(args: argparse.Namespace) -> int:
+    root, cfg = _cfg(args)
+    try:
+        if args.init:
+            return baseline.init(root, cfg)
+        if args.update:
+            return baseline.update(root, cfg)
+        if args.resolve:
+            return baseline.resolve(root, cfg)
+        if args.merge_driver:
+            return baseline.merge_driver(*args.merge_driver)
+        return baseline.report(root, cfg, args.json)
+    except quality.QualityError as exc:
+        print(f"baseline: {exc}", file=sys.stderr)
+        return 2
+
+
+def cmd_hooks(args: argparse.Namespace) -> int:
+    if args.action == "run":
+        return githooks.run(args.hook, args.hook_args)
+    root, cfg = _cfg(args)
+    top = vcs.toplevel(root)
+    if top is None:
+        print(f"hooks: NOT installed: {root} is not inside a git repository", file=sys.stderr)
+        return 1
+    here = vcs.toplevel(Path.cwd())
+    if here is not None and here.resolve() != top.resolve():
+        print(f"hooks: NOT installed: the project root {top} is not the repository of the current directory ({here}); "
+              "run the command from inside the target repository", file=sys.stderr)
+        return 1
+    return githooks.install(top, cfgmod.load(top) if (top / cfgmod.CONFIG_NAME).is_file() else cfg, args.force)
+
+
+def cmd_routing(args: argparse.Namespace) -> int:
+    root, cfg = _cfg(args)
+    if args.action == "table":
+        return routing.cmd_table(root, cfg, args.json)
+    if args.action == "log":
+        if not (args.output_file or args.file):
+            print("routing log: give --output-file <Workflow output file> or --file <summary JSON | ->", file=sys.stderr)
+            return 2
+        return routing.cmd_log(root, cfg, args.output_file, args.file, args.transcript_dir)
+    return routing.cmd_refit(root, cfg, args.file, args.json, args.min_samples, args.max_fail)
 
 
 def cmd_new_feature(args: argparse.Namespace) -> int:
@@ -217,22 +299,55 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     check((root / cfg["paths"]["roadmap"]).is_file(), f"roadmap {cfg['paths']['roadmap']}", warn=True)
     check((root / ".claude" / "settings.json").is_file(), ".claude/settings.json installed", warn=True)
     check((root / cfg["paths"]["tools_dir"] / "pipeline" / "feature-pipeline.js").is_file(), "feature pipeline script installed", warn=True)
-    for mode in ("fast", "full"):
+    for mode in ("fast", "full", "nightly"):
         for g in cfg["gates"][mode]:
             if "not configured" in g["command"]:
                 check(False, f"gate {mode}/{g['name']}: still the template placeholder (set a real command; see docs/ADAPTING.md)", warn=bool(g.get("optional")))
                 continue
             prog = g["command"].split()[0] if g["command"].split() else ""
-            found = shutil.which(prog) is not None or prog in ("python3", "sdd")
-            check(found, f"gate {mode}/{g['name']}: {prog} {'on' if found else 'NOT on'} PATH", warn=bool(g.get("optional")))
+            path = quality.tool_env(cfg, root).get("PATH")
+            found = shutil.which(prog, path=path) is not None or prog in ("python3", "sdd", "sh") or "=" in prog
+            # A gate that SKIPs when its tool is missing (skip_if_missing), an optional one and the
+            # nightly plan (CI only) warn; only a gate that would FAIL is a doctor problem.
+            soft = bool(g.get("optional") or g.get("skip_if_missing")) or mode == "nightly"
+            check(found, f"gate {mode}/{g['name']}: {prog} {'on' if found else 'NOT on'} PATH", warn=soft)
+    q = cfg["quality"]
+    for tool in ("coverage", "mutation"):
+        if not q[tool]["command"] and not q[tool]["report"]:
+            check(False, f"quality.{tool}: not configured (sdd check {tool} fails until it is; see docs/ADAPTING.md)", warn=True)
+    if vcs.toplevel(root):
+        check(githooks.installed(root, cfg), "git hooks installed (run `sdd hooks install`, or chain them: docs/ADAPTING.md)", warn=True)
     if "not configured" in (cfg.get("tests", {}).get("run") or ""):
         check(False, "tests.run: still the template placeholder", warn=True)
-    for tier in ("mechanical", "mid", "strong", "top"):
-        check(bool(cfg["models"].get(tier)), f"models.{tier} set (explicit model id)", warn=True)
+    for warning in routing.doctor_warnings(root, cfg):
+        check(False, warning, warn=True)
     mounts = str(root)
     check(not mounts.startswith("/tmp"), "project not under /tmp (RAM tmpfs would lose it on a crash)")
+    for key, value in (cfg["build_cache"].get("env") or {}).items():
+        if isinstance(value, str) and value.startswith(("/", "~")) and _on_tmpfs(Path(value).expanduser()):
+            check(False, f"build_cache.env {key}={value}: under /tmp or on a tmpfs mount (RAM); put the shared build cache on disk", warn=True)
     print("doctor: " + ("OK" if ok else "problems found"))
     return 0 if ok else 1
+
+
+def _on_tmpfs(path: Path) -> bool:
+    """True when ``path`` is under /tmp or its mount point (from /proc/mounts) is a tmpfs."""
+    path = Path(os.path.abspath(str(path)))
+    if path == Path("/tmp") or Path("/tmp") in path.parents:
+        return True
+    best, fstype = "", ""
+    try:
+        lines = Path("/proc/mounts").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        mount = parts[1].replace("\\040", " ")
+        if (str(path) == mount or str(path).startswith(mount.rstrip("/") + "/")) and len(mount) > len(best):
+            best, fstype = mount, parts[2]
+    return fstype in ("tmpfs", "ramfs")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -255,20 +370,67 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--check", action="store_true", help="fail on orphans, duplicates and uncovered must requirements")
     t.add_argument("--json", action="store_true")
     t.add_argument("--allow-missing-impl", action="store_true")
+    t.add_argument("--include", action="append", metavar="PATH",
+                   help="also scan this file whatever trace.scan_globs says (repeatable); files outside the globs are listed as outsideScan")
     t.set_defaults(fn=cmd_trace)
 
     g = sub.add_parser("gates", help="run the configured gates")
-    g.add_argument("--fast", action="store_true", help="run gates.fast instead of gates.full")
+    g.add_argument("--fast", action="store_true", help="run gates.fast instead of gates.full (alias of --plan fast)")
+    g.add_argument("--plan", choices=["fast", "full", "nightly"], help="gate plan to run (default: full)")
     g.add_argument("--only", action="append", help="run only this gate (repeatable)")
     g.add_argument("--feature", help="exported as SDD_FEATURE to gate commands")
     g.add_argument("--log", help="log file (default: <logs_dir>/gates-<tag>.log)")
-    g.add_argument("--tag", help="log name tag")
-    g.add_argument("--detached", action="store_true", help="start in the background; poll with --wait <log>")
-    g.add_argument("--wait", metavar="LOG", help="wait for GATES_EXIT=<n> in LOG and exit with n")
+    g.add_argument("--tag", help="log name tag; with --detached --feature the log is <logs_dir>/gates/<feature>-<tag>-<sha7>[-dirty].log")
+    g.add_argument("--detached", action="store_true",
+                   help="start in the background (or attach to the live run of the same key); prints {log, state, pid, exit?}; wait with --wait <log>")
+    g.add_argument("--fresh", action="store_true", help="with --detached --feature: never reuse a completed log of this HEAD and tag (it is renamed to <log>.<n>)")
+    g.add_argument("--wait", metavar="LOG", help="wait for GATES_EXIT=<n> in LOG and exit with n; 124 timed out (still running), 125 incomplete (runner dead, no marker)")
     g.add_argument("--poll", default="15", help="seconds between polls for --wait")
     g.add_argument("--timeout", default="7200", help="max seconds for --wait")
     g.add_argument("--no-stdout", action="store_true", help=argparse.SUPPRESS)
     g.set_defaults(fn=cmd_gates)
+
+    ck = sub.add_parser("check", help="run one quality check: size, arch, coverage, mutation, commits, secrets, baseline, protected or a quality.checks entry")
+    ck.add_argument("name")
+    ck.add_argument("--json", action="store_true")
+    ck.add_argument("--staged", action="store_true", help="size: check the staged content of staged files only")
+    ck.add_argument("--no-run", action="store_true", help="coverage/mutation: read the existing report instead of running the tool")
+    ck.set_defaults(fn=cmd_check)
+
+    bl = sub.add_parser("baseline", help="the shrink-only violation baseline: report (default), init, update, resolve")
+    mode = bl.add_mutually_exclusive_group()
+    mode.add_argument("--report", action="store_true", help="every current violation by kind and file (default)")
+    mode.add_argument("--init", action="store_true", help="record all current violations (refuses when the file exists)")
+    mode.add_argument("--update", action="store_true", help="remove stale entries and lower values; never adds")
+    mode.add_argument("--resolve", action="store_true", help="resolve a conflicted baseline file in a merge (intersection, then --update)")
+    mode.add_argument("--merge-driver", nargs=3, metavar=("O", "A", "B"), help="git merge driver: intersection of A and B written to A")
+    bl.add_argument("--json", action="store_true")
+    bl.set_defaults(fn=cmd_baseline)
+
+    hk = sub.add_parser("hooks", help="git hooks: install (sets core.hooksPath) or run one (used by the hook scripts)")
+    hk_sub = hk.add_subparsers(dest="action", required=True)
+    hi = hk_sub.add_parser("install", help="set core.hooksPath to <tools_dir>/githooks in this repository")
+    hi.add_argument("--force", action="store_true", help="install even over hooks already in use")
+    hr = hk_sub.add_parser("run", help="run one hook's logic")
+    hr.add_argument("hook", choices=list(githooks.HOOK_NAMES))
+    hr.add_argument("hook_args", nargs=argparse.REMAINDER)
+    hk.set_defaults(fn=cmd_hooks)
+
+    ro = sub.add_parser("routing", help="model routing: models table candidates, telemetry log, refit report")
+    ro_sub = ro.add_subparsers(dest="action", required=True)
+    rt = ro_sub.add_parser("table", help="validate the effective models table and print the candidates per level with E")
+    rt.add_argument("--json", action="store_true")
+    rl = ro_sub.add_parser("log", help="append a run's telemetry (one JSONL line per agent attempt) to <logs_dir>/routing.jsonl")
+    src = rl.add_mutually_exclusive_group()
+    src.add_argument("--output-file", help="the Workflow output file named in the completion notice (summary in 'result', times in 'workflowProgress')")
+    src.add_argument("--file", help="a pipeline summary or telemetry array as JSON ('-' = stdin)")
+    rl.add_argument("--transcript-dir", help="the run's transcript dir (journal.jsonl + agent-*.jsonl) for times when there is no output file")
+    rf = ro_sub.add_parser("refit", help="per-level failure rates and floor suggestions (report only, never writes)")
+    rf.add_argument("--json", action="store_true")
+    rf.add_argument("--file", help="routing JSONL (default: <logs_dir>/routing.jsonl)")
+    rf.add_argument("--min-samples", type=int, default=10)
+    rf.add_argument("--max-fail", type=float, default=0.25)
+    ro.set_defaults(fn=cmd_routing)
 
     n = sub.add_parser("new-feature", help="scaffold <features_dir>/<NNN>-<slug>/ from the templates")
     n.add_argument("number")

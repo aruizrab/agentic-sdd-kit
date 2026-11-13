@@ -1,0 +1,73 @@
+{
+ "runId": "wf_resumed",
+ "status": "completed",
+ "result": {
+  "feature": "F011",
+  "status": "stopped",
+  "runKey": "F011-20260101T000000",
+  "telemetry": [
+   {
+    "call": "setup#1",
+    "attempt": 1,
+    "label": "setup",
+    "role": "mechanical",
+    "level": 1,
+    "model": "small-a",
+    "effort": "low",
+    "outcome": "ok",
+    "fallback_of": null,
+    "mode": "formula"
+   },
+   {
+    "call": "architect-planner F011#1",
+    "attempt": 1,
+    "label": "architect-planner F011",
+    "role": "architect-planner",
+    "level": 4,
+    "model": "cap-c",
+    "effort": "medium",
+    "outcome": "ok",
+    "fallback_of": null,
+    "mode": "formula"
+   },
+   {
+    "call": "commit: docs(F011): design and tasks#1",
+    "attempt": 1,
+    "label": "commit: docs(F011): design and tasks",
+    "role": "mechanical",
+    "level": 1,
+    "model": "small-a",
+    "effort": "low",
+    "outcome": "ok",
+    "fallback_of": null,
+    "mode": "formula"
+   }
+  ]
+ },
+ "workflowProgress": [
+  {
+   "type": "workflow_agent",
+   "index": 1,
+   "label": "setup",
+   "agentId": "b1",
+   "startedAt": 1767229200000,
+   "cached": true
+  },
+  {
+   "type": "workflow_agent",
+   "index": 2,
+   "label": "architect-planner F011",
+   "agentId": "b2",
+   "startedAt": 1767229201000,
+   "durationMs": 600000
+  },
+  {
+   "type": "workflow_agent",
+   "index": 3,
+   "label": "commit: docs(F011): design and tasks",
+   "agentId": "b3",
+   "startedAt": 1767229801000,
+   "durationMs": 20000
+  }
+ ]
+}

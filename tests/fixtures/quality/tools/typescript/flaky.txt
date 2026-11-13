@@ -1,0 +1,9 @@
+
+ RUN  v2.1.8 /work/app
+
+ ✓ src/domain/order.test.ts > Order > totals 3ms
+ ✓ src/infra/db.test.ts > db > reconnects 120ms (retry x1)
+ ✓ src/infra/db.test.ts > db > closes 2ms
+
+ Test Files  2 passed (2)
+      Tests  3 passed (3)

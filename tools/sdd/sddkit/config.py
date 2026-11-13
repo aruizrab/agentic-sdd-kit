@@ -19,6 +19,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from . import routing
+
 CONFIG_NAME = "sdd.config.json"
 
 DEFAULTS: Dict[str, Any] = {
@@ -72,6 +74,60 @@ DEFAULTS: Dict[str, Any] = {
     "gates": {
         "fast": [],
         "full": [],
+        "nightly": [],
+    },
+    "quality": {
+        "baseline_file": "sdd.baseline.json",
+        "base_ref": "",
+        "generated": [],
+        "test_globs": [],
+        "languages": {},
+        "tool_dirs": [],
+        "size": {
+            "globs": [],
+            "exclude": [],
+            "function_warn": 0,
+            "function_fail": 80,
+            "file_warn": 600,
+            "file_fail": 1000,
+        },
+        "arch": {"modules": [], "exclude": []},
+        "coverage": {
+            "command": "",
+            "report": "",
+            "format": "lcov",
+            "globs": [],
+            "unmeasured_ok": [],
+            "ok_exits": [0],
+            "requires": [],
+            "install": "",
+            "timeout": 3600,
+        },
+        "mutation": {
+            "command": "",
+            "report": "",
+            "format": "regex",
+            "survivor_regex": "",
+            "ok_exits": [0],
+            "globs": [],
+            "requires": [],
+            "install": "",
+            "timeout": 3600,
+        },
+        "checks": [],
+        "secrets": {"gitleaks": True, "patterns": [], "allow_globs": []},
+        "hooks": {
+            "types": ["build", "chore", "ci", "docs", "feat", "fix", "perf", "refactor", "revert", "style", "test"],
+            "scope_regex": "",
+            "required_trailers": [],
+            "required_trailers_env": "CLAUDECODE",
+            "trailer_authors": "",
+            "pre_commit": [],
+            "commit_tests": True,
+            "skip_tests_for_types": ["test"],
+            "test_timeout": 300,
+            "budget_seconds": 60,
+        },
     },
     "tests": {
         "run": "",
@@ -99,12 +155,16 @@ DEFAULTS: Dict[str, Any] = {
         "integrator": ["specs/features/**"],
     },
     "role_denied_paths": {
-        "implementer": ["tests/**", "**/tests/**", "**/*.test.*", "**/*_test.*", "**/test_*.py"],
+        "implementer": ["tests/**", "**/tests/**", "**/*.test.*", "**/*_test.*", "**/test_*.py",
+                        "tools/sdd/githooks/**", "tools/sdd/sddkit/**", "tools/sdd/sdd.py"],
+        "test-author": ["tools/sdd/githooks/**", "tools/sdd/sddkit/**", "tools/sdd/sdd.py"],
     },
     "formatters": [],
+    "build_cache": {"env": {}},
     "stop_check": {"command": "", "changed_globs": [], "roles": ["implementer"], "timeout": 240},
     "models": {
         "mechanical": "",
+        "gate": "",
         "mid": "",
         "strong": "",
         "top": "",
@@ -116,6 +176,8 @@ DEFAULTS: Dict[str, Any] = {
         "skeptics": 2,
         "max_build_jobs": 4,
         "gate_poll_seconds": 120,
+        "routing": "tiers",
+        "models_table": "sdd.models.json",
         "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, input parsing of untrusted data",
     },
     "merge": {
@@ -132,7 +194,9 @@ DEFAULTS: Dict[str, Any] = {
 
 
 # Sections whose keys are free-form (role names), and known keys that have no default.
-_FREE_FORM_SECTIONS = {"role_write_scopes", "role_denied_paths"}
+_FREE_FORM_SECTIONS = {"role_write_scopes", "role_denied_paths", "quality.languages", "build_cache.env"}
+_BUILTIN_CHECKS = ("size", "arch", "coverage", "mutation", "baseline", "commits", "secrets", "protected")
+_GATE_KEYS = {"name", "command", "timeout", "optional", "skip_if_missing", "env", "install", "skip_exit"}
 _EXTRA_KEYS = {"components": {"word"}, "pipeline": {"role_tiers"}}
 
 
@@ -227,7 +291,7 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
             re.compile(cfg["components"]["path_regex"])
         except re.error as exc:
             problems.append(f"components.path_regex does not compile: {exc}")
-    for mode in ("fast", "full"):
+    for mode in ("fast", "full", "nightly"):
         gates = cfg["gates"].get(mode)
         if not isinstance(gates, list):
             problems.append(f"gates.{mode} must be a list")
@@ -242,6 +306,10 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
             seen.add(gate["name"])
             if "timeout" in gate and not isinstance(gate["timeout"], (int, float)):
                 problems.append(f"gates.{mode}[{i}] timeout must be a number of seconds")
+            if "skip_exit" in gate and not _exit_code(gate["skip_exit"]):
+                problems.append(f"gates.{mode}[{i}] skip_exit must be an integer 0-255")
+            for key in sorted(set(gate) - _GATE_KEYS):
+                problems.append(f"gates.{mode}[{i}]: unknown key {key!r}")
     if not cfg["gates"]["fast"] and not cfg["gates"]["full"]:
         problems.append("no gates configured (gates.fast / gates.full); the kit cannot verify anything")
     for i, entry in enumerate(cfg["protected_paths"]):
@@ -253,11 +321,15 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
     for i, entry in enumerate(cfg["formatters"]):
         if not isinstance(entry, dict) or "glob" not in entry or "command" not in entry:
             problems.append(f"formatters[{i}] must be an object with 'glob' and 'command'")
-    models = cfg["models"]
-    for tier in ("mechanical", "mid", "strong", "top"):
-        value = models.get(tier, "")
-        if value and not re.match(r"^[a-z0-9][a-z0-9.-]*$", value):
-            problems.append(f"models.{tier}: use an explicit model id (lower-case, digits, dots, dashes), got {value!r}")
+    problems.extend(_validate_quality(cfg["quality"]))
+    cache_env = cfg["build_cache"].get("env")
+    if not isinstance(cache_env, dict):
+        problems.append("build_cache.env must be an object of environment variables")
+    else:
+        for key, value in cache_env.items():
+            if not isinstance(value, str):
+                problems.append(f"build_cache.env.{key} must be a string")
+    problems.extend(routing.config_problems(cfg))
     if not cfg["commit"]["trailers"]:
         problems.append("commit.trailers is empty: add at least the attribution trailer line the project uses")
     for i, trailer in enumerate(cfg["commit"]["trailers"]):
@@ -266,6 +338,111 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
         elif re.search(r"<[^<>@]*>", trailer.split("<noreply@", 1)[0]) or re.search(r"<[^<>]*\s[^<>]*>", trailer):
             problems.append(f"commit.trailers[{i}]: still the template placeholder ({trailer!r}); set the real attribution line")
     return problems
+
+
+def _exit_code(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 255
+
+
+def _regex(problems: List[str], where: str, pattern: Any, groups: tuple = ()) -> None:
+    if not isinstance(pattern, str):
+        problems.append(f"{where} must be a regex string")
+        return
+    try:
+        rx = re.compile(pattern)
+    except re.error as exc:
+        problems.append(f"{where} does not compile: {exc}")
+        return
+    for g in groups:
+        if g not in rx.groupindex:
+            problems.append(f"{where} needs the named group (?P<{g}>...)")
+
+
+def _validate_quality(q: Dict[str, Any]) -> List[str]:
+    problems: List[str] = []
+    for key in ("generated", "test_globs", "tool_dirs"):
+        if not isinstance(q.get(key), list):
+            problems.append(f"quality.{key} must be a list of globs")
+    for ext, lang in (q.get("languages") or {}).items():
+        if lang not in ("rust", "python", "typescript", "go", "none"):
+            problems.append(f"quality.languages[{ext!r}]: unknown language {lang!r} (rust, python, typescript, go or none)")
+    for key in ("function_warn", "function_fail", "file_warn", "file_fail"):
+        v = q["size"].get(key)
+        if not isinstance(v, int) or isinstance(v, bool) or v < 0:
+            problems.append(f"quality.size.{key} must be a non-negative integer (0 disables)")
+    modules = q["arch"].get("modules") or []
+    names = [m.get("name") for m in modules if isinstance(m, dict)]
+    for i, m in enumerate(modules):
+        where = f"quality.arch.modules[{i}]"
+        if not isinstance(m, dict) or not m.get("name") or not isinstance(m.get("paths"), list):
+            problems.append(f"{where} needs 'name' and a 'paths' list")
+            continue
+        for key in sorted(set(m) - {"name", "paths", "imports", "may_depend_on", "forbid"}):
+            problems.append(f"{where}: unknown key {key!r}")
+        for j, rx in enumerate(m.get("imports") or []):
+            _regex(problems, f"{where}.imports[{j}]", rx)
+        for dep in m.get("may_depend_on") or []:
+            if dep not in names:
+                problems.append(f"{where}.may_depend_on: no module named {dep!r}")
+        for j, f in enumerate(m.get("forbid") or []):
+            if not isinstance(f, dict) or "pattern" not in f:
+                problems.append(f"{where}.forbid[{j}] needs 'pattern' (and 'reason')")
+            else:
+                _regex(problems, f"{where}.forbid[{j}].pattern", f["pattern"])
+    if len(set(names)) != len(names):
+        problems.append("quality.arch.modules: duplicate module names")
+    for tool in ("coverage", "mutation"):
+        t = q[tool]
+        if not all(_exit_code(c) for c in t.get("ok_exits") or []):
+            problems.append(f"quality.{tool}.ok_exits must be integers 0-255")
+    if q["coverage"]["format"] not in ("lcov", "cobertura"):
+        problems.append("quality.coverage.format must be 'lcov' or 'cobertura'")
+    if q["mutation"]["format"] not in ("regex", "mutation-testing-report"):
+        problems.append("quality.mutation.format must be 'regex' or 'mutation-testing-report'")
+    if q["mutation"]["format"] == "regex" and q["mutation"]["survivor_regex"]:
+        _regex(problems, "quality.mutation.survivor_regex", q["mutation"]["survivor_regex"], ("file", "mutation"))
+    seen = set()
+    for i, c in enumerate(q.get("checks") or []):
+        where = f"quality.checks[{i}]"
+        if not isinstance(c, dict) or not c.get("name") or not c.get("command"):
+            problems.append(f"{where} needs 'name' and 'command'")
+            continue
+        for key in sorted(set(c) - {"name", "command", "violation_regex", "baseline", "requires", "install", "timeout", "ok_exits"}):
+            problems.append(f"{where}: unknown key {key!r}")
+        if c["name"] in _BUILTIN_CHECKS:
+            problems.append(f"{where}: name {c['name']!r} shadows a built-in check")
+        if c["name"] in seen:
+            problems.append(f"quality.checks: duplicate check name {c['name']!r}")
+        seen.add(c["name"])
+        if c.get("violation_regex"):
+            _regex(problems, f"{where}.violation_regex", c["violation_regex"], ("file", "message"))
+        if not all(_exit_code(x) for x in c.get("ok_exits") or []):
+            problems.append(f"{where}.ok_exits must be integers 0-255")
+    for i, p in enumerate(q["secrets"].get("patterns") or []):
+        if not isinstance(p, dict) or not p.get("id"):
+            problems.append(f"quality.secrets.patterns[{i}] needs 'id' and 'regex'")
+        else:
+            _regex(problems, f"quality.secrets.patterns[{i}].regex", p.get("regex"))
+    h = q["hooks"]
+    if h.get("scope_regex"):
+        _regex(problems, "quality.hooks.scope_regex", h["scope_regex"])
+    for i, rx in enumerate(h.get("required_trailers") or []):
+        _regex(problems, f"quality.hooks.required_trailers[{i}]", rx)
+    if h.get("trailer_authors"):
+        _regex(problems, "quality.hooks.trailer_authors", h["trailer_authors"])
+    for i, step in enumerate(h.get("pre_commit") or []):
+        if not isinstance(step, dict) or not step.get("name") or not step.get("command"):
+            problems.append(f"quality.hooks.pre_commit[{i}] needs 'name' and 'command'")
+    for key in ("test_timeout", "budget_seconds"):
+        if not isinstance(h.get(key), (int, float)) or h.get(key) <= 0:
+            problems.append(f"quality.hooks.{key} must be a positive number of seconds")
+    return problems
+
+
+def kit_checker_globs(cfg: Dict[str, Any]) -> List[str]:
+    """The kit's git hooks and checkers, derived from ``paths.tools_dir``: no subagent may edit them."""
+    d = (cfg.get("paths") or {}).get("tools_dir", "tools/sdd").strip().strip("/") or "tools/sdd"
+    return [f"{d}/githooks/**", f"{d}/sddkit/**", f"{d}/sdd.py"]
 
 
 def public(cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -277,12 +454,14 @@ def pipeline_view(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """The subset the Workflow script needs (passed as ``args.config``)."""
     keys = [
         "project", "paths", "features", "requirements", "components", "tests", "sources",
-        "models", "pipeline", "commit", "merge", "override_env",
+        "models", "pipeline", "commit", "merge", "override_env", "build_cache",
     ]
     view = {k: copy.deepcopy(cfg[k]) for k in keys}
     view["gates"] = {
         "fast": [g["name"] for g in cfg["gates"]["fast"]],
         "full": [g["name"] for g in cfg["gates"]["full"]],
+        "nightly": [g["name"] for g in cfg["gates"].get("nightly") or []],
     }
     view["root"] = cfg["_root"]
+    view["routing"] = routing.pipeline_routing(Path(cfg["_root"]), cfg)
     return view

@@ -8,6 +8,10 @@ Any other conflicted file is refused with exit code 3: resolve it semantically
 of a source file once produced a compiling but wrong main branch that had to be
 reverted.
 
+The quality baseline (``quality.baseline_file``) is always refused, even when it matches
+``merge.union_manifests``: a union would re-add the entries one side removed. Resolve it with
+``sdd baseline --resolve`` (intersection of both sides, then ``--update``).
+
 Lockfiles in ``merge.lockfiles`` are resolved by taking "theirs" and then
 ``merge.after_union`` is run (the project's ``<lockfile regenerate>`` command) so the tool regenerates
 them. Duplicate ``key = value`` lines inside one table (the typical result of a
@@ -74,6 +78,10 @@ def resolve(root: Path, cfg: Dict[str, Any], files: List[str]) -> Tuple[int, Lis
         files = git.unmerged_files()
     if not files:
         return 0, ["nothing to resolve (no unmerged files)"]
+    baseline_file = (cfg.get("quality") or {}).get("baseline_file") or "sdd.baseline.json"
+    if baseline_file in files:
+        return 3, [f"REFUSE: {baseline_file} is the shrink-only quality baseline; a union would re-add removed entries. "
+                   "Resolve it with `sdd baseline --resolve`"]
     refused = [f for f in files if not any_match(f, manifests) and not any_match(f, lockfiles)]
     if refused:
         for f in refused:

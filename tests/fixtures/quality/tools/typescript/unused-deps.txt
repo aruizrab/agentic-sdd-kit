@@ -1,0 +1,5 @@
+Unused dependencies
+* left-pad
+* lodash
+Unused devDependencies
+* jest

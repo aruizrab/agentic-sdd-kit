@@ -1,0 +1,9 @@
+PASS example.com/app/internal/domain.TestTotal (0.00s)
+FAIL example.com/app/internal/infra.TestReconnect (0.10s)
+DONE 12 tests, 1 failure in 1.204s
+
+✓  internal/infra (102ms)
+
+=== Rerun 1
+PASS example.com/app/internal/infra.TestReconnect (re-run 1) (0.09s)
+DONE 2 runs, 13 tests in 1.512s
