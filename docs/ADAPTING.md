@@ -258,3 +258,24 @@ fails instead of skipping, so install every tool the plan names. Set `SDD_BASE_R
 target branch is not `features.main_branch` (for example `SDD_BASE_REF=origin/release-2`).
 Schedule `CI=true python3 -I tools/sdd/sdd.py gates --plan nightly` for the full-repository
 coverage and mutation runs, long fuzzing and benchmarks.
+
+## 9. Shared build cache across worktrees
+
+Every feature (and every implementation lane) runs in its own worktree, so each one starts with
+a cold build unless the compiler output is cached outside the worktree. `build_cache.env` is
+the hook: its variables are set for every gate, `sdd check` and git hook command and are quoted
+to the agents ("export these before building"). Rules: the cache is **size-capped** and lives
+**on disk, never on tmpfs** (`/tmp` is RAM on many hosts; `sdd doctor` warns); values are
+literal strings, so write absolute paths (no `~` or `$HOME`). Only set a wrapper once the tool
+is installed: `RUSTC_WRAPPER=sccache` without sccache breaks every build.
+
+| Ecosystem | `build_cache.env` |
+|---|---|
+| Rust (sccache) | `{"RUSTC_WRAPPER": "sccache", "SCCACHE_DIR": "/var/cache/<project>/sccache", "SCCACHE_CACHE_SIZE": "20G"}` |
+| C/C++ (ccache) | `{"CCACHE_DIR": "/var/cache/<project>/ccache", "CCACHE_MAXSIZE": "10G"}` (and `CC="ccache gcc"` or the build system's launcher setting) |
+| TypeScript (pnpm) | `{"npm_config_store_dir": "/var/cache/<project>/pnpm-store"}`: one content-addressed store, hard-linked into each worktree's `node_modules` (prune with `pnpm store prune`) |
+| Go | usually nothing: `GOCACHE` and `GOMODCACHE` are per user and shared already; set `GOCACHE` only to move it off a small or RAM-backed home |
+| Python | usually nothing: no compile step; `PIP_CACHE_DIR` / `UV_CACHE_DIR` move the download cache |
+
+Keep `paths.build_dirs` for the per-worktree output that is deleted after a merge; the shared
+cache is not deleted per feature, its size cap bounds it.

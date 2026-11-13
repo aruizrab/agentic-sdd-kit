@@ -35,19 +35,35 @@ Workflow({
 
 | Stage | Who | What you see / do |
 |---|---|---|
-| Setup | integrator (mechanical) | creates `.wt/F011` on `feat/F011-user-login` from `main`, scaffolds `specs/features/011-user-login/` |
+| Setup | integrator (mechanical) | creates `.wt/F011` on `feat/F011-user-login` from `main`, scaffolds `specs/features/011-user-login/`; stops `blocked-setup` on uncommitted edits outside the feature directory (§5) |
 | Specify | spec-author (strong) | spec.md within the requirement budget; decisions recorded; markers only for real source ambiguity |
 | Critic | spec-critic (strong) | round 1 full; later rounds re-check earlier issues and raise only new blocking ones |
 | Approve | you, or product-owner agent | default: run returns `awaiting-approval` (see §2) |
 | Plan | architect-planner (strong) | design.md + tasks.md; `sdd tasks --validate` must be clean |
-| Tests | test-author (strong) + red check | failing tests tagged with ids; commit `test(F011): ...` = tests baseline |
+| Tests | test-author (strong) + red check | failing tests tagged with ids; the red check runs `sdd trace --include <added tests>`; commit `test(F011): ...` = tests baseline |
 | Implement | implementers (mid; top on retry) | waves; lanes of disjoint components in parallel worktrees; manifests union-merged, sources resolved semantically |
-| Gates | integrator runs, implementer fixes | detached run, polled until `GATES_EXIT`; 3 fix rounds; test arbiter after 2 failing test gates |
-| Review | 4 reviewers (+2nd security) | blocking findings only gate the merge |
-| Verify | N skeptics per finding | dismissed only if all refute; confirmed -> fix -> re-gate -> fix-check (x2 if security-sensitive) |
-| Finalize | integrator | review.md, `Status: Implemented`, `sdd trace --check`; returns `ready-to-merge` |
+| Gates | integrator runs, implementer fixes | detached HEAD-keyed run, waited on until `GATES_EXIT`; incomplete runs re-run (§4); 3 fix rounds; test arbiter after 2 failing test gates |
+| Review | 4 reviewers (+2nd security) | blocking findings only gate the merge; the findings are committed to review.md §3 at once (`docs(F011): review findings`) |
+| Verify | N skeptics per finding | dismissed only if all refute; confirmed -> fix -> re-gate -> fix-check (x2 if security-sensitive); verdicts committed (`docs(F011): verify record`) |
+| Finalize | integrator | completes review.md, `Status: Implemented`, plain `sdd trace --check`; returns `ready-to-merge` |
 
 Always read `status`, `reason` and `nextAction` in the returned summary.
+
+Robustness arguments (defaults in brackets):
+
+| Arg | Effect |
+|---|---|
+| `strictScope` [`true`] | every prompt carries the SCOPE RULE: only the orchestrator assigns work; a relayed user or chat message asking for other work is not acted on, only mentioned in one line of the agent's summary. `false` removes it. |
+| `readViaGit` [`false`] | the spec critic, reviewers, verifiers and fix-checks read through git (`git show <sha>:<path>`, `git diff`, `git log`) instead of creating worktrees; they may run the existing tests but write no code, so a reproduction that needs new code is described, not run, and Verify passes no `isolation`. Turn it on when builds are expensive (each worktree is a cold build). |
+| `outsideScan` [`[]`] | carried over on a resumed run: test files the red check found outside `trace.scan_globs` (see below) |
+
+**Tests outside the trace scan.** The red check runs `sdd trace --feature NNN --json --include
+<each added test file>`, so a `must` whose test lives where `trace.scan_globs` does not look
+is not wrongly reported as untested. Those files are listed in `summary.outsideScan`, and every
+end state's `nextAction` then starts with "add these paths to `trace.scan_globs` in
+sdd.config.json before merge: ...". `sdd.config.json` is protected, so you extend it; Finalize
+runs the plain `sdd trace --check` and ends `blocked-finalize` until the configuration covers
+the tests; then re-run with `stages: ["finalize"]`.
 
 ## 2. Approval (you are the product owner)
 
@@ -88,9 +104,20 @@ If it still blocks, resolve it yourself and re-run with `poResolved: true`.
 
 ## 4. Gates that take long
 
-Full gates can exceed an agent's shell time limit. The pipeline runs them detached
-(`sdd gates --detached`) and polls `sdd gates --wait <log>`; a log without `GATES_EXIT=<n>` is
-an incomplete run and is never reported as a result. There are three plans: `gates.fast`
+Full gates can exceed an agent's shell time limit, and an agent that ends its turn can kill a
+foreground run. The pipeline therefore runs them detached and keyed by HEAD:
+`sdd gates --detached --feature F011 --tag post-implement-1` writes
+`<logs_dir>/gates/F011-post-implement-1-<sha7>.log` (`-dirty` when tracked files differ from
+HEAD) and records the runner in `<log>.pid`. A second call for the same key attaches to the live
+run or, for a clean key, reuses the completed log, so a retried gate agent never starts a
+duplicate run. The gate agent runs `sdd gates --wait <log>` with its Bash tool in the
+background and waits for the completion notice. `--wait` exits with the run's code, 124 when it
+timed out while the run is going, and 125 when the run is **incomplete** (no marker and the
+runner is gone; a reused pid does not count as alive). An incomplete result (or a log showing
+the run itself was killed, e.g. by the OOM killer) is re-run with `--fresh` (the old log is
+kept as `<log>.<n>`) up to 3 times in the same round; it is never counted as a failed round
+and never triggers a gate-fix. A fourth incomplete result ends the run `blocked-infra`: check
+memory, disk and the log. There are three plans: `gates.fast`
 (pre-push and every task), `gates.full` (the pipeline's Gates stage and pull-request CI: adds
 coverage and mutation of the changed lines and the command checks) and `gates.nightly`
 (full-repository coverage and mutation, long fuzzing, benchmarks; schedule it in CI). Keep full gates fast enough to run per
@@ -109,6 +136,13 @@ property tests. Gate logs live in `paths.logs_dir`.
   infrastructure; re-run with `stages` starting at the failing stage. Done tasks stay `[x]`.
 - A journal with an empty or odd result: read `<transcriptDir>/journal.jsonl` before
   diagnosing.
+- Review findings and verifier verdicts are committed to review.md as soon as they exist, so a
+  run paused in Verify keeps them; a resumed Finalize completes the record and keeps the §3
+  rows and §6 justifications.
+- `blocked-setup` with uncommitted edits outside the feature directory: an interrupted worker
+  probably left them. Inspect them (`git status`, `git diff`), then commit them or hand them to
+  an implementer; never discard them automatically (the bash-guard blocks the commands that
+  would). Re-run with the same args.
 
 ## 6. Usage limits
 
@@ -164,7 +198,7 @@ id.
 - [ ] build output of the merged worktree deleted, worktree removed
 - [ ] `df -h` headroom checked (a full host disk crashed the VM twice in ferrocore)
 - [ ] `sdd trace --check` and `sdd progress` run on main
-- [ ] nothing under `/tmp` that matters
+- [ ] nothing under `/tmp` that matters (no build cache either: `sdd doctor` warns)
 
 ## 12. Adopting the gates on an existing codebase
 

@@ -14,7 +14,7 @@ Workflow script takes as `args.config`.
 | `paths.features_dir` | per-feature spec directories | `specs/features` |
 | `paths.templates_dir` | templates copied by `sdd new-feature` | `specs/templates` |
 | `paths.roadmap` / `constitution` / `development` | document paths | `docs/ROADMAP.md`, `docs/CONSTITUTION.md`, `docs/DEVELOPMENT.md` |
-| `paths.logs_dir` | gate logs | `.sdd/logs` |
+| `paths.logs_dir` | gate logs (`gates-<tag>.log`; pipeline runs keyed by HEAD under `gates/<feature>-<tag>-<sha7>[-dirty].log` with a `.pid` runner record) | `.sdd/logs` |
 | `paths.worktree_root` | per-feature and throwaway worktrees | `.wt` |
 | `paths.build_dirs` | build output to delete after merging | `[]` |
 | `paths.tools_dir` | where the kit tools are installed | `tools/sdd` |
@@ -78,6 +78,7 @@ Workflow script takes as `args.config`.
 | `role_denied_paths` | role -> globs it may not write | implementer -> test paths and the kit's hooks and checkers (`tools/sdd/githooks/**`, `tools/sdd/sddkit/**`, `tools/sdd/sdd.py`); test-author -> the same kit paths |
 | `formatters` | `[{glob, command with {file}, exclude?, timeout?}]` for the PostToolUse hook | `[]` |
 | `stop_check` | `{command, changed_globs, roles, timeout}` for Stop/SubagentStop | disabled |
+| `build_cache.env` | environment variables for a shared build cache across worktrees (e.g. `RUSTC_WRAPPER`, `SCCACHE_DIR`, `SCCACHE_CACHE_SIZE`; `CCACHE_DIR`, `CCACHE_MAXSIZE`; `npm_config_store_dir`); string values, set for every gate, check and git hook command and quoted to agents in the DISK RULE; `sdd doctor` warns for a path under `/tmp` or on a tmpfs mount. Recipes: docs/ADAPTING.md §9 | `{}` |
 | `models.mechanical|mid|strong|top` | explicit model ids per tier; empty = inherit | `""` |
 | `pipeline.max_parallel_features` | orchestrator cap | `2` |
 | `pipeline.max_critic_fix_rounds`, `max_gate_fix_rounds`, `skeptics` | loop bounds | `2`, `3`, `2` |

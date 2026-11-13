@@ -40,7 +40,8 @@ name and threat model, languages, gate commands (fast/full/nightly, each with na
 timeout), quality-gate rules (size limits, layers, coverage and mutation tools, command
 checks, hook rules), test commands, requirement id regex, trace tag keywords and scan globs, component
 regex, protected / append-only / role-scoped paths, formatters, normative source lookup,
-explicit model ids per tier, worktree root, parallelism caps, commit trailers.
+explicit model ids per tier, worktree root, parallelism caps, commit trailers, shared build
+cache environment.
 
 ## Quick start
 
@@ -70,6 +71,14 @@ finalisation to `ready-to-merge`. `docs/PLAYBOOK.md` describes the whole loop, i
 parallel features, resuming paused runs, usage limits, model tiering and the security
 sign-off.
 
+The pipeline is built to survive long unattended runs: every agent gets a **scope rule**
+(`strictScope`, on by default: a relayed chat message never redirects an agent), gate runs are
+**detached and keyed by HEAD** (an agent ending its turn cannot kill them, and an incomplete run
+is re-run up to 3 times instead of being counted as a failure), read-only roles can **read via
+git** instead of building worktrees (`readViaGit`), review findings are **committed as soon as
+they exist**, interrupted work is **never discarded**, reviewers flag **over-engineering**, and
+worktrees can share a **size-capped build cache** (`build_cache.env`, never on tmpfs).
+
 Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 `python3 -I tools/sdd/sdd.py gates --fast`.
 
@@ -78,8 +87,8 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 | Command | What it does |
 |---|---|
 | `sdd config [--validate\|--pipeline [--compact]\|--get key]` | show/validate `sdd.config.json`; `--pipeline` prints the subset the Workflow script takes as `args.config` (`--compact`: one line, for embedding in a prompt) |
-| `sdd trace [--feature NNN] [--check] [--json]` | requirement -> implementation -> test matrix; `--check` is the CI gate (orphans, duplicates, uncovered `must`) |
-| `sdd gates [--fast\|--plan fast\|full\|nightly] [--only g] [--detached] [--wait LOG]` | runs the configured gate plan, prints a summary table, exit code; every log ends with `GATES_EXIT=<n>`; missing tools SKIP with an install hint, or FAIL when `CI=true` |
+| `sdd trace [--feature NNN] [--check] [--json] [--include PATH]` | requirement -> implementation -> test matrix; `--check` is the CI gate (orphans, duplicates, uncovered `must`); `--include` also scans a file outside `trace.scan_globs` and lists it as `outsideScan` (the pipeline's red check) |
+| `sdd gates [--fast\|--plan fast\|full\|nightly] [--only g] [--detached [--feature F --tag T] [--fresh]] [--wait LOG]` | runs the configured gate plan, prints a summary table, exit code; every log ends with `GATES_EXIT=<n>`; missing tools SKIP with an install hint, or FAIL when `CI=true`. `--detached --feature --tag` keys the log on HEAD (`<logs_dir>/gates/F-T-<sha7>[-dirty].log`), attaches to a live run or reuses a completed one (`--fresh`: never reuse); `--wait` exits 124 while still running, 125 for an incomplete run |
 | `sdd check NAME [--json] [--staged] [--no-run]` | one quality check: `size`, `arch`, `coverage`, `mutation`, `commits`, `secrets`, `baseline` or a `quality.checks` entry; exit 0 pass, 1 violations, 2 config/tool error, 3 tool missing |
 | `sdd baseline [--report [--json]\|--init\|--update\|--resolve\|--merge-driver O A B]` | the shrink-only violation baseline: report every violation by kind and file, record it once at adoption, shrink it, resolve merge conflicts mechanically |
 | `sdd hooks install [--force]`, `sdd hooks run NAME` | sets `core.hooksPath` to the kit's git hooks (refuses over hooks already in use); the hook logic |
@@ -130,7 +139,7 @@ docs/ADAPTING.md.
 ## Testing the kit
 
 ```sh
-python3 -I -m unittest discover -s tests -v     # 94 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
+python3 -I -m unittest discover -s tests -v     # 105 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
 node tests/pipeline_smoke.mjs                   # drives feature-pipeline.js with a fake agent()
 ```
 
