@@ -26,6 +26,8 @@ agentic-sdd-kit/
     sddkit/quality/          quality checks (size, arch, coverage, mutation, command checks,
                              commits, secrets), the shrink-only baseline, git hook logic
     githooks/                pre-commit, commit-msg, pre-push (installed by `sdd hooks install`)
+    scripts/                 memcap-runner.sh (per-test memory cap), heavy-lock.sh (host-wide
+                             heavy-job lock), memguard.py (memory guard for unattended runs)
     pipeline/feature-pipeline.js   the per-feature Workflow script (Claude Code Workflow tool)
   claude/                    -> .claude/: 12 agents, 6 skills, 4 hooks, settings.json
   templates/                 CLAUDE.md, docs/{CONSTITUTION,DEVELOPMENT,ROADMAP}.md,
@@ -194,7 +196,7 @@ changes the table. Reference: docs/CONFIG.md ("Model routing"), docs/PLAYBOOK.md
 ## Testing the kit
 
 ```sh
-python3 -I -m unittest discover -s tests -v     # 204 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
+python3 -I -m unittest discover -s tests -v     # 222 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
 node tests/pipeline_smoke.mjs                   # drives feature-pipeline.js with a fake agent()
 node tests/pipeline_cachekeys.mjs               # cache keys: (prompt, opts) byte-identical to the baseline script without new args (PLAYBOOK §13)
 ```

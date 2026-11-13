@@ -58,9 +58,10 @@ class LessonsTest(unittest.TestCase):
         25: ("out of memory", "idle host"),
         26: ("wake-up", "reset"),
         27: ("none applies", "explicit entry"),
+        28: ("runaway", "memcap-runner"),
     }
 
-    def test_entries_16_to_27(self) -> None:
+    def test_entries_16_to_28(self) -> None:
         text = read("docs/LESSONS.md")
         rows = {}
         for line in text.splitlines():
@@ -127,7 +128,8 @@ class PlaybookPipelineAndPausesTest(unittest.TestCase):
         for word in ("opt-in", "byte-identical", "tests/pipeline_cachekeys.mjs", "--baseline", "stub runtime"):
             self.assertIn(word, safe)
         pauses = section(text, r"(?:\d+\.\s+)?Usage-limit pauses while unattended")
-        for word in ("one-shot wake-up", "reset time", "two heavy build or test jobs", "idle host", "without the compiler-cache wrapper", "registry dependencies"):
+        for word in ("one-shot wake-up", "reset time", "two heavy build or test jobs", "idle host", "without the compiler-cache wrapper", "registry dependencies",
+                     "heavy-lock.sh", "memcap-runner.sh", "memguard.py", "CARGO_TARGET_<TRIPLE>_RUNNER", "never remove it", "slow end-to-end tests"):
             self.assertIn(word, pauses)
         self.assertTrue((KIT / "tests" / "pipeline_cachekeys.mjs").is_file())
 

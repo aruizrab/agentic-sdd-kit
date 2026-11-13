@@ -7,7 +7,7 @@ Hooks:
 
 * ``protect-paths`` (PreToolUse Edit|Write|MultiEdit|NotebookEdit): exit 2 for
   ``protected_paths`` (always), the kit's hooks and checkers
-  (``<tools_dir>/{githooks/**,sddkit/**,sdd.py}``, every subagent, so role fallback to
+  (``<tools_dir>/{githooks/**,sddkit/**,scripts/**,sdd.py}``, every subagent, so role fallback to
   ``general-purpose`` cannot lift it), ``append_only_paths`` (only listed roles may
   *create* new files), ``role_denied_paths`` and ``role_write_scopes``.
 * ``bash-guard`` (PreToolUse Bash): best-effort block of shell commands that

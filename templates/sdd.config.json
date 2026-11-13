@@ -110,8 +110,13 @@
       "globs": [],
       "requires": [],
       "install": "",
-      "timeout": 3600
+      "timeout": 3600,
+      "jobs": 2,
+      "test_threads": 3,
+      "memory_limit_mib": 2048,
+      "env": {}
     },
+    "heavy_lock": "/tmp/sdd-heavy-job.lock",
     "checks": [],
     "secrets": {"gitleaks": true, "patterns": [], "allow_globs": []},
     "hooks": {

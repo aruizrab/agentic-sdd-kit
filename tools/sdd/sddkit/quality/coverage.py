@@ -8,13 +8,15 @@ test directories, registry test patterns, ``quality.test_globs``, test regions s
 ``cov:unreachable: <reason>`` comment marks it (at the end of the line, or on a comment-only
 line directly above; closing-brace-only lines right after a marked line count as marked). A
 changed considered file absent from the report fails as
-``coverage-unmeasured`` unless it cannot hold executable code.
+``coverage-unmeasured`` unless it cannot hold executable code. The command runs under the
+host-wide heavy-job lock (``quality.heavy_lock``, ``scripts/heavy-lock.sh``).
 """
 
 from __future__ import annotations
 
 import os
 import re
+import shlex
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -119,10 +121,24 @@ def no_code(path: str, src: langs.Source, cfg: Dict[str, Any]) -> bool:
     return src.lang.name in langs.LANGS and not src.lang.top_level_statements and not langs.find_functions(src)
 
 
-def run_tool(root: Path, cfg: Dict[str, Any], section: str, extra_cmd: Optional[str] = None) -> Tuple[Optional[Result], str]:
-    """Run ``quality.<section>.command`` after deleting its report. Returns (failure result or None, output)."""
+SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"  # the kit's gate scripts, next to sdd.py
+
+
+def heavy_locked(cfg: Dict[str, Any], cmd: str) -> Tuple[str, Dict[str, str]]:
+    """``cmd`` run under the host-wide heavy-job lock (``quality.heavy_lock``; ``""`` = unlocked)."""
+    lock = cfg["quality"].get("heavy_lock") or ""
+    if not lock:
+        return cmd, {}
+    return f"sh {shlex.quote(str(SCRIPTS / 'heavy-lock.sh'))} sh -c {shlex.quote(cmd)}", {"SDD_HEAVY_LOCK": lock}
+
+
+def run_tool(root: Path, cfg: Dict[str, Any], section: str, extra_cmd: Optional[str] = None,
+             extra_env: Optional[Dict[str, str]] = None) -> Tuple[Optional[Result], str]:
+    """Run ``quality.<section>.command`` (under the heavy-job lock) after deleting its report.
+    Returns (failure result or None, output)."""
     t = cfg["quality"][section]
-    env = tool_env(cfg, root)
+    locked, lock_env = heavy_locked(cfg, extra_cmd or t["command"])
+    env = tool_env(cfg, root, {**(extra_env or {}), **lock_env})
     missing = missing_programs(t["requires"], env)
     if missing:
         return skip(section, ", ".join(missing), t["install"]), ""
@@ -131,7 +147,7 @@ def run_tool(root: Path, cfg: Dict[str, Any], section: str, extra_cmd: Optional[
         if rp.is_file():
             rp.unlink()
     cmd = extra_cmd or t["command"]
-    rc, out, timed_out = run_command(cmd, root, env, float(t["timeout"]))
+    rc, out, timed_out = run_command(locked, root, env, float(t["timeout"]))
     if timed_out:
         raise QualityError(f"{section} command timed out after {t['timeout']} s:\n{tail(out)}")
     if rc == 127:

@@ -49,6 +49,7 @@ def test_config(**overrides) -> dict:
         {"name": "missing", "command": "definitely-not-a-program-xyz", "timeout": 10, "optional": True},
     ]
     cfg["commit"]["trailers"] = ["Co-Authored-By: Test <test@localhost>"]
+    cfg["quality"]["heavy_lock"] = str(SCRATCH / "heavy-job.lock")  # never the host-wide lock of real jobs
     cfg["merge"]["union_manifests"] = ["Cargo.toml", "crates/*/Cargo.toml", "package.json"]
     for k, v in overrides.items():
         if isinstance(v, dict):

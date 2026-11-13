@@ -145,7 +145,7 @@
       },
       {
         "name": "test",
-        "command": "cargo nextest run --workspace --no-tests=pass || cargo test --workspace",
+        "command": "tools/sdd/scripts/heavy-lock.sh sh -c 'cargo nextest run --workspace --no-tests=pass || cargo test --workspace'",
         "timeout": 3600
       },
       {
@@ -255,13 +255,13 @@
     "nightly": [
       {
         "name": "coverage-full",
-        "command": "cargo llvm-cov --workspace --fail-under-lines 90",
+        "command": "tools/sdd/scripts/heavy-lock.sh cargo llvm-cov --workspace --fail-under-lines 90",
         "timeout": 7200,
         "skip_if_missing": "cargo-llvm-cov"
       },
       {
         "name": "mutation-full",
-        "command": "cargo mutants --workspace --no-shuffle",
+        "command": "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER=\"$PWD/tools/sdd/scripts/memcap-runner.sh\" NEXTEST_TEST_THREADS=3 RUST_TEST_THREADS=3 RUSTC_WRAPPER= tools/sdd/scripts/heavy-lock.sh cargo mutants --workspace --no-shuffle --jobs 2",
         "timeout": 21600,
         "skip_if_missing": "cargo-mutants"
       },
@@ -349,7 +349,7 @@
       "timeout": 3600
     },
     "mutation": {
-      "command": "cargo mutants --workspace --in-diff {diff_file} --no-shuffle",
+      "command": "cargo mutants --workspace --in-diff {diff_file} --no-shuffle --jobs {jobs}",
       "report": "mutants.out/missed.txt",
       "format": "regex",
       "survivor_regex": "(?m)^(?P<file>[^:\\n]+):(?P<line>\\d+):\\d+: (?P<mutation>.+)$",
@@ -363,8 +363,18 @@
         "cargo-mutants"
       ],
       "install": "cargo install cargo-mutants",
-      "timeout": 3600
+      "timeout": 3600,
+      "jobs": 2,
+      "test_threads": 3,
+      "memory_limit_mib": 2048,
+      "env": {
+        "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER": "{memcap_runner}",
+        "NEXTEST_TEST_THREADS": "{test_threads}",
+        "RUST_TEST_THREADS": "{test_threads}",
+        "RUSTC_WRAPPER": ""
+      }
     },
+    "heavy_lock": "/tmp/sdd-heavy-job.lock",
     "checks": [
       {
         "name": "docs",

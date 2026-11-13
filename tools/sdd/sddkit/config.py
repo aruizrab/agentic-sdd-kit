@@ -120,7 +120,12 @@ DEFAULTS: Dict[str, Any] = {
             "requires": [],
             "install": "",
             "timeout": 3600,
+            "jobs": 2,
+            "test_threads": 3,
+            "memory_limit_mib": 2048,
+            "env": {},
         },
+        "heavy_lock": "/tmp/sdd-heavy-job.lock",
         "checks": [],
         "secrets": {"gitleaks": True, "patterns": [], "allow_globs": []},
         "hooks": {
@@ -203,7 +208,7 @@ DEFAULTS: Dict[str, Any] = {
 
 
 # Sections whose keys are free-form (role names), and known keys that have no default.
-_FREE_FORM_SECTIONS = {"role_write_scopes", "role_denied_paths", "quality.languages", "build_cache.env"}
+_FREE_FORM_SECTIONS = {"role_write_scopes", "role_denied_paths", "quality.languages", "build_cache.env", "quality.mutation.env"}
 _BUILTIN_CHECKS = ("size", "arch", "coverage", "mutation", "baseline", "commits", "secrets", "protected")
 _GATE_KEYS = {"name", "command", "timeout", "optional", "skip_if_missing", "env", "install", "skip_exit"}
 _EXTRA_KEYS = {"components": {"word"}, "pipeline": {"role_tiers"}}
@@ -385,6 +390,27 @@ def _validate_procedure_steps(ps: Any) -> List[str]:
     return problems
 
 
+def _validate_mutation_limits(m: Dict[str, Any]) -> List[str]:
+    problems: List[str] = []
+    for key in ("jobs", "test_threads"):
+        v = m.get(key)
+        if not isinstance(v, int) or isinstance(v, bool) or v < 1:
+            problems.append(f"quality.mutation.{key} must be a positive integer")
+    v = m.get("memory_limit_mib")
+    if not isinstance(v, int) or isinstance(v, bool) or v < 0 or 0 < v < 64:
+        problems.append("quality.mutation.memory_limit_mib must be 0 (no cap) or an integer of at least 64 MiB")
+    env = m.get("env")
+    if not isinstance(env, dict):
+        problems.append("quality.mutation.env must be an object of environment variables")
+    else:
+        for key, value in env.items():
+            if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", key):
+                problems.append(f"quality.mutation.env: {key!r} is not an environment variable name")
+            elif not isinstance(value, str):
+                problems.append(f"quality.mutation.env.{key} must be a string")
+    return problems
+
+
 def _validate_quality(q: Dict[str, Any]) -> List[str]:
     problems: List[str] = []
     for key in ("generated", "test_globs", "tool_dirs"):
@@ -428,6 +454,10 @@ def _validate_quality(q: Dict[str, Any]) -> List[str]:
         problems.append("quality.mutation.format must be 'regex' or 'mutation-testing-report'")
     if q["mutation"]["format"] == "regex" and q["mutation"]["survivor_regex"]:
         _regex(problems, "quality.mutation.survivor_regex", q["mutation"]["survivor_regex"], ("file", "mutation"))
+    problems.extend(_validate_mutation_limits(q["mutation"]))
+    lock = q.get("heavy_lock")
+    if not isinstance(lock, str) or (lock and not lock.startswith("/")):
+        problems.append("quality.heavy_lock must be an absolute lock file path shared by every worktree (\"\" = no lock)")
     seen = set()
     for i, c in enumerate(q.get("checks") or []):
         where = f"quality.checks[{i}]"
@@ -467,9 +497,9 @@ def _validate_quality(q: Dict[str, Any]) -> List[str]:
 
 
 def kit_checker_globs(cfg: Dict[str, Any]) -> List[str]:
-    """The kit's git hooks and checkers, derived from ``paths.tools_dir``: no subagent may edit them."""
+    """The kit's git hooks, checkers and gate scripts, derived from ``paths.tools_dir``: no subagent may edit them."""
     d = (cfg.get("paths") or {}).get("tools_dir", "tools/sdd").strip().strip("/") or "tools/sdd"
-    return [f"{d}/githooks/**", f"{d}/sddkit/**", f"{d}/sdd.py"]
+    return [f"{d}/githooks/**", f"{d}/sddkit/**", f"{d}/scripts/**", f"{d}/sdd.py"]
 
 
 def public(cfg: Dict[str, Any]) -> Dict[str, Any]:

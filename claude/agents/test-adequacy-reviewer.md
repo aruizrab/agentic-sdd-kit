@@ -35,7 +35,9 @@ Check:
 8. **Mutation justifications**: every surviving mutant justified in review.md §6 is truly
    equivalent or unobservable (explain why no test can tell it apart); a surviving mutant
    that a reasonable assertion would kill is blocking. Run `sdd check mutation --json` (or
-   read its report) and compare it with §6: an unlisted survivor is blocking.
+   read its report) and compare it with §6: an unlisted survivor is blocking. If the mutation
+   command excludes slow end-to-end tests, re-run the survivors with those tests included
+   before reporting them as test gaps; a survivor they kill is not a gap.
 
 9. **Golden call-flow scenarios** (only when the spec has step tables): every step table is
    checked by a test that records a run and passes its events through the call-flow helper

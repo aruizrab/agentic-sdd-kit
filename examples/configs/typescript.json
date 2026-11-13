@@ -159,7 +159,7 @@
       },
       {
         "name": "test",
-        "command": "npm test --silent -- --run --coverage",
+        "command": "tools/sdd/scripts/heavy-lock.sh npm test --silent -- --run --coverage",
         "timeout": 2400
       },
       {
@@ -255,12 +255,12 @@
     "nightly": [
       {
         "name": "coverage-full",
-        "command": "npx --no-install vitest run --coverage.enabled --coverage.all --coverage.thresholds.lines=90",
+        "command": "tools/sdd/scripts/heavy-lock.sh npx --no-install vitest run --coverage.enabled --coverage.all --coverage.thresholds.lines=90",
         "timeout": 7200
       },
       {
         "name": "mutation-full",
-        "command": "npx --no-install stryker run",
+        "command": "NODE_OPTIONS=--max-old-space-size=2048 tools/sdd/scripts/heavy-lock.sh npx --no-install stryker run --concurrency 2",
         "timeout": 21600
       }
     ]
@@ -346,7 +346,7 @@
       "timeout": 3600
     },
     "mutation": {
-      "command": "stryker run --incremental --reporters json",
+      "command": "stryker run --incremental --reporters json --concurrency {jobs}",
       "report": "reports/mutation/mutation.json",
       "format": "mutation-testing-report",
       "survivor_regex": "",
@@ -358,8 +358,15 @@
         "stryker"
       ],
       "install": "npm install --save-dev @stryker-mutator/core @stryker-mutator/vitest-runner",
-      "timeout": 3600
+      "timeout": 3600,
+      "jobs": 2,
+      "test_threads": 3,
+      "memory_limit_mib": 0,
+      "env": {
+        "NODE_OPTIONS": "--max-old-space-size=2048"
+      }
     },
+    "heavy_lock": "/tmp/sdd-heavy-job.lock",
     "checks": [
       {
         "name": "docs",

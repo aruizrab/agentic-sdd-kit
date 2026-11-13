@@ -162,7 +162,7 @@
       },
       {
         "name": "test",
-        "command": "pytest -q --no-header --cov=src --cov-fail-under=80",
+        "command": "tools/sdd/scripts/heavy-lock.sh pytest -q --no-header --cov=src --cov-fail-under=80",
         "timeout": 3600
       },
       {
@@ -259,13 +259,13 @@
     "nightly": [
       {
         "name": "coverage-full",
-        "command": "coverage run --source=src -m pytest -q && coverage report --fail-under=90",
+        "command": "tools/sdd/scripts/heavy-lock.sh sh -c 'coverage run --source=src -m pytest -q && coverage report --fail-under=90'",
         "timeout": 7200,
         "skip_if_missing": "coverage"
       },
       {
         "name": "mutation-full",
-        "command": "mutmut run",
+        "command": "tools/sdd/scripts/heavy-lock.sh tools/sdd/scripts/memcap-runner.sh mutmut run --max-children 2",
         "timeout": 21600,
         "skip_if_missing": "mutmut"
       }
@@ -351,7 +351,7 @@
       "timeout": 3600
     },
     "mutation": {
-      "command": "mutmut run --max-children 4 >/dev/null && mutmut results",
+      "command": "mutmut run --max-children {jobs} >/dev/null && mutmut results",
       "report": "",
       "format": "regex",
       "survivor_regex": "(?m)^\\s+(?P<file>[\\w.]+?)\\.(?P<mutation>x\\w*__mutmut_\\d+): survived$",
@@ -363,8 +363,13 @@
         "mutmut"
       ],
       "install": "pip install mutmut",
-      "timeout": 3600
+      "timeout": 3600,
+      "jobs": 2,
+      "test_threads": 3,
+      "memory_limit_mib": 2048,
+      "env": {}
     },
+    "heavy_lock": "/tmp/sdd-heavy-job.lock",
     "checks": [
       {
         "name": "docs",

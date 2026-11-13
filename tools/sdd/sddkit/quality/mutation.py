@@ -11,19 +11,50 @@ has a line), or on a known line that is not a changed line or is in a test regio
 a survivor named by dotted module (``app.domain.calc``) is mapped to the changed file of that
 module first. Any other survivor fails unless the current feature's review.md has a line
 ``- mutant: <file>[:<line>]: <mutation> — <reason>`` with a non-empty reason.
+
+Resource limits (a mutant can turn a loop into a runaway allocator): ``{jobs}``,
+``{test_threads}``, ``{memory_limit_kb}`` and ``{memcap_runner}`` are substituted in the
+command and in the values of ``quality.mutation.env`` (set for the command), and
+``SDD_MUTATION_JOBS``, ``SDD_TEST_THREADS`` and ``SDD_MEM_LIMIT_KB`` are exported. With
+``memory_limit_mib`` > 0 and no ``{memcap_runner}`` in the command or env, the whole command
+runs under ``scripts/memcap-runner.sh`` (each process capped); with it, the tool's test-runner
+hook caps the test processes only (Rust: ``CARGO_TARGET_<TRIPLE>_RUNNER``). The command runs
+under the host-wide heavy-job lock (``quality.heavy_lock``).
 """
 
 from __future__ import annotations
 
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import QualityError, Result, Violation, normalize_path, quote_files, scratch_dir, vcs
-from .coverage import check_report_fresh, considered_files, run_tool
+from .coverage import SCRIPTS, check_report_fresh, considered_files, run_tool
 
 JUSTIFICATION = re.compile(r"^\s*[-*]\s*mutant:\s*(?P<file>[^\s:]+)(?::(?P<line>\d+))?:\s*(?P<mutation>.+?)\s+[—]\s*(?P<reason>.*)$")
+
+
+def build_command(cfg: Dict[str, Any], diff_file: str, files: List[str]) -> Tuple[str, Dict[str, str]]:
+    """The mutation command and its extra environment, with the resource limits applied."""
+    m = cfg["quality"]["mutation"]
+    runner = str(SCRIPTS / "memcap-runner.sh")
+    limit_kb = int(m["memory_limit_mib"]) * 1024
+    values = {"{jobs}": str(m["jobs"]), "{test_threads}": str(m["test_threads"]), "{memory_limit_kb}": str(limit_kb)}
+
+    def fill(text: str, runner_text: str) -> str:
+        for key, value in {**values, "{memcap_runner}": runner_text}.items():
+            text = text.replace(key, value)
+        return text
+
+    env = {k: fill(v, runner) for k, v in (m.get("env") or {}).items()}
+    env.update({"SDD_MUTATION_JOBS": values["{jobs}"], "SDD_TEST_THREADS": values["{test_threads}"], "SDD_MEM_LIMIT_KB": str(limit_kb)})
+    hooked = "{memcap_runner}" in m["command"] or any("{memcap_runner}" in v for v in (m.get("env") or {}).values())
+    cmd = fill(m["command"], shlex.quote(runner)).replace("{diff_file}", quote_files([diff_file])).replace("{changed_files}", quote_files(sorted(files)))
+    if limit_kb and not hooked:
+        cmd = f"sh {shlex.quote(runner)} sh -c {shlex.quote(cmd)}"
+    return cmd, env
 
 
 def parse_survivors(text: str, cfg: Dict[str, Any], root: Path) -> List[Tuple[str, Optional[int], str]]:
@@ -94,8 +125,8 @@ def run(root: Path, cfg: Dict[str, Any], no_run: bool = False) -> Result:
     if m["command"] and not no_run:
         diff_file = scratch_dir(root, cfg) / "diff.patch"
         diff_file.write_text(vcs.diff_text(root, base), encoding="utf-8")
-        cmd = m["command"].replace("{diff_file}", quote_files([str(diff_file)])).replace("{changed_files}", quote_files(sorted(files)))
-        failed, output = run_tool(root, cfg, "mutation", cmd)
+        cmd, env = build_command(cfg, str(diff_file), list(files))
+        failed, output = run_tool(root, cfg, "mutation", cmd, env)
         if failed:
             return failed
     elif m["report"]:

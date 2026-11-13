@@ -156,7 +156,7 @@
       },
       {
         "name": "test",
-        "command": "go test -race -cover ./...",
+        "command": "tools/sdd/scripts/heavy-lock.sh go test -race -cover ./...",
         "timeout": 3600
       },
       {
@@ -253,12 +253,12 @@
     "nightly": [
       {
         "name": "coverage-full",
-        "command": "go test -cover ./...",
+        "command": "tools/sdd/scripts/heavy-lock.sh go test -cover ./...",
         "timeout": 7200
       },
       {
         "name": "mutation-full",
-        "command": "gremlins unleash ./...",
+        "command": "tools/sdd/scripts/heavy-lock.sh tools/sdd/scripts/memcap-runner.sh gremlins unleash --workers 2 --test-cpu 3 ./...",
         "timeout": 21600,
         "skip_if_missing": "gremlins"
       }
@@ -341,7 +341,7 @@
       "timeout": 3600
     },
     "mutation": {
-      "command": "gremlins unleash ./...",
+      "command": "gremlins unleash --workers {jobs} --test-cpu {test_threads} ./...",
       "report": "",
       "format": "regex",
       "survivor_regex": "(?m)^\\s*LIVED\\s+(?P<mutation>\\S+)\\s+at\\s+(?P<file>[^:\\s]+):(?P<line>\\d+):\\d+",
@@ -353,8 +353,13 @@
         "gremlins"
       ],
       "install": "go install github.com/go-gremlins/gremlins/cmd/gremlins@latest",
-      "timeout": 3600
+      "timeout": 3600,
+      "jobs": 2,
+      "test_threads": 3,
+      "memory_limit_mib": 2048,
+      "env": {}
     },
+    "heavy_lock": "/tmp/sdd-heavy-job.lock",
     "checks": [
       {
         "name": "docs",

@@ -325,6 +325,30 @@ until somebody looks, even after the limit has reset.
   builds ran a 16 GB host out of memory, the OOM killer took a test process and froze the
   session. Queue heavy jobs; `pipeline.max_parallel_features` and `pipeline.max_build_jobs`
   bound the pipeline, but jobs started by hand count too.
+- **Queue heavy jobs on the host-wide lock**: `tools/sdd/scripts/heavy-lock.sh <command>`
+  runs a command under `flock` on one lock file per host (`quality.heavy_lock`, default
+  `/tmp/sdd-heavy-job.lock`, the same in every worktree). `sdd check coverage` and
+  `sdd check mutation` take it themselves; wrap the other heavy commands (the full plan's test
+  build, nightly runs, cache measurements, jobs started by hand) the same way. A nested call
+  for the same lock runs directly, so wrapping a whole gate plan cannot deadlock.
+- **Cap every mutation test process**: a mutant can turn a loop into a runaway allocator that
+  grows a test process by gigabytes in seconds, far faster than a test timeout stops it. With
+  3 jobs and 8 test threads per job that took a 16 GB host down, init system and unrelated user
+  services included. `sdd check mutation` runs at most `quality.mutation.jobs` (2) mutants with
+  `test_threads` (3) each and caps each test process's address space at `memory_limit_mib`
+  (2048) through `tools/sdd/scripts/memcap-runner.sh` (`ulimit -v`); for Rust the runner is the
+  cargo target runner (`CARGO_TARGET_<TRIPLE>_RUNNER`), so the compiler stays uncapped. A
+  runaway mutant then fails alone and counts as caught. If the unmutated baseline fails only
+  because of the cap, raise it; never remove it. Other ecosystems: docs/ADAPTING.md §6.
+- **Run the memory guard during unattended heavy runs**:
+  `nohup python3 -I tools/sdd/scripts/memguard.py --log .sdd/logs/memguard.log &` (or a user
+  service). When MemAvailable drops under `--floor-mib` (1536) it kills the largest process
+  whose executable matches `--pattern` (default `*/target/*`, test binaries in a build target
+  directory) and logs it, so the kernel never picks a system service. It is a backstop for the
+  cap, not a replacement: interpreted test runners (python, node) do not match by executable.
+- **Re-check survivors with the slow tests before calling them test gaps**: if the mutation
+  command excludes slow end-to-end tests for speed, re-run the surviving mutants with those
+  tests included first; a survivor they kill is not a gap.
 - **Measure build caches only on an idle host**: a cache measurement is a series of cold
   builds, and its timings are worthless (and its memory use dangerous) next to another build.
 - **Run mutation testing without the compiler-cache wrapper** (for example an empty

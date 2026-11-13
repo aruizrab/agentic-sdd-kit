@@ -172,23 +172,46 @@ run completed" (any other code, e.g. a failing unmutated baseline, is a tool err
 
 | Language | `mutation.command` | Survivors | `ok_exits` |
 |---|---|---|---|
-| Rust | `cargo mutants --workspace --in-diff {diff_file} --no-shuffle` | `report: mutants.out/missed.txt`, regex `^(?P<file>[^:\n]+):(?P<line>\d+):\d+: (?P<mutation>.+)$` | `[0, 2, 3]` (2 = missed mutants, 3 = timeouts; 1 usage error, 4 baseline failed) |
-| Python | `mutmut run --max-children 4 >/dev/null && mutmut results` (`&&`: a failed run is a tool error, never "no survivors") | stdout, regex on `    <module>.x_<fn>__mutmut_<n>: survived` (file = dotted module, mapped to the changed file of that module; survivors in unchanged modules are ignored; no line: every survivor in a changed module needs a fix or a justification) | `[0]` |
-| TypeScript | `stryker run --incremental --reporters json` | `report: reports/mutation/mutation.json`, `format: mutation-testing-report` | `[0]` |
-| Go | `gremlins unleash ./...` | stdout, regex `LIVED (?P<mutation>\S+) at (?P<file>...):(?P<line>\d+)` | `[0]` |
+| Rust | `cargo mutants --workspace --in-diff {diff_file} --no-shuffle --jobs {jobs}` | `report: mutants.out/missed.txt`, regex `^(?P<file>[^:\n]+):(?P<line>\d+):\d+: (?P<mutation>.+)$` | `[0, 2, 3]` (2 = missed mutants, 3 = timeouts; 1 usage error, 4 baseline failed) |
+| Python | `mutmut run --max-children {jobs} >/dev/null && mutmut results` (`&&`: a failed run is a tool error, never "no survivors") | stdout, regex on `    <module>.x_<fn>__mutmut_<n>: survived` (file = dotted module, mapped to the changed file of that module; survivors in unchanged modules are ignored; no line: every survivor in a changed module needs a fix or a justification) | `[0]` |
+| TypeScript | `stryker run --incremental --reporters json --concurrency {jobs}` | `report: reports/mutation/mutation.json`, `format: mutation-testing-report` | `[0]` |
+| Go | `gremlins unleash --workers {jobs} --test-cpu {test_threads} ./...` | stdout, regex `LIVED (?P<mutation>\S+) at (?P<file>...):(?P<line>\d+)` | `[0]` |
 
 A survivor that no test can kill is justified in the feature's review.md §6 as
 `- mutant: <file>[:<line>]: <mutation> — <reason>`.
+
+**Mutation resource limits.** A mutant can turn a loop into a runaway allocator: one test
+process grows by gigabytes in seconds, far faster than any test timeout, and several jobs with
+several test threads each exhausted a 16 GB host (docs/LESSONS.md 28). `sdd check mutation`
+therefore applies `quality.mutation.jobs` (default 2), `test_threads` (3) and a per-test-process
+memory cap, `memory_limit_mib` (2048), through `tools/sdd/scripts/memcap-runner.sh`
+(`ulimit -v`), and runs under the host-wide heavy-job lock (`tools/sdd/scripts/heavy-lock.sh`,
+`quality.heavy_lock`). Cap the test processes, not the compiler:
+
+| Ecosystem | How the cap reaches the tests |
+|---|---|
+| Rust | target runner hook: `env` `{"CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER": "{memcap_runner}", "NEXTEST_TEST_THREADS": "{test_threads}", "RUST_TEST_THREADS": "{test_threads}", "RUSTC_WRAPPER": ""}` (use your host triple: `rustc -vV`, upper-case, `-` to `_`); cargo and nextest start every test binary through the runner, rustc stays uncapped |
+| Python, Go | no `{memcap_runner}`: the whole command runs under the runner, each process (the Go compiler too) with its own cap |
+| TypeScript (Node) | `ulimit -v` breaks V8, which reserves large address space: `memory_limit_mib: 0` and `env` `{"NODE_OPTIONS": "--max-old-space-size=2048"}` (heap cap per process) |
+| any (systemd) | a cgroup for the whole run instead: `systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=0 <command>` (the kernel then kills the largest process inside the scope only) |
+
+A runaway mutant then fails alone and counts as caught. If the unmutated baseline fails only
+because of the cap, raise `memory_limit_mib`; never remove the cap. For unattended runs also
+start the memory guard (`python3 -I tools/sdd/scripts/memguard.py`, docs/PLAYBOOK.md §14).
 
 **Nightly** (`gates.nightly`, scheduled in CI): the whole repository, not only the diff, with
 an absolute floor instead of the 100 % changed-lines rule.
 
 | Language | full-repository coverage | full-repository mutation |
 |---|---|---|
-| Rust | `cargo llvm-cov --workspace --fail-under-lines 90` | `cargo mutants --workspace --no-shuffle` |
-| Python | `coverage run --source=src -m pytest -q && coverage report --fail-under=90` | `mutmut run` |
-| TypeScript | `npx --no-install vitest run --coverage.enabled --coverage.all --coverage.thresholds.lines=90` | `npx --no-install stryker run` |
-| Go | `go test -cover ./...` | `gremlins unleash ./...` |
+| Rust | `cargo llvm-cov --workspace --fail-under-lines 90` | `cargo mutants --workspace --no-shuffle --jobs 2` with the runner hook, test threads and `RUSTC_WRAPPER=` set inline |
+| Python | `coverage run --source=src -m pytest -q && coverage report --fail-under=90` | `tools/sdd/scripts/memcap-runner.sh mutmut run --max-children 2` |
+| TypeScript | `npx --no-install vitest run --coverage.enabled --coverage.all --coverage.thresholds.lines=90` | `NODE_OPTIONS=--max-old-space-size=2048 npx --no-install stryker run --concurrency 2` |
+| Go | `go test -cover ./...` | `tools/sdd/scripts/memcap-runner.sh gremlins unleash --workers 2 --test-cpu 3 ./...` |
+
+The examples wrap these and the full plan's `test` gate in `tools/sdd/scripts/heavy-lock.sh`
+(`sdd check coverage` and `sdd check mutation` take the lock themselves), so heavy jobs of
+concurrent pipelines queue instead of overlapping.
 
 Long fuzzing (`FUZZ_BUDGET_SECS=3600 scripts/fuzz-changed.sh`) and benchmarks belong here too.
 
@@ -346,7 +369,7 @@ Add your CI configuration to `protected_paths` too (for example `.github/**`,
 branch's own workflow file.
 
 Agents cannot edit the hooks and checkers locally either: `<tools_dir>/githooks/**`,
-`<tools_dir>/sddkit/**` and `<tools_dir>/sdd.py` are denied to every subagent (the pipeline's
+`<tools_dir>/sddkit/**`, `<tools_dir>/scripts/**` and `<tools_dir>/sdd.py` are denied to every subagent (the pipeline's
 role fallback runs all roles as `general-purpose`, so a role-keyed denial would never fire).
 
 Schedule `CI=true python3 -I tools/sdd/sdd.py gates --plan nightly` for the full-repository
