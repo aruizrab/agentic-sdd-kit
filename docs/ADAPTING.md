@@ -298,8 +298,13 @@ CI=true python3 -I tools/sdd/sdd.py gates --plan full
 
 which includes `sdd check commits` (every commit message on the branch) and `sdd check
 secrets` (added lines and commits, gitleaks when installed). With `CI=true` a missing tool
-fails instead of skipping, so install every tool the plan names. Set `SDD_BASE_REF` when the
-target branch is not `features.main_branch` (for example `SDD_BASE_REF=origin/release-2`).
+fails instead of skipping, so install every tool the plan names. Always set `SDD_BASE_REF` to
+the pull request's target branch (for example `SDD_BASE_REF=origin/main` or
+`origin/release-2`): the reference points must not come from the branch under test. With
+`CI=true` the kit ignores the branch's `quality.base_ref`, refuses a configured base that
+resolves to HEAD while the branch has its own commits, and `sdd check baseline` takes
+`quality.baseline_file` from the merge-base's configuration (a renamed baseline fails as
+`baseline-moved`).
 Schedule `CI=true python3 -I tools/sdd/sdd.py gates --plan nightly` for the full-repository
 coverage and mutation runs, long fuzzing and benchmarks.
 

@@ -269,6 +269,20 @@ def ratchet(root: Path, cfg: Dict[str, Any]) -> Result:
     rel = cfg["quality"]["baseline_file"]
     current = load(root, cfg) or []
     mb = vcs.merge_base(root, cfg)
+    # The file name is a reference point: take it from the merge-base's configuration, so a
+    # branch cannot start a fresh baseline under a new name.
+    base_rel = rel
+    base_cfg_text = vcs.show(root, mb, "sdd.config.json")
+    if base_cfg_text is not None:
+        try:
+            base_rel = ((json.loads(base_cfg_text).get("quality") or {}).get("baseline_file")) or "sdd.baseline.json"
+        except (json.JSONDecodeError, AttributeError):
+            base_rel = rel
+    if base_rel != rel:
+        res.violations.append(Violation("baseline-moved", rel, None, {"file": rel, "message": f"{base_rel} -> {rel}"}, 1,
+                                        f"quality.baseline_file changed from {base_rel} (merge-base) to {rel}: the baseline is "
+                                        "compared with the merge-base's file; change its name on the main branch only"))
+        return res.finish()
     base_text = vcs.show(root, mb, rel)
     if base_text is None:
         res.notes.append(f"no {rel} at the merge-base (adoption commit): nothing to compare")

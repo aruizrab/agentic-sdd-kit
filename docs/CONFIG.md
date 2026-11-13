@@ -36,8 +36,8 @@ Workflow script takes as `args.config`.
 | `components.path_regex` | first capture group = component of a file (lanes) | `^src/([^/]+)/` |
 | `components.root`, `components.word` | component of root files; the word used in prompts | `workspace`, `component` |
 | `gates.fast` / `gates.full` / `gates.nightly` | gate plans (`sdd gates --plan`): `{name, command, timeout, optional?, skip_if_missing?, env?, install?, skip_exit?}`; `install` is the hint shown on a SKIP row; `skip_exit` (0-255) is the exit code that means "tool missing, SKIP" (the templates set `3` on `sdd check` entries only); with `CI=true` every skip fails | `[]` |
-| `quality.baseline_file` | the committed, shrink-only baseline | `sdd.baseline.json` |
-| `quality.base_ref` | base branch for "changed lines" (else `SDD_BASE_REF`, else `features.main_branch`, else `origin/<main_branch>`) | `""` |
+| `quality.baseline_file` | the committed, shrink-only baseline; `sdd check baseline` uses the merge-base's value and fails a branch that renames it (`baseline-moved`) | `sdd.baseline.json` |
+| `quality.base_ref` | base branch for "changed lines" (`SDD_BASE_REF` wins; ignored with `CI=true`; a value resolving to HEAD on a branch with its own commits is an error; else `features.main_branch`, else `origin/<main_branch>`) | `""` |
 | `quality.generated` | globs of generated files: excluded from size, coverage and mutation | `[]` |
 | `quality.test_globs` | extra test-code globs, added to `tests/**`, `**/tests/**`, `test/**`, `**/test/**` and the language registry's patterns; test code is excluded from coverage and mutation, still size-checked | `[]` |
 | `quality.tool_dirs` | project-local tool directories (root-relative, e.g. `node_modules/.bin`) put in front of `PATH` for every gate, check and git hook command; `requires` and `skip_if_missing` look there too, so a missing project tool SKIPs with its install hint instead of being downloaded | `[]` |

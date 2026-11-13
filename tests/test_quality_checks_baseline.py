@@ -186,6 +186,37 @@ class BaselineTest(unittest.TestCase):
             self.assertNotIn("lint", rep["totals"])
             self.assertEqual(rep["stale"], [])
 
+    def test_branch_config_cannot_move_reference_points(self) -> None:
+        """S4: a branch cannot rename the baseline to grow it, nor point the base at HEAD."""
+        run_cli(self.root, "baseline", "--init")
+        self.repo.commit("chore: adopt baseline")
+        self.repo.git("switch", "-q", "-c", "feat/F003-z")
+        data = json.loads((self.root / "sdd.baseline.json").read_text())
+        data["entries"].append({"kind": "size-file", "file": "src/huge.py", "lines": 9000})
+        (self.root / "sdd.baseline2.json").write_text(json.dumps(data))
+        (self.root / "sdd.baseline.json").unlink()
+        cfg = json.loads((self.root / "sdd.config.json").read_text())
+        cfg["quality"]["baseline_file"] = "sdd.baseline2.json"
+        write_config(self.root, cfg)
+        self.repo.commit("chore: move the baseline")
+        for env in ({"CI": "true"}, {"CI": ""}):
+            proc = run_cli(self.root, "check", "baseline", env=env)
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("baseline-moved", proc.stdout)
+        # base_ref = HEAD would hide the branch's commits: an error, and ignored in CI.
+        cfg["quality"]["baseline_file"] = "sdd.baseline.json"
+        cfg["quality"]["base_ref"] = "HEAD"
+        cfg["quality"]["secrets"]["gitleaks"] = False
+        write_config(self.root, cfg)
+        (self.root / "sdd.baseline2.json").rename(self.root / "sdd.baseline.json")
+        write(self.root, "src/k.py", "k = '" + "AKIA" + "ABCDEFGHIJKLMNOP" + "'\n")
+        self.repo.commit("feat: key")
+        proc = run_cli(self.root, "check", "secrets", env={"CI": ""})
+        self.assertEqual(proc.returncode, 2, proc.stdout)
+        self.assertIn("resolves to HEAD", proc.stdout)
+        for check in ("secrets", "baseline"):
+            self.assertEqual(run_cli(self.root, "check", check, env={"CI": "true"}).returncode, 1, check)
+
     def test_ratchet(self) -> None:
         self.repo.git("switch", "-q", "-c", "feat/F001-x")
         self.assertEqual(run_cli(self.root, "check", "baseline").returncode, 0)  # no baseline at the merge-base

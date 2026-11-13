@@ -32,18 +32,23 @@ def toplevel(cwd: Path) -> Optional[Path]:
     return Path(proc.stdout.strip()) if proc.returncode == 0 else None
 
 
-def base_ref(root: Path, cfg: Dict[str, Any]) -> str:
-    """``SDD_BASE_REF``, else ``quality.base_ref``, else the local main branch, else origin/<main>."""
-    env = os.environ.get("SDD_BASE_REF")
-    if env:
-        return env
-    configured = (cfg.get("quality") or {}).get("base_ref")
-    if configured:
-        return configured
+def main_ref(root: Path, cfg: Dict[str, Any]) -> str:
     main = cfg["features"].get("main_branch") or "main"
     if git_ok(root, "rev-parse", "--verify", "-q", f"refs/heads/{main}"):
         return main
     return f"origin/{main}"
+
+
+def base_ref(root: Path, cfg: Dict[str, Any]) -> str:
+    """``SDD_BASE_REF``, else ``quality.base_ref`` (not with ``CI=true``: the branch under test
+    must not pick its own reference point), else the local main branch, else origin/<main>."""
+    env = os.environ.get("SDD_BASE_REF")
+    if env:
+        return env
+    configured = (cfg.get("quality") or {}).get("base_ref")
+    if configured and os.environ.get("CI") != "true":
+        return configured
+    return main_ref(root, cfg)
 
 
 def merge_base(root: Path, cfg: Dict[str, Any]) -> str:
@@ -51,7 +56,15 @@ def merge_base(root: Path, cfg: Dict[str, Any]) -> str:
     proc = subprocess.run(["git", "-C", str(root), "merge-base", "HEAD", ref], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if proc.returncode != 0 or not proc.stdout.strip():
         raise QualityError(f"no merge-base between HEAD and {ref!r} (set SDD_BASE_REF or quality.base_ref; CI needs full history)")
-    return proc.stdout.strip()
+    mb = proc.stdout.strip()
+    if not os.environ.get("SDD_BASE_REF") and ref != main_ref(root, cfg):
+        # A configured base that resolves to HEAD would hide every commit of the branch.
+        head = git(root, "rev-parse", "HEAD").strip()
+        main = main_ref(root, cfg)
+        if mb == head and git_ok(root, "rev-parse", "--verify", "-q", main) and not git_ok(root, "merge-base", "--is-ancestor", "HEAD", main):
+            raise QualityError(f"quality.base_ref {ref!r} resolves to HEAD while HEAD has commits not on {main}: "
+                               f"every change would be hidden (set SDD_BASE_REF to the target branch)")
+    return mb
 
 
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
