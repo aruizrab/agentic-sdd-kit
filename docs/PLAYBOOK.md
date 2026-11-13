@@ -57,6 +57,9 @@ Robustness arguments (defaults in brackets):
 | `readViaGit` [`false`] | the spec critic, reviewers, verifiers and fix-checks read through git (`git show <sha>:<path>`, `git diff`, `git log`) instead of creating worktrees; they may run the existing tests but write no code, so a reproduction that needs new code is described, not run, and Verify passes no `isolation`. Turn it on when builds are expensive (each worktree is a cold build). |
 | `outsideScan` [`[]`] | carried over on a resumed run: test files the red check found outside `trace.scan_globs` (see below) |
 
+Why these exist: docs/LESSONS.md entries 16 (scope rule), 17 (detached gate runs), 19 (red
+check cross-checks tags), 20 (persisted review record) and 21 (interrupted work is kept).
+
 **Tests outside the trace scan.** The red check runs `sdd trace --feature NNN --json --include
 <each added test file>`, so a `must` whose test lives where `trace.scan_globs` does not look
 is not wrongly reported as untested. Those files are listed in `summary.outsideScan`, and every

@@ -1,7 +1,7 @@
 # agentic-sdd-kit
 
 A reusable, project-agnostic kit for **spec-driven development by AI agents** under Claude
-Code. It was extracted from [ferrocore](https://github.com/aruizrab/ferrocore) (a 3GPP 5G
+Code. It was extracted from ferrocore (a 3GPP 5G
 core in Rust built almost entirely by agents), stripped of everything Rust- or 3GPP-specific,
 and generalised for any language and any kind of normative source.
 
@@ -190,15 +190,22 @@ changes the table. Reference: docs/CONFIG.md ("Model routing"), docs/PLAYBOOK.md
 ## Testing the kit
 
 ```sh
-python3 -I -m unittest discover -s tests -v     # 126 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
+python3 -I -m unittest discover -s tests -v     # 137 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
 node tests/pipeline_smoke.mjs                   # drives feature-pipeline.js with a fake agent()
 ```
+
+`tests/test_docs.py` also keeps the docs honest: every configuration key is in docs/CONFIG.md,
+every example command in docs/ADAPTING.md, every `sdd` subcommand in the tools table above, and
+a scan of all tracked files allows `--no-verify` only in prohibitions and guard code, e-mail
+addresses only as `noreply@` or reserved example domains, and URLs only to allowlisted public
+hosts (no private repository links). Personal names cannot be tested without listing them:
+check for them when reviewing a change to the kit.
 
 ## Status and provenance
 
 Version 0.1.0. The workflow, roles, gates and lessons come from running ferrocore's pipeline
-on a dozen features in November 2026; `docs/LESSONS.md` lists what went wrong there and which
-rule or default in this kit prevents it. ferrocore is cited as the worked example throughout
+on a dozen features in November 2026; `docs/LESSONS.md` lists what went wrong there, which
+rule or default in this kit prevents it and why. ferrocore is cited as the worked example throughout
 the docs; nothing in the generic parts depends on it.
 
 License: MIT.

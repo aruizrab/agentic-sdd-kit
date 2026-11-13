@@ -14,7 +14,8 @@ A gate is `{"name", "command", "timeout", "optional"?, "skip_if_missing"?, "env"
 nightly; section 6 covers the quality checks), streams output to the log,
 prints a summary and exits non-zero if any gate failed. `optional` gates are skipped (not
 failed) when the command exits 127 or `skip_if_missing` names a program that is not on
-PATH. Keep `trace` in both lists.
+PATH. Keep `trace` (`python3 -I tools/sdd/sdd.py trace --check`, i.e. `sdd trace --check`) in
+every plan; the kit's quality checks are gates of the form `sdd check <name>` (section 6).
 
 ### Rust
 ```json
@@ -43,9 +44,12 @@ Trace tags: `/// Implements: ID` doc lines and `#[trace::implements("ID")]` /
 is recognised).
 
 ### TypeScript
-Fast: `prettier --check`, `eslint --max-warnings 0`, `tsc --noEmit`, `npm test -- --run`,
-trace. Full adds coverage, `npm audit --audit-level=high`, contract tests, a benchmark
-compare. Components: `^packages/([^/]+)/` (monorepo) or drop the regex for a single package.
+Fast: `npx prettier --check .`, `npx eslint . --max-warnings 0`, `npx tsc --noEmit -p .`,
+`npm test -- --run`, trace. Full adds coverage, `npm audit --audit-level=high`, contract tests
+and a benchmark compare as package scripts (`npm run test:contract --if-present`,
+`npm run bench:compare --if-present`: a project without the script passes). Formatter and
+pre-commit step: `npx prettier --write {file}` / `npx prettier --check {files}`; stop check:
+`npx tsc --noEmit -p .`. Components: `^packages/([^/]+)/` (monorepo) or drop the regex for a single package.
 Union manifests: `package.json`, `packages/*/package.json`; lockfile `package-lock.json`;
 `after_union: npm install --package-lock-only --ignore-scripts`. Tags: `// Implements: ID`
 comments or `implements("ID")` / `verifies("ID")` calls in test helpers. Implementer-denied
@@ -55,7 +59,9 @@ paths: `**/*.test.ts`, `**/__tests__/**`.
 Fast: `ruff format --check`, `ruff check`, `mypy src` (optional), `pytest -q -x`, trace. Full
 adds `--cov --cov-fail-under`, `pip-audit`, hypothesis property tests, `pytest-benchmark
 --benchmark-compare`. Components: `^src/([^/]+)/`. Union manifests: `pyproject.toml`;
-lockfiles `poetry.lock`/`uv.lock`. Tags: `# Implements: ID` comments, a docstring whose
+lockfiles `poetry.lock`/`uv.lock`, regenerated after a union merge by
+`uv lock >/dev/null 2>&1 || poetry lock --no-update >/dev/null 2>&1 || true` (whichever the
+project uses). Tags: `# Implements: ID` comments, a docstring whose
 first line is the tag (`"""Implements: ID"""` or `"""Verifies: ID` on the opening line; a tag
 on a later docstring line is NOT scanned), or `@implements("ID")` / `@verifies("ID")`
 decorators (define them as no-op decorators in a tiny `trace` module).
@@ -65,7 +71,7 @@ Stop check: `python3 -m compileall -q src` (not `python`: many hosts have no suc
 Fast: `gofmt -l`, `go vet`, `golangci-lint` (optional), `go test ./...`, trace. Full adds
 `-race -cover`, `govulncheck`, native fuzzing of changed targets, benchstat compare.
 Components: `^(?:internal|pkg|cmd)/([^/]+)/`, root `module`. Union manifests: `go.mod`;
-lockfile `go.sum`; `after_union: go mod tidy`. Tags: `// Implements: ID` and
+lockfile `go.sum`; `after_union: go mod tidy`. Stop check: `go build ./...`. Tags: `// Implements: ID` and
 `// Verifies: ID` comments above functions. Implementer-denied: `**/*_test.go`,
 `**/testdata/**`; append-only: `**/testdata/**` for test-author.
 
@@ -161,7 +167,21 @@ run completed" (any other code, e.g. a failing unmutated baseline, is a tool err
 A survivor that no test can kill is justified in the feature's review.md §6 as
 `- mutant: <file>[:<line>]: <mutation> — <reason>`.
 
-**Command checks** (`quality.checks`, run in the full plan):
+**Nightly** (`gates.nightly`, scheduled in CI): the whole repository, not only the diff, with
+an absolute floor instead of the 100 % changed-lines rule.
+
+| Language | full-repository coverage | full-repository mutation |
+|---|---|---|
+| Rust | `cargo llvm-cov --workspace --fail-under-lines 90` | `cargo mutants --workspace --no-shuffle` |
+| Python | `coverage run --source=src -m pytest -q && coverage report --fail-under=90` | `mutmut run` |
+| TypeScript | `npx vitest run --coverage.enabled --coverage.all --coverage.thresholds.lines=90` | `npx stryker run` |
+| Go | `go test -cover ./...` | `gremlins unleash ./...` |
+
+Long fuzzing (`FUZZ_BUDGET_SECS=3600 scripts/fuzz-changed.sh`) and benchmarks belong here too.
+
+**Command checks** (`quality.checks`, run in the full plan; the examples name them `docs`,
+`unused-deps` and `flaky`, so the gates are `sdd check docs`, `sdd check unused-deps` and
+`sdd check flaky`):
 
 | Language | docs / warnings | unused dependencies | flaky tests (`baseline: false`) |
 |---|---|---|---|
