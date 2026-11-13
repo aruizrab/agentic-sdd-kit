@@ -1,6 +1,6 @@
 """WI4 acceptance criteria: documentation and lessons, and the repository hygiene scan.
 
-AC 1  LESSONS.md has entries 16-22 (what happened, rule, where).
+AC 1  LESSONS.md has entries 16-26 (what happened, rule, where).
 AC 2  every key path of config.DEFAULTS appears in docs/CONFIG.md.
 AC 3  PLAYBOOK has the adoption section with its three steps in order.
 AC 4  every tracked text file: `--no-verify` only in prohibitions and guard code; e-mail
@@ -53,9 +53,13 @@ class LessonsTest(unittest.TestCase):
         20: ("review.md", "resume"),
         21: ("uncommitted", "discard"),
         22: ("dominated", "downgrad"),
+        23: ("whole repository", "multi-id"),
+        24: ("machine-readable", "reload"),
+        25: ("out of memory", "idle host"),
+        26: ("wake-up", "reset"),
     }
 
-    def test_entries_16_to_22(self) -> None:
+    def test_entries_16_to_26(self) -> None:
         text = read("docs/LESSONS.md")
         rows = {}
         for line in text.splitlines():
@@ -111,6 +115,20 @@ class ConfigDocTest(unittest.TestCase):
         doc = read("docs/CONFIG.md")
         for var in ("SDD_BASE_REF", "CI=true", "SDD_FEATURE"):
             self.assertIn(var, doc)
+
+
+class PlaybookPipelineAndPausesTest(unittest.TestCase):
+    """PLAYBOOK sections from the 2026-11-13 sync: changing the pipeline safely, unattended usage-limit pauses."""
+
+    def test_sections(self) -> None:
+        text = read("docs/PLAYBOOK.md")
+        safe = section(text, r"(?:\d+\.\s+)?Changing the pipeline safely")
+        for word in ("opt-in", "byte-identical", "tests/pipeline_cachekeys.mjs", "--baseline", "stub runtime"):
+            self.assertIn(word, safe)
+        pauses = section(text, r"(?:\d+\.\s+)?Usage-limit pauses while unattended")
+        for word in ("one-shot wake-up", "reset time", "two heavy build or test jobs", "idle host", "without the compiler-cache wrapper", "registry dependencies"):
+            self.assertIn(word, pauses)
+        self.assertTrue((KIT / "tests" / "pipeline_cachekeys.mjs").is_file())
 
 
 class PlaybookAdoptionTest(unittest.TestCase):

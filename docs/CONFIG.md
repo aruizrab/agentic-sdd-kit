@@ -20,7 +20,8 @@ Workflow script takes as `args.config`.
 | `paths.tools_dir` | where the kit tools are installed | `tools/sdd` |
 | `features.id_prefix`, `id_digits`, `branch_prefix` | `F`, `3`, `feat/` -> `F011`, `feat/F011-slug` | |
 | `features.main_branch` | the integration branch worktrees are created from and merged into (`master`, `trunk`, `develop`...) | `main` |
-| `features.roadmap_milestone_regex`, `roadmap_feature_regex` | how `sdd progress` and `sdd new-feature` parse the roadmap | `### M<n> — name`, `#### F<NNN> slug` |
+| `features.roadmap_milestone_regex`, `roadmap_feature_regex` | how `sdd progress` and `sdd new-feature` parse the roadmap; text after the slug of the form ` — <title>` is the feature's display title until its spec has an H1 title | `### M<n> — name`, `#### F<NNN> slug` |
+| `features.roadmap_cross_cutting_regex` | heading of a roadmap section whose features belong to no milestone: `sdd progress` lists them as one extra group (`kind: "cross-cutting"`, id `CC`), counted in overall only; group 1 (optional) is the group name | `### Cross-cutting — name` |
 | `features.done_without_spec` | feature ids counted as merged although they predate the pipeline | `[]` |
 | `requirements.id_regex` | requirement id syntax (used by trace, spec-info, tasks) | `[A-Z][A-Z0-9]*(?:-[A-Z0-9.]+)*-R\d{2,3}` |
 | `requirements.priorities` | first is the enforced one | `["must","should","may"]` |
@@ -90,6 +91,8 @@ Workflow script takes as `args.config`.
 | `pipeline.gate_poll_seconds` | `sdd gates --wait --poll` interval used by the pipeline | `120` |
 | `pipeline.security_sensitive_hint` | what makes a change security-sensitive | auth, crypto, secrets, tokens, untrusted parsing |
 | `pipeline.role_tiers` | override role -> tier (tiers mode) | `{}` |
+| `pipeline.red_check_tags` | the red check also searches the whole repository for Verifies tags (`trace.verifies_keywords` + `requirements.id_regex`, every id of a multi-id list); a `must` is untested only if neither the trace tool nor that search finds a test (same as the pipeline arg `redCheckTags`) | `false` |
+| `pipeline.persist_findings` | review.md §3 also gets a machine-readable findings block with each finding's outcome, verdicts are written before any fix, and a run resumed from `verify` reloads the findings (same as the pipeline arg `persistFindings`) | `false` |
 | `pipeline.routing` | `tiers` (role -> tier) or `formula` (levels and the models table); the pipeline arg `routing` overrides | `"tiers"` |
 | `pipeline.models_table` | the project's models table; when absent `<tools_dir>/pipeline/models.json` (the template) is used. The project file replaces the template, it is not merged. Formula mode rejects a table whose ids still start with `example-` | `"sdd.models.json"` |
 | `merge.union_manifests` | globs `sdd union-merge` may union | `[]` |
@@ -163,4 +166,13 @@ logging a paused run and then its resume records each attempt once. `sdd routing
 samples (`ok` + `fail`), failure and retry rates and the infrastructure failures, and suggests
 raising a floor to the next frontier intelligence when the failure rate exceeds `--max-fail`
 with enough samples, or lowering it when there were no failures over 3x the samples. It never
-writes a file.
+writes a file. Its input is pluggable (`--input`, repeatable, rows pooled): `telemetry` (the
+default, the JSONL above) or `journal`: Workflow journals given with `--journal <file | run dir
+| glob>` (default: the journals under `~/.claude/projects`), for runs whose telemetry was never
+logged. A journal call counts only when its label carries the level as a ` [L<n>]` suffix (an
+orchestration script that routes by level adds it); the model comes from the
+`agent-<id>.meta.json` next to the journal (`inherit` when it names none), journals carry no
+effort, a null result or a failed or unfinished call is an infrastructure failure, and a label
+ending in `retry`, `(retry)` or `(... fallback)` is a second attempt. Telemetry outcomes
+`failed` are read as `fail`. Another log format is one more reader in `REFIT_INPUTS`
+(`sddkit/routing.py`).

@@ -149,6 +149,16 @@ property tests. Gate logs live in `paths.logs_dir`.
 - Review findings and verifier verdicts are committed to review.md as soon as they exist, so a
   run paused in Verify keeps them; a resumed Finalize completes the record and keeps the §3
   rows and §6 justifications.
+- With `persistFindings: true` (or `pipeline.persist_findings`) §3 also holds a machine-readable
+  findings block with each finding's outcome, the verdicts are written right after the votes
+  (before any fix), and a run started with stages from `verify` (no `review`, no `findings`
+  arg) reloads the findings from that block; findings already refuted or fixed are not
+  verified again. Use it whenever a run may be resumed with new stages instead of from its
+  journal.
+- With `redCheckTags: true` (or `pipeline.red_check_tags`) the red check also searches the whole
+  repository for Verifies tags with the configured tag syntax, so tests in directories outside
+  `trace.scan_globs` do not block the run as "untested"; their files are reported in
+  `outsideScan` for the owner to add to the scan globs.
 - `blocked-setup` with uncommitted edits outside the feature directory: an interrupted worker
   probably left them. Inspect them (`git status`, `git diff`), then commit them or hand them to
   an implementer; never discard them automatically (the bash-guard blocks the commands that
@@ -264,3 +274,62 @@ Never grandfather new code: no agent adds baseline entries, raises thresholds or
 globs to get a gate green (the code-writing roles cannot edit the config, the hooks or the
 checkers). A `cov:unreachable: <reason>` marker or a mutant justification in review.md §6 is
 reviewed like code.
+
+## 13. Changing the pipeline safely
+
+A paused or running Workflow run is resumed with the same args, and the runtime replays every
+completed agent call whose key, the exact `(prompt, opts)` pair, is unchanged. Edit a prompt
+or an opts field of an already completed call and the resumed run silently runs that call
+again (cost, and possibly a different answer than the one the later phases built on). So:
+
+1. **Every new behaviour is opt-in**, behind a new pipeline arg or a new `pipeline.*` config
+   key that defaults to off (examples: `readViaGit`, `redCheckTags`, `persistFindings`).
+   Without it, every prompt and opts object must stay byte-identical to the previous script.
+2. **Prove it with the cache-key equivalence test**, `node tests/pipeline_cachekeys.mjs
+   [--baseline <git-rev>]`. It loads the current script and the baseline script
+   (`git show <rev>:tools/sdd/pipeline/feature-pipeline.js`) under a stub runtime whose
+   `agent()` records every `(prompt, opts)` and answers from the call's label and per-label
+   count only (never from the prompt), so both scripts walk the same path. Over several arg
+   sets (tiers, hard, worktree root, main checkout with lanes, read via git, orchestrator
+   approval, formula routing, stages from the middle) and scenarios (normal, a capped pool
+   failing) it compares the call sequences and the run summaries byte for byte, and checks that
+   the scenarios really reach the interesting paths (retries, test arbiter, second security
+   review, verify, fixes, the cap fallback). Then it checks each opt-in arg changes exactly
+   what it should and nothing else.
+3. **Move the baseline when a change is installed**: after the change merges, pass the merge
+   commit as `--baseline` (or update the default in the test) so the next change is compared
+   against what the running copies use.
+4. A resumed run may add an opt-in only when the calls it changes lie after the phase the run
+   resumes in; the test shows which calls each arg touches. Install the new script in the live
+   location only between runs, or for new launches.
+
+The same pattern works for any orchestration script whose host caches calls by their inputs:
+record the calls of old and new under a deterministic stub, and diff them.
+
+## 14. Usage-limit pauses while unattended
+
+The orchestrator acts only when something notifies it (a finished agent, a finished run, a
+message). A run that ends `paused` on a usage limit while the owner is away therefore sits idle
+until somebody looks, even after the limit has reset.
+
+- **Schedule a one-shot wake-up at the reset time** when a run pauses on a usage limit: a
+  scheduled task or timer that sends the orchestrator a message at the time the limit resets
+  (plus a few minutes), with the resume instruction (`Workflow({scriptPath, resumeFromRunId,
+  args: <same args>})` for each paused run). One wake-up per reset, not a polling loop. If the
+  limit is still in force at wake-up, the resumed run pauses again on its first call: schedule
+  the next wake-up then.
+- Record the paused runs, their args and the planned wake-up time where the orchestrator keeps
+  its state, so the wake-up (or a new session) can resume them without guessing.
+- **Never run two heavy build or test jobs at once on a small host** (coverage, mutation
+  testing, full workspace builds, build-cache measurements, full gates): two concurrent cold
+  builds ran a 16 GB host out of memory, the OOM killer took a test process and froze the
+  session. Queue heavy jobs; `pipeline.max_parallel_features` and `pipeline.max_build_jobs`
+  bound the pipeline, but jobs started by hand count too.
+- **Measure build caches only on an idle host**: a cache measurement is a series of cold
+  builds, and its timings are worthless (and its memory use dangerous) next to another build.
+- **Run mutation testing without the compiler-cache wrapper** (for example an empty
+  `RUSTC_WRAPPER=` for Rust): every mutant rebuild is a guaranteed miss that writes a cache
+  entry nobody reuses and evicts useful ones.
+- **Expect cross-worktree cache hits mainly for registry dependencies**: they have the same
+  absolute paths in every worktree; the project's own packages are compiled from a different
+  path per worktree and usually miss across worktrees (hits come from rebuilds in the same one).

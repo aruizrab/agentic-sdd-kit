@@ -48,6 +48,7 @@ DEFAULTS: Dict[str, Any] = {
         "main_branch": "main",
         "roadmap_milestone_regex": r"^###\s+(M\d+)\s*[—–-]+\s*(.+?)\s*$",
         "roadmap_feature_regex": r"^####\s+(F\d{3})\s+(\S+)(.*)$",
+        "roadmap_cross_cutting_regex": r"(?i)^###\s+Cross-cutting\b\s*(?:[—–:-]+\s*(.*?))?\s*$",
         "done_without_spec": [],
     },
     "requirements": {
@@ -179,6 +180,8 @@ DEFAULTS: Dict[str, Any] = {
         "routing": "tiers",
         "models_table": "sdd.models.json",
         "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, input parsing of untrusted data",
+        "red_check_tags": False,
+        "persist_findings": False,
     },
     "merge": {
         "union_manifests": [],
@@ -281,7 +284,7 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
         re.compile(cfg["requirements"]["id_regex"])
     except re.error as exc:
         problems.append(f"requirements.id_regex does not compile: {exc}")
-    for name in ("roadmap_milestone_regex", "roadmap_feature_regex"):
+    for name in ("roadmap_milestone_regex", "roadmap_feature_regex", "roadmap_cross_cutting_regex"):
         try:
             re.compile(cfg["features"][name])
         except re.error as exc:
@@ -454,7 +457,7 @@ def pipeline_view(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """The subset the Workflow script needs (passed as ``args.config``)."""
     keys = [
         "project", "paths", "features", "requirements", "components", "tests", "sources",
-        "models", "pipeline", "commit", "merge", "override_env", "build_cache",
+        "models", "pipeline", "commit", "merge", "override_env", "build_cache", "trace",
     ]
     view = {k: copy.deepcopy(cfg[k]) for k in keys}
     view["gates"] = {

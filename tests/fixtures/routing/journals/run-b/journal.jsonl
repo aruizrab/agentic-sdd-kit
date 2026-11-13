@@ -1,0 +1,5 @@
+{"type": "launched"}
+{"type": "started", "key": "v2:b1", "agentId": "b1", "label": "T02 impl [L3]", "phase": "x"}
+{"type": "result", "key": "v2:b1", "agentId": "b1", "result": {"ok": true}}
+{"type": "started", "key": "v2:b2", "agentId": "b2", "label": "T03 impl (capped fallback) [L3]", "phase": "x"}
+{"type": "result", "key": "v2:b2", "agentId": "b2", "result": {"ok": true}}
