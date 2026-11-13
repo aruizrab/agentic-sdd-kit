@@ -422,6 +422,7 @@
         "^Co-Authored-By: .+ <.+>$"
       ],
       "required_trailers_env": "CLAUDECODE",
+      "trailer_authors": "",
       "pre_commit": [
         {
           "name": "prettier",

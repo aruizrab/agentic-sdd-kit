@@ -120,6 +120,7 @@ DEFAULTS: Dict[str, Any] = {
             "scope_regex": "",
             "required_trailers": [],
             "required_trailers_env": "CLAUDECODE",
+            "trailer_authors": "",
             "pre_commit": [],
             "commit_tests": True,
             "skip_tests_for_types": ["test"],
@@ -426,6 +427,8 @@ def _validate_quality(q: Dict[str, Any]) -> List[str]:
         _regex(problems, "quality.hooks.scope_regex", h["scope_regex"])
     for i, rx in enumerate(h.get("required_trailers") or []):
         _regex(problems, f"quality.hooks.required_trailers[{i}]", rx)
+    if h.get("trailer_authors"):
+        _regex(problems, "quality.hooks.trailer_authors", h["trailer_authors"])
     for i, step in enumerate(h.get("pre_commit") or []):
         if not isinstance(step, dict) or not step.get("name") or not step.get("command"):
             problems.append(f"quality.hooks.pre_commit[{i}] needs 'name' and 'command'")

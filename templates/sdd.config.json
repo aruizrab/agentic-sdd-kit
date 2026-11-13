@@ -111,6 +111,7 @@
       "scope_regex": "",
       "required_trailers": ["^Co-Authored-By: .+ <.+>$"],
       "required_trailers_env": "CLAUDECODE",
+      "trailer_authors": "",
       "pre_commit": [],
       "commit_tests": true,
       "skip_tests_for_types": ["test"],

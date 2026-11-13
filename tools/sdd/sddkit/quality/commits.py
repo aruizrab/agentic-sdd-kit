@@ -3,8 +3,13 @@
 * first line ``<type>[(<scope>)][!]: <subject>`` with ``<type>`` in ``quality.hooks.types``, the
   scope rule of ``scope_regex`` (``""`` = optional and free; otherwise required and matching)
   and a non-empty subject, or git's ``Revert "<subject>"``;
-* each ``required_trailers`` regex matches a line of the trailer block, when
-  ``required_trailers_env`` is ``""`` or that environment variable equals ``1``;
+* each ``required_trailers`` regex matches a line of the trailer block. The commit-msg hook
+  requires them when ``required_trailers_env`` is ``""`` or that environment variable equals
+  ``1`` (the committing process is an agent session). ``sdd check commits`` decides from the
+  commit itself, never from the environment of the process running the check: trailers are
+  required for a commit whose author or committer (``Name <email>``) matches
+  ``trailer_authors``; with ``trailer_authors`` empty the check does not test trailers (with
+  ``required_trailers_env`` empty it always does);
 * the message holds no secret (built-in rules; gitleaks in the hook when installed).
 """
 
@@ -75,15 +80,17 @@ def trailer_block(message: str) -> List[str]:
     return paras[-1].splitlines()
 
 
-def message_problems(message: str, cfg: Dict[str, Any]) -> List[Tuple[str, str]]:
-    """(rule, detail) for the format and trailer rules (no secret scan)."""
+def message_problems(message: str, cfg: Dict[str, Any], need_trailers: Optional[bool] = None) -> List[Tuple[str, str]]:
+    """(rule, detail) for the format and trailer rules (no secret scan).
+
+    ``need_trailers`` None = decide from the environment (the commit-msg hook)."""
     msg = clean(message)
     first = msg.splitlines()[0] if msg else ""
     out = []
     p = header_problem(first, cfg)
     if p:
         out.append(("format", f"{p}; {expected_format(cfg)}"))
-    if trailers_required(cfg):
+    if trailers_required(cfg) if need_trailers is None else need_trailers:
         block = trailer_block(msg)
         for rx in cfg["quality"]["hooks"]["required_trailers"]:
             if not any(re.search(rx, line) for line in block):
@@ -101,13 +108,23 @@ def check(root: Path, cfg: Dict[str, Any]) -> Result:
     res = Result("commits")
     base = vcs.merge_base(root, cfg)
     shas = [s for s in vcs.git(root, "rev-list", "--no-merges", "--reverse", f"{base}..HEAD").split() if s]
+    h = cfg["quality"]["hooks"]
     for sha in shas:
         msg = vcs.git(root, "log", "-1", "--format=%B", sha)
-        for rule, detail in message_problems(msg, cfg):
+        if not h["required_trailers_env"]:
+            need = True
+        elif h["trailer_authors"]:
+            who = vcs.git(root, "log", "-1", "--format=%an <%ae>%n%cn <%ce>", sha).splitlines()
+            need = any(re.search(h["trailer_authors"], w) for w in who)
+        else:
+            need = False
+        for rule, detail in message_problems(msg, cfg, need):
             res.violations.append(Violation("commit-" + rule, sha[:12], None, {"file": sha[:12], "message": rule}, 1, detail))
         for v in secrets.scan_message(cfg, msg):
             res.violations.append(Violation("commit-secret", sha[:12], None, {"file": sha[:12], "message": v.key["message"]}, 1,
                                             f"{v.message} in the commit message"))
     if not shas:
         res.notes.append(f"no commits in {base[:12]}..HEAD")
+    elif h["required_trailers"] and h["required_trailers_env"] and not h["trailer_authors"]:
+        res.notes.append("trailers not checked: set quality.hooks.trailer_authors to the agent commit identity to check them here")
     return res.finish()

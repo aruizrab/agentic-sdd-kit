@@ -130,7 +130,7 @@ like the existing fmt/lint/test placeholders; `sdd doctor` warns.
 | `sdd check arch [--json]` | module dependency and forbidden-pattern rules | 0/1/2 |
 | `sdd check coverage [--no-run] [--json]` | runs `coverage.command` (not with `--no-run`), parses the report, checks changed lines | 0/1/2/3 |
 | `sdd check mutation [--no-run] [--json]` | writes the diff, runs `mutation.command` on changed hand-written files, fails on unjustified survivors | 0/1/2/3 |
-| `sdd check commits [--json]` | the commit-msg rules (format, trailers under the same env rule, message secret scan) on every non-merge commit in `<merge-base>..HEAD` | 0/1/2 |
+| `sdd check commits [--json]` | the commit-msg rules (format, message secret scan, and trailers on commits whose author or committer matches `quality.hooks.trailer_authors`; never decided by the checker's environment) on every non-merge commit in `<merge-base>..HEAD` | 0/1/2 |
 | `sdd check secrets [--json]` | the pre-commit secret scan on the added lines of `git diff <merge-base>` (working tree), plus `gitleaks git --log-opts=<merge-base>..HEAD --redact` when enabled and installed | 0/1/2/3 |
 | `sdd check <name> [--json]` | one command check of `quality.checks` | 0/1/2/3 |
 | `sdd check baseline` | ratchet: working-tree baseline vs the merge-base baseline | 0/1/2 |
@@ -289,7 +289,9 @@ altogether (ADAPTING.md); the kit never sets it.
 `exec python3 -I "$(dirname "$0")/../sdd.py" hooks run <name> "$@"`.
 `core.hooksPath` is relative, so each linked worktree runs its own checkout's hooks on its own
 files, and a branch without the scripts runs none; CI runs `sdd check commits` and
-`sdd check secrets` (fast and full plans) as the backstop for every hook rule. Hooks never
+`sdd check secrets` (fast and full plans) as the backstop for the hook rules (the trailer rule
+only when `quality.hooks.trailer_authors` names the agent commit identity: whether a commit
+came from an agent session is a property of the commit, not of the process checking it). Hooks never
 stash, reset, check out, or write the index, the working tree or git config; checks that need
 file content read the staged blob (`git show :<path>`), commands run on the working tree. The
 only file a hook writes is its timing note in the git dir (Budget, below).
@@ -918,7 +920,10 @@ Acceptance criteria:
   reference (60 s for both); per-step timeouts, including `test_timeout`, fail. A hard budget
   would block every first commit in a cold worktree, and agents may not bypass hooks.
 - D-07 Required trailers apply only when `CLAUDECODE=1` by default. Agent commits must carry
-  attribution; a human commit from a plain shell is not blocked.
+  attribution; a human commit from a plain shell is not blocked. `sdd check commits` cannot use
+  that rule (an agent-run gate would fail the owner's commits, and CI would never check), so it
+  requires trailers only on commits whose author or committer matches
+  `quality.hooks.trailer_authors`, and skips trailers with a note when that is empty.
 - D-08 Secret scanning has a small built-in rule set and adds gitleaks when installed. The
   message and staged diff are always scanned with stdlib only; gitleaks adds breadth; matched
   values are never printed.

@@ -97,6 +97,35 @@ class CommitsAndSecretsCheckTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 1)
         self.assertEqual([(v["file"], v["kind"]) for v in out["violations"]], [(bad[:12], "commit-format")])
 
+    def test_commit_trailers_follow_the_commit_not_the_checker(self) -> None:
+        """C3: an agent-run check passes a human commit; CI fails an agent commit without trailers."""
+        cfg = json.loads((self.root / "sdd.config.json").read_text())
+        cfg["quality"]["hooks"].update({"required_trailers": ["^Co-Authored-By: .+ <.+>$"], "required_trailers_env": "CLAUDECODE"})
+        write_config(self.root, cfg)
+        write(self.root, "a.md", "a\n")
+        self.repo.commit("docs(F001): owner commit, no trailer")
+        agent = {"CLAUDECODE": "1", "CI": ""}
+        ci = {"CLAUDECODE": "", "CI": "true"}
+        for env in (agent, ci):
+            proc = run_cli(self.root, "check", "commits", env=env)
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+            self.assertIn("trailers not checked", proc.stdout)
+        cfg["quality"]["hooks"]["trailer_authors"] = r"<agent@example\.com>$"
+        write_config(self.root, cfg)
+        for env in (agent, ci):
+            self.assertEqual(run_cli(self.root, "check", "commits", env=env).returncode, 0)
+        self.repo.env.update({"GIT_AUTHOR_NAME": "Agent", "GIT_AUTHOR_EMAIL": "agent@example.com"})
+        write(self.root, "b.md", "b\n")
+        sha = self.repo.commit("docs(F001): agent commit from a hookless clone")
+        for env in (agent, ci):
+            proc = run_cli(self.root, "check", "commits", "--json", env=env)
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertEqual([(v["file"], v["kind"]) for v in json.loads(proc.stdout)["violations"]], [(sha[:12], "commit-trailer")])
+        write(self.root, "c.md", "c\n")
+        self.repo.commit("docs(F001): agent commit\n\nCo-Authored-By: Agent <agent@example.com>")
+        proc = run_cli(self.root, "check", "commits", "--json", env=ci)
+        self.assertEqual(len(json.loads(proc.stdout)["violations"]), 1)
+
     def test_secrets(self) -> None:
         write(self.root, "src/a.py", f"x = 1\nk = '{AWS}'\n")
         self.repo.commit("feat: committed secret")

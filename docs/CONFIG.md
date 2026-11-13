@@ -63,7 +63,8 @@ Workflow script takes as `args.config`.
 | `quality.hooks.types` | Conventional Commit types | `build chore ci docs feat fix perf refactor revert style test` |
 | `quality.hooks.scope_regex` | `""` = scope optional and free; else required and must match | `""` |
 | `quality.hooks.required_trailers` | regexes; each must match a line of the message's last paragraph | `[]` |
-| `quality.hooks.required_trailers_env` | trailers are required only when this env var is `1` (agent sessions); `""` = always | `CLAUDECODE` |
+| `quality.hooks.required_trailers_env` | the commit-msg hook requires the trailers only when this env var is `1` (agent sessions); `""` = always (hook and `sdd check commits`) | `CLAUDECODE` |
+| `quality.hooks.trailer_authors` | regex on a commit's author or committer `Name <email>`: `sdd check commits` (CI) requires the trailers on matching commits, whatever the environment of the checking process; `""` = the check does not test trailers (it notes that) | `""` |
 | `quality.hooks.pre_commit` | fast steps `[{name, command, glob?, exclude?, timeout?: 300}]`; `{files}` = staged files matching `glob`, minus `exclude` globs and the installed kit (`<paths.tools_dir>/**`); a step whose `{files}` would be empty is skipped | `[]` |
 | `quality.hooks.commit_tests` | commit-msg runs `tests.run_component` per component of the staged source and test files (`tests.run` for root files) | `true` |
 | `quality.hooks.skip_tests_for_types` | commit types whose test step is skipped (red-by-design test commits) | `["test"]` |
