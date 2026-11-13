@@ -67,7 +67,7 @@ def cmd_config(args: argparse.Namespace) -> int:
 
 def cmd_trace(args: argparse.Namespace) -> int:
     root, cfg = _cfg(args)
-    return trace.run(root, cfg, args.feature, args.check, args.json, args.allow_missing_impl)
+    return trace.run(root, cfg, args.feature, args.check, args.json, args.allow_missing_impl, args.include)
 
 
 def cmd_gates(args: argparse.Namespace) -> int:
@@ -77,14 +77,23 @@ def cmd_gates(args: argparse.Namespace) -> int:
         return gates.wait(Path(args.wait), float(args.poll), float(args.timeout))
     plan_name = args.plan or ("fast" if args.fast else "full")
     tag = args.tag or plan_name
-    log_path = Path(args.log) if args.log else logs_dir / f"gates-{tag}.log"
     if args.detached:
         argv = ["--plan", plan_name]
         for o in args.only or []:
             argv += ["--only", o]
-        if args.tag:
-            argv += ["--tag", args.tag]
-        return gates.start_detached(root, argv, log_path)
+        if args.feature:
+            argv += ["--feature", args.feature]
+        if args.log:
+            return gates.detached(root, argv, Path(args.log), keyed=False, fresh=True)
+        if args.feature:
+            try:
+                log_path = gates.keyed_log(root, logs_dir, args.feature, tag)
+            except gates.GateRunError as exc:
+                print(f"gates: {exc}", file=sys.stderr)
+                return 2
+            return gates.detached(root, argv, log_path, keyed=True, fresh=args.fresh)
+        return gates.detached(root, argv, logs_dir / f"gates-{tag}.log", keyed=False, fresh=True)
+    log_path = Path(args.log) if args.log else logs_dir / f"gates-{tag}.log"
     extra = {"SDD_FEATURE": args.feature} if args.feature else None
     return gates.run(cfg, root, plan_name == "fast", args.only, log_path, extra, quiet=args.no_stdout, plan_name=plan_name)
 
@@ -288,8 +297,31 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         check(bool(cfg["models"].get(tier)), f"models.{tier} set (explicit model id)", warn=True)
     mounts = str(root)
     check(not mounts.startswith("/tmp"), "project not under /tmp (RAM tmpfs would lose it on a crash)")
+    for key, value in (cfg["build_cache"].get("env") or {}).items():
+        if isinstance(value, str) and value.startswith(("/", "~")) and _on_tmpfs(Path(value).expanduser()):
+            check(False, f"build_cache.env {key}={value}: under /tmp or on a tmpfs mount (RAM); put the shared build cache on disk", warn=True)
     print("doctor: " + ("OK" if ok else "problems found"))
     return 0 if ok else 1
+
+
+def _on_tmpfs(path: Path) -> bool:
+    """True when ``path`` is under /tmp or its mount point (from /proc/mounts) is a tmpfs."""
+    path = Path(os.path.abspath(str(path)))
+    if path == Path("/tmp") or Path("/tmp") in path.parents:
+        return True
+    best, fstype = "", ""
+    try:
+        lines = Path("/proc/mounts").read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    for line in lines:
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        mount = parts[1].replace("\\040", " ")
+        if (str(path) == mount or str(path).startswith(mount.rstrip("/") + "/")) and len(mount) > len(best):
+            best, fstype = mount, parts[2]
+    return fstype in ("tmpfs", "ramfs")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -312,6 +344,8 @@ def build_parser() -> argparse.ArgumentParser:
     t.add_argument("--check", action="store_true", help="fail on orphans, duplicates and uncovered must requirements")
     t.add_argument("--json", action="store_true")
     t.add_argument("--allow-missing-impl", action="store_true")
+    t.add_argument("--include", action="append", metavar="PATH",
+                   help="also scan this file whatever trace.scan_globs says (repeatable); files outside the globs are listed as outsideScan")
     t.set_defaults(fn=cmd_trace)
 
     g = sub.add_parser("gates", help="run the configured gates")
@@ -320,9 +354,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--only", action="append", help="run only this gate (repeatable)")
     g.add_argument("--feature", help="exported as SDD_FEATURE to gate commands")
     g.add_argument("--log", help="log file (default: <logs_dir>/gates-<tag>.log)")
-    g.add_argument("--tag", help="log name tag")
-    g.add_argument("--detached", action="store_true", help="start in the background; poll with --wait <log>")
-    g.add_argument("--wait", metavar="LOG", help="wait for GATES_EXIT=<n> in LOG and exit with n")
+    g.add_argument("--tag", help="log name tag; with --detached --feature the log is <logs_dir>/gates/<feature>-<tag>-<sha7>[-dirty].log")
+    g.add_argument("--detached", action="store_true",
+                   help="start in the background (or attach to the live run of the same key); prints {log, state, pid, exit?}; wait with --wait <log>")
+    g.add_argument("--fresh", action="store_true", help="with --detached --feature: never reuse a completed log of this HEAD and tag (it is renamed to <log>.<n>)")
+    g.add_argument("--wait", metavar="LOG", help="wait for GATES_EXIT=<n> in LOG and exit with n; 124 timed out (still running), 125 incomplete (runner dead, no marker)")
     g.add_argument("--poll", default="15", help="seconds between polls for --wait")
     g.add_argument("--timeout", default="7200", help="max seconds for --wait")
     g.add_argument("--no-stdout", action="store_true", help=argparse.SUPPRESS)

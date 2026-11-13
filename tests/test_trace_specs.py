@@ -143,6 +143,24 @@ class TraceTest(unittest.TestCase):
         proc = run_cli(self.root, "trace", "--feature", "999", "--check")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
+    def test_include_scans_files_outside_scan_globs(self) -> None:
+        # AC 3.6-7: a Verifies tag in a file outside trace.scan_globs is found only via --include.
+        write(self.root, "tools/x/test_r113.py", "# Verifies: FC-OBS-R113\ndef test_r113():\n    pass\n")
+        proc = run_cli(self.root, "trace", "--feature", "011", "--json")
+        r113 = [r for r in json.loads(proc.stdout)["requirements"] if r["id"] == "FC-OBS-R113"][0]
+        self.assertEqual(r113["verifies"], [])
+        self.assertEqual(json.loads(proc.stdout)["outsideScan"], [])
+        proc = run_cli(self.root, "trace", "--feature", "011", "--json", "--include", "tools/x/test_r113.py",
+                       "--include", "src/app/log.py", "--include", str(self.root / "tools" / "x" / "test_r113.py"))
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        data = json.loads(proc.stdout)
+        r113 = [r for r in data["requirements"] if r["id"] == "FC-OBS-R113"][0]
+        self.assertEqual(r113["verifies"], ["tools/x/test_r113.py:1 (test_r113)"])
+        # Only files that scan_globs does not already cover are outside the scan; no tag is counted twice.
+        self.assertEqual(data["outsideScan"], ["tools/x/test_r113.py"])
+        r111 = [r for r in data["requirements"] if r["id"] == "FC-OBS-R111"][0]
+        self.assertEqual(len(r111["verifies"]), 2)
+
 
 class SpecInfoTest(unittest.TestCase):
     def setUp(self) -> None:

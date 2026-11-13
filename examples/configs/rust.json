@@ -523,6 +523,9 @@
       ]
     }
   ],
+  "build_cache": {
+    "env": {}
+  },
   "stop_check": {
     "command": "cargo check -q --workspace --all-targets --message-format short",
     "changed_globs": [

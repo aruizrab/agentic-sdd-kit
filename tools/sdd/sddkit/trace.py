@@ -90,6 +90,7 @@ class Matrix:
     tags: List[Tag] = field(default_factory=list)
     features: Dict[str, str] = field(default_factory=dict)  # feature dir -> status
     malformed: List[str] = field(default_factory=list)
+    outside_scan: List[str] = field(default_factory=list)  # --include files that scan_globs does not cover
 
     def sites(self, req_id: str, kind: str) -> List[Tag]:
         return [t for t in self.tags if t.id == req_id and t.kind == kind]
@@ -286,7 +287,12 @@ def iter_source_files(root: Path, cfg: Dict[str, Any]) -> List[Path]:
 # ----------------------------------------------------------------------------
 
 
-def load(root: Path, cfg: Dict[str, Any]) -> Matrix:
+def load(root: Path, cfg: Dict[str, Any], include: Optional[Iterable[str]] = None) -> Matrix:
+    """Parse every spec and scan the configured sources.
+
+    ``include`` (``sdd trace --include``) adds files whatever ``trace.scan_globs`` says; those
+    that the globs do not cover are listed in ``outside_scan`` (a configuration gap to close).
+    """
     m = Matrix()
     features_dir = root / cfg["paths"]["features_dir"]
     id_regex = cfg["requirements"]["id_regex"]
@@ -306,8 +312,16 @@ def load(root: Path, cfg: Dict[str, Any]) -> Matrix:
                     m.duplicates.append((r.id, f"{first.file}:{first.line}", f"{r.file}:{r.line}"))
                     continue
                 m.requirements[r.id] = r
-    for path in iter_source_files(root, cfg):
-        rel = path.relative_to(root).as_posix()
+    files = iter_source_files(root, cfg)
+    scanned = {p.resolve() for p in files}
+    for item in include or []:
+        path = (root / item).resolve()
+        if path.is_file() and path not in scanned:
+            scanned.add(path)
+            files.append(path)
+            m.outside_scan.append(_rel(root, path))
+    for path in files:
+        rel = _rel(root, path)
         try:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
@@ -316,6 +330,13 @@ def load(root: Path, cfg: Dict[str, Any]) -> Matrix:
             continue
         m.tags.extend(scan_source(text, rel, cfg))
     return m
+
+
+def _rel(root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def select(m: Matrix, feature: Optional[str]) -> List[Requirement]:
@@ -382,6 +403,7 @@ def to_markdown(m: Matrix, feature: Optional[str] = None) -> str:
 def to_json(m: Matrix, feature: Optional[str] = None) -> Dict[str, Any]:
     return {
         "features": m.features,
+        "outsideScan": list(m.outside_scan),
         "requirements": [
             {
                 "id": r.id,
@@ -400,8 +422,8 @@ def to_json(m: Matrix, feature: Optional[str] = None) -> Dict[str, Any]:
     }
 
 
-def run(root: Path, cfg: Dict[str, Any], feature: Optional[str], do_check: bool, as_json: bool, allow_missing_impl: bool = False) -> int:
-    m = load(root, cfg)
+def run(root: Path, cfg: Dict[str, Any], feature: Optional[str], do_check: bool, as_json: bool, allow_missing_impl: bool = False, include: Optional[List[str]] = None) -> int:
+    m = load(root, cfg, include)
     if allow_missing_impl:
         cfg = json.loads(json.dumps(cfg))
         cfg["requirements"]["require_impl_for_statuses"] = []
@@ -413,6 +435,8 @@ def run(root: Path, cfg: Dict[str, Any], feature: Optional[str], do_check: bool,
         print(json.dumps(out, indent=2))
         return 1 if problems else 0
     print(to_markdown(m, feature), end="")
+    if m.outside_scan:
+        print(f"outside trace.scan_globs (found only via --include): {', '.join(m.outside_scan)}")
     if do_check:
         problems = check(m, cfg, feature)
         for p in problems:

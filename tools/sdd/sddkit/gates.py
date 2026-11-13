@@ -21,13 +21,18 @@ on the ``sdd check`` entries: 3 = required tool missing). The row names the
 ``install`` hint. In CI mode (``CI=true``) every such skip is a failure. A gate
 that exceeds ``timeout`` seconds fails.
 
-Detached mode (for agents whose shell calls are time-limited)::
+Detached mode (for agents whose shell calls are time-limited, and whose end of turn
+would kill a foreground run)::
 
-    sdd gates --detached            # starts the run in the background, prints the log path
+    sdd gates --detached --feature F011 --tag post-implement-1 [--fresh]
+        # log <logs_dir>/gates/F011-post-implement-1-<sha7>[-dirty].log, runner in <log>.pid;
+        # attaches to a live run of the same key, reuses a completed clean one, else starts
     sdd gates --wait <log>          # blocks until the GATES_EXIT=<n> marker appears
 
 Every log ends with the line ``GATES_EXIT=<code>``; never report a gate run
-that has no such line (it is still running or was killed).
+that has no such line. ``--wait`` exits 124 when it timed out while the run is going
+(wait again) and 125 when the run is incomplete (no marker, runner gone): re-run it with
+``--fresh``; an incomplete run is not a gate failure.
 """
 
 from __future__ import annotations
@@ -204,9 +209,107 @@ def run(cfg: Dict[str, Any], root: Path, fast: bool, only: Optional[List[str]], 
     return code
 
 
-def start_detached(root: Path, argv: List[str], log_path: Path) -> int:
-    """Re-run this command in the background with output to ``log_path``."""
+class GateRunError(Exception):
+    """A detached run cannot be keyed (no git repository or no HEAD)."""
+
+
+def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
+def _safe(part: str) -> str:
+    return "".join(c if c.isalnum() or c in "._-" else "-" for c in part) or "x"
+
+
+def keyed_log(root: Path, logs_dir: Path, feature: str, tag: str) -> Path:
+    """``<logs_dir>/gates/<feature>-<tag>-<sha7>[-dirty].log`` for the current HEAD.
+
+    The tree is dirty when tracked files differ from HEAD; untracked files (tool output such
+    as a coverage report) do not count.
+    """
+    head = _git(root, "rev-parse", "--short=7", "HEAD")
+    if head.returncode != 0:
+        raise GateRunError(f"cannot key the run on HEAD in {root}: {head.stderr.strip() or 'not a git repository'}")
+    dirty = _git(root, "diff", "--quiet", "HEAD").returncode != 0
+    name = f"{_safe(feature)}-{_safe(tag)}-{head.stdout.strip()}{'-dirty' if dirty else ''}.log"
+    return logs_dir / "gates" / name
+
+
+def _pid_file(log_path: Path) -> Path:
+    return log_path.with_name(log_path.name + ".pid")
+
+
+def _read_runner(log_path: Path) -> Optional[Dict[str, Any]]:
+    try:
+        rec = json.loads(_pid_file(log_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return rec if isinstance(rec, dict) else None
+
+
+def runner_alive(rec: Optional[Dict[str, Any]]) -> bool:
+    """True when the recorded pid exists AND runs the recorded command line (a reused pid does not count)."""
+    if not rec:
+        return False
+    pid, cmdline = rec.get("pid"), rec.get("cmdline")
+    if not isinstance(pid, int) or pid <= 0 or not isinstance(cmdline, list) or not cmdline:
+        return False
+    if Path("/proc/self").exists():
+        try:
+            raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+        except OSError:
+            return False
+        return raw.decode("utf-8", "replace").split("\0")[:-1] == [str(c) for c in cmdline]
+    try:
+        out = subprocess.run(["ps", "-o", "args=", "-p", str(pid)], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    except OSError:
+        return False
+    return out.returncode == 0 and out.stdout.strip() == " ".join(str(c) for c in cmdline)
+
+
+def _marker_code(log_path: Path) -> Optional[int]:
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for line in reversed(text.splitlines()):
+        if line.startswith(MARKER):
+            try:
+                return int(line[len(MARKER):].strip() or "1")
+            except ValueError:
+                return 1
+    return None
+
+
+def _keep(log_path: Path) -> None:
+    """Rename an existing log to ``<log>.<n>`` (n = 1, 2, ...) so its evidence survives a new run."""
+    if not log_path.exists():
+        return
+    n = 1
+    while log_path.with_name(f"{log_path.name}.{n}").exists():
+        n += 1
+    log_path.rename(log_path.with_name(f"{log_path.name}.{n}"))
+
+
+def detached(root: Path, argv: List[str], log_path: Path, keyed: bool, fresh: bool) -> int:
+    """Start the run in the background, or attach to the live run, or reuse a completed one.
+
+    - a live runner for ``log_path`` is always attached to (one log never has two writers);
+    - a keyed, clean log with its marker is reused unless ``fresh`` (``-dirty`` logs never are);
+    - otherwise a new run starts; a keyed run first renames the old log to ``<log>.<n>``.
+    Prints ``{"log", "state": "started|running|done", "pid", "exit"?}``.
+    """
+    rec = _read_runner(log_path)
+    if runner_alive(rec):
+        print(json.dumps({"log": str(log_path), "state": "running", "pid": rec["pid"]}))
+        return 0
+    code = _marker_code(log_path)
+    if keyed and not fresh and code is not None and not log_path.name.endswith("-dirty.log"):
+        print(json.dumps({"log": str(log_path), "state": "done", "pid": rec.get("pid") if rec else None, "exit": code}))
+        return 0
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    if keyed:
+        _keep(log_path)
     with open(log_path, "w", encoding="utf-8") as fh:
         fh.write(f"# detached gate run started; waiting for {MARKER}<code>\n")
     cmd = [sys.executable, "-I", str(Path(__file__).resolve().parent.parent / "sdd.py"), "gates", *argv, "--log", str(log_path), "--no-stdout"]
@@ -215,23 +318,36 @@ def start_detached(root: Path, argv: List[str], log_path: Path) -> int:
             cmd, cwd=str(root), stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
             start_new_session=True,
         )
-    print(json.dumps({"detached": True, "pid": proc.pid, "log": str(log_path), "marker": MARKER}))
+    _pid_file(log_path).write_text(json.dumps({"pid": proc.pid, "cmdline": cmd}) + "\n", encoding="utf-8")
+    print(json.dumps({"log": str(log_path), "state": "started", "pid": proc.pid}))
     return 0
 
 
 def wait(log_path: Path, poll_seconds: float, timeout: float) -> int:
-    """Block until the marker line appears; print the summary; return its code."""
+    """Block until the marker line appears; print the summary; return its code.
+
+    124: timed out while the run is still going; 125: incomplete, i.e. no marker and the
+    recorded runner (``<log>.pid``) is no longer alive.
+    """
     deadline = time.monotonic() + timeout
     while True:
-        if log_path.is_file():
+        code = _marker_code(log_path)
+        if code is None:
+            rec = _read_runner(log_path)
+            if rec and not runner_alive(rec):
+                code = _marker_code(log_path)  # it may have finished between the two reads
+                if code is None:
+                    print(f"incomplete run: no {MARKER} line in {log_path} and its runner (pid {rec.get('pid')}) is gone; "
+                          "re-run it (sdd gates --detached ... --fresh); it is not a gate failure", file=sys.stderr)
+                    return 125
+        if code is not None:
             text = log_path.read_text(encoding="utf-8", errors="replace")
-            for line in reversed(text.splitlines()):
-                if line.startswith(MARKER):
-                    code = int(line[len(MARKER):].strip() or "1")
-                    start = text.rfind("+- gates summary")
-                    print(text[start:] if start >= 0 else line, end="" if text.endswith("\n") else "\n")
-                    return code
+            start = text.rfind("+- gates summary")
+            print(text[start:] if start >= 0 else f"{MARKER}{code}", end="" if text.endswith("\n") or start < 0 else "\n")
+            if start < 0:
+                print()
+            return code
         if time.monotonic() > deadline:
-            print(f"timed out waiting for {MARKER} in {log_path}; the run is still going or was killed", file=sys.stderr)
+            print(f"timed out waiting for {MARKER} in {log_path}; the run is still going: wait again", file=sys.stderr)
             return 124
         time.sleep(poll_seconds)

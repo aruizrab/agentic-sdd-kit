@@ -156,6 +156,7 @@ DEFAULTS: Dict[str, Any] = {
         "test-author": ["tools/sdd/githooks/**", "tools/sdd/sddkit/**", "tools/sdd/sdd.py"],
     },
     "formatters": [],
+    "build_cache": {"env": {}},
     "stop_check": {"command": "", "changed_globs": [], "roles": ["implementer"], "timeout": 240},
     "models": {
         "mechanical": "",
@@ -186,7 +187,7 @@ DEFAULTS: Dict[str, Any] = {
 
 
 # Sections whose keys are free-form (role names), and known keys that have no default.
-_FREE_FORM_SECTIONS = {"role_write_scopes", "role_denied_paths", "quality.languages"}
+_FREE_FORM_SECTIONS = {"role_write_scopes", "role_denied_paths", "quality.languages", "build_cache.env"}
 _BUILTIN_CHECKS = ("size", "arch", "coverage", "mutation", "baseline", "commits", "secrets")
 _GATE_KEYS = {"name", "command", "timeout", "optional", "skip_if_missing", "env", "install", "skip_exit"}
 _EXTRA_KEYS = {"components": {"word"}, "pipeline": {"role_tiers"}}
@@ -314,6 +315,13 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
         if not isinstance(entry, dict) or "glob" not in entry or "command" not in entry:
             problems.append(f"formatters[{i}] must be an object with 'glob' and 'command'")
     problems.extend(_validate_quality(cfg["quality"]))
+    cache_env = cfg["build_cache"].get("env")
+    if not isinstance(cache_env, dict):
+        problems.append("build_cache.env must be an object of environment variables")
+    else:
+        for key, value in cache_env.items():
+            if not isinstance(value, str):
+                problems.append(f"build_cache.env.{key} must be a string")
     models = cfg["models"]
     for tier in ("mechanical", "mid", "strong", "top"):
         value = models.get(tier, "")
@@ -435,7 +443,7 @@ def pipeline_view(cfg: Dict[str, Any]) -> Dict[str, Any]:
     """The subset the Workflow script needs (passed as ``args.config``)."""
     keys = [
         "project", "paths", "features", "requirements", "components", "tests", "sources",
-        "models", "pipeline", "commit", "merge", "override_env",
+        "models", "pipeline", "commit", "merge", "override_env", "build_cache",
     ]
     view = {k: copy.deepcopy(cfg[k]) for k in keys}
     view["gates"] = {

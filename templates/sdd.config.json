@@ -151,6 +151,9 @@
     "test-author": ["tools/sdd/githooks/**", "tools/sdd/sddkit/**", "tools/sdd/sdd.py"]
   },
   "formatters": [],
+  "build_cache": {
+    "env": {}
+  },
   "stop_check": {
     "command": "",
     "changed_globs": [],

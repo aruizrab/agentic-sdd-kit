@@ -510,6 +510,9 @@
       "command": "gofmt -w {file}"
     }
   ],
+  "build_cache": {
+    "env": {}
+  },
   "stop_check": {
     "command": "go build ./...",
     "changed_globs": [
