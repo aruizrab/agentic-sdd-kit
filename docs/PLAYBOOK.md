@@ -242,7 +242,10 @@ adopt them is fixed on purpose, not by accident. Three steps, in this order:
    tool either run or show its install hint; in CI set `CI=true` so a missing tool fails.
 2. **Record the baseline in the adoption commit.** `sdd baseline --init` writes every current
    size, arch and baseline-enabled command-check violation to `sdd.baseline.json`; commit it
-   (for example `chore: adopt quality gates`). From then on the baseline only shrinks:
+   (for example `chore: adopt quality gates`). The installed kit (`tools/sdd/**`) is never
+   project code, so it never lands in the baseline. `--init` refuses (exit 3) while a
+   baseline-enabled check's tool is missing: install it or set `"baseline": false` on that
+   check first. From then on the baseline only shrinks:
    `sdd check baseline` refuses new entries and raised values, a violation that grows or a
    new one fails, and a fixed one must have its entry removed with `sdd baseline --update`.
    Coverage and mutation need no baseline: they judge only changed lines.
