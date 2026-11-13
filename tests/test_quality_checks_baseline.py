@@ -211,7 +211,7 @@ class BaselineTest(unittest.TestCase):
         cfg["quality"]["baseline_file"] = "sdd.baseline2.json"
         write_config(self.root, cfg)
         self.repo.commit("chore: move the baseline")
-        for env in ({"CI": "true"}, {"CI": ""}):
+        for env in ({"CI": "true", "SDD_BASE_REF": "main"}, {"CI": ""}):
             proc = run_cli(self.root, "check", "baseline", env=env)
             self.assertEqual(proc.returncode, 1, proc.stdout)
             self.assertIn("baseline-moved", proc.stdout)
@@ -227,7 +227,7 @@ class BaselineTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 2, proc.stdout)
         self.assertIn("resolves to HEAD", proc.stdout)
         for check in ("secrets", "baseline"):
-            self.assertEqual(run_cli(self.root, "check", check, env={"CI": "true"}).returncode, 1, check)
+            self.assertEqual(run_cli(self.root, "check", check, env={"CI": "true", "SDD_BASE_REF": "main"}).returncode, 1, check)
 
     def test_ratchet(self) -> None:
         self.repo.git("switch", "-q", "-c", "feat/F001-x")

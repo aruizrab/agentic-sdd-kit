@@ -307,8 +307,10 @@ secrets` (added lines and commits, gitleaks when installed). With `CI=true` a mi
 fails instead of skipping, so install every tool the plan names. Always set `SDD_BASE_REF` to
 the pull request's target branch (for example `SDD_BASE_REF=origin/main` or
 `origin/release-2`): the reference points must not come from the branch under test. With
-`CI=true` the kit ignores the branch's `quality.base_ref`, refuses a configured base that
-resolves to HEAD while the branch has its own commits, and `sdd check baseline` takes
+`CI=true` the kit fails every check that diffs against a base (exit 2) while `SDD_BASE_REF` is
+unset (the branch's `features.main_branch` could name the branch itself and empty every diff),
+ignores the branch's `quality.base_ref`, refuses a configured base that resolves to HEAD while
+the branch has its own commits, and `sdd check baseline` takes
 `quality.baseline_file` from the merge-base's configuration (a renamed baseline fails as
 `baseline-moved`).
 **Do not let the branch grade itself.** The plan above runs the branch's own `tools/sdd` and

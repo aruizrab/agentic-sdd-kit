@@ -195,7 +195,7 @@ class CoverageTest(unittest.TestCase):
         code, out = self.check(env={"CI": ""})
         self.assertEqual(code, 3)
         self.assertIn("definitely-not-a-tool-xyz not installed (install: pip install xyz)", out["notes"][0])
-        code, out = self.check(env={"CI": "true"})
+        code, out = self.check(env={"CI": "true", "SDD_BASE_REF": "main"})
         self.assertEqual(code, 1)
 
 

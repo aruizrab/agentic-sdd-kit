@@ -130,7 +130,7 @@ class CommitsAndSecretsCheckTest(unittest.TestCase):
         write(self.root, "a.md", "a\n")
         self.repo.commit("docs(F001): owner commit, no trailer")
         agent = {"CLAUDECODE": "1", "CI": ""}
-        ci = {"CLAUDECODE": "", "CI": "true"}
+        ci = {"CLAUDECODE": "", "CI": "true", "SDD_BASE_REF": "main"}
         for env in (agent, ci):
             proc = run_cli(self.root, "check", "commits", env=env)
             self.assertEqual(proc.returncode, 0, proc.stdout)
@@ -196,6 +196,19 @@ class CommitsAndSecretsCheckTest(unittest.TestCase):
         self.repo.commit("chore: rename the approval variable")
         self.assertEqual(self._protected(), (1, [("protected-changed", "sdd.config.json")]))
         self.assertEqual(self._protected(SDD_ALLOW_PROTECTED="1"), (0, []))
+
+    def test_ci_needs_the_base_ref_from_the_job(self) -> None:
+        """Under CI=true the base comes only from SDD_BASE_REF: a branch could name itself main_branch."""
+        cfg = json.loads((self.root / "sdd.config.json").read_text())
+        cfg["features"]["main_branch"] = "feat/F001-x"
+        write_config(self.root, cfg)
+        write(self.root, "src/k.py", "k = '" + AWS + "'\n")
+        self.repo.commit("chore: grade myself")
+        for check in ("protected", "secrets", "commits", "baseline"):
+            proc = run_cli(self.root, "check", check, env={"CI": "true", "SDD_BASE_REF": ""})
+            self.assertEqual(proc.returncode, 2, check + proc.stdout)
+            self.assertIn("CI=true needs SDD_BASE_REF", proc.stdout)
+        self.assertEqual(self._protected(), (1, [("protected-changed", "sdd.config.json")]))
 
     def test_gitattributes_hiding_content_is_protected(self) -> None:
         """S1: a branch that marks files `binary` or `-diff` needs the owner's approval."""

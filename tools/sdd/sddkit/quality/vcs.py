@@ -53,6 +53,11 @@ def base_ref(root: Path, cfg: Dict[str, Any]) -> str:
 
 
 def merge_base(root: Path, cfg: Dict[str, Any]) -> str:
+    """The merge-base of HEAD and the base ref. With ``CI=true`` the base must be ``SDD_BASE_REF``:
+    the branch's ``features.main_branch`` could name the branch itself and empty every diff."""
+    if os.environ.get("CI") == "true" and not os.environ.get("SDD_BASE_REF"):
+        raise QualityError("CI=true needs SDD_BASE_REF set to the pull request's target branch (e.g. origin/main): "
+                           "the reference point must not come from the branch's own configuration")
     ref = base_ref(root, cfg)
     proc = subprocess.run(["git", "-C", str(root), "merge-base", "HEAD", ref], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if proc.returncode != 0 or not proc.stdout.strip():

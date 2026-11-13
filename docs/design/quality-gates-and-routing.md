@@ -31,7 +31,7 @@ script. Implementation order: WI1, WI2, WI3, WI4 (section 7 lists the commits).
 | Gate skip code | `sdd gates` shows a gate as SKIP for an exit code only when the gate entry opts in with `skip_exit` (an integer). The templates set `"skip_exit": 3` on every `sdd check` entry and nowhere else. For any other gate, exit 3 is a failure like every non-zero code: real tools use 3 for real failures (pytest: internal error; cargo-mutants: mutants timed out). |
 | CI mode | env `CI` equals `true`. A missing tool is then a failure: `sdd check` returns 1 instead of 3, and `sdd gates` turns every missing-tool SKIP (`skip_if_missing`, `optional` + exit 127, a gate's `skip_exit` code) into FAIL. |
 | Missing tool | SKIP row `<tool> not installed (install: <hint>)`; the hint comes from the gate's or check's `install` key. |
-| Base ref | `SDD_BASE_REF`, else `quality.base_ref`, else `features.main_branch` if that local branch exists, else `origin/<main_branch>`. Changed lines = `git diff -U0 <merge-base>` against the **working tree** (uncommitted edits count). No merge-base: exit 2 naming the ref. |
+| Base ref | `SDD_BASE_REF`, else `quality.base_ref`, else `features.main_branch` if that local branch exists, else `origin/<main_branch>`. With `CI=true` only `SDD_BASE_REF` (missing: exit 2), since the other two come from the branch's own config. Changed lines = `git diff -U0 <merge-base>` against the **working tree** (uncommitted edits count). No merge-base: exit 2 naming the ref. |
 | Current feature | `SDD_FEATURE` (set by `sdd gates --feature`), else parsed from the branch `<branch_prefix><id_prefix><digits>-<slug>`, else none. Its record is `<features_dir>/<NNN>-*/review.md`. |
 | Tool environment | Every command the kit runs for gates, checks and git hooks gets `SDD_ROOT`, `SDD_FEATURE` and `build_cache.env` (WI2). |
 | Scratch output | diff files, tool reports and gitleaks reports go to `<logs_dir>/quality/`, never `/tmp`; temporary reports are deleted after parsing. |
@@ -1050,6 +1050,10 @@ Acceptance criteria:
   `override_env` keeps naming the Claude Code hooks' override for a local human session;
   otherwise a branch could unprotect the config, move `tools_dir`, or point the approval at a
   variable that CI always sets to 1 (`SHLVL`). (review S5)
+- D-43 With `CI=true` the base ref comes only from `SDD_BASE_REF`; without it every check that
+  diffs against a base exits 2. `quality.base_ref` and `features.main_branch` are the branch's
+  own config: naming the branch itself as `main_branch` makes the merge-base HEAD and empties
+  the diffs of protected, secrets, commits and baseline. Local runs keep the fallbacks.
 
 ### Critic round 1: where each finding is addressed
 
