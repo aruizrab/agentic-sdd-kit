@@ -256,6 +256,38 @@ class SecretsHookTest(unittest.TestCase):
         self.assertIn("commit message", proc.stderr)
         self.assertNotIn(AWS, proc.stdout + proc.stderr)
 
+    def test_binary_to_git_is_still_scanned(self) -> None:
+        """S1: `-diff`/`binary` attributes or a NUL byte must not hide added lines from the scan;
+        S12: neither may a type change (symlink -> file)."""
+        write(self.r.root, ".gitattributes", "creds.txt -diff\n*.cfg binary\n")
+        self.assertEqual(self.r.commit("chore: attributes", ".gitattributes").returncode, 0)
+        cases = {"creds.txt": f"key = {AWS}\n", "app.cfg": f"key = {AWS}\n", "nul.txt": f"x\0y\nkey = {AWS}\n"}
+        for name, text in cases.items():
+            with self.subTest(name=name):
+                (self.r.root / name).write_bytes(text.encode())
+                proc = self.r.commit("chore: data", name)
+                self.assertNotEqual(proc.returncode, 0, proc.stderr)
+                self.assertIn(f"aws-access-key-id at {name}:", proc.stderr)
+                self.r.git("rm", "-q", "--cached", name)
+                (self.r.root / name).unlink()
+        os.symlink("README.md", self.r.root / "link.txt")
+        self.assertEqual(self.r.commit("chore: link", "link.txt").returncode, 0)
+        (self.r.root / "link.txt").unlink()
+        write(self.r.root, "link.txt", f"key = {AWS}\n")
+        proc = self.r.commit("chore: link to file", "link.txt")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("aws-access-key-id at link.txt:1", proc.stderr)
+        # The CI check sees the committed content the same way.
+        self.r.git("commit", "-q", "--no-verify", "-m", "chore: bypass for the CI check")
+        write(self.r.root, "nul2.txt", "")
+        (self.r.root / "nul2.txt").write_bytes(f"a\0b\n{AWS}\n".encode())
+        self.r.git("add", "nul2.txt")
+        self.r.git("commit", "-q", "--no-verify", "-m", "chore: bypass 2")
+        proc = self.r.sdd("check", "secrets", env={"SDD_BASE_REF": "HEAD~2"})
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("link.txt:1", proc.stdout)
+        self.assertIn("nul2.txt:2", proc.stdout)
+
     def test_gitleaks_missing_skip_and_ci(self) -> None:
         path = no_gitleaks_path()
         if not shutil.which("git", path=path) or not shutil.which("python3", path=path):

@@ -126,6 +126,16 @@ class CommitsAndSecretsCheckTest(unittest.TestCase):
         proc = run_cli(self.root, "check", "commits", "--json", env=ci)
         self.assertEqual(len(json.loads(proc.stdout)["violations"]), 1)
 
+    def test_diff_paths_with_spaces_and_quotes(self) -> None:
+        """S11: names git prints with a trailing TAB or C-quoted are normalised."""
+        from sddkit.quality import vcs
+        for name in ("my file.txt", 'q"uote.txt', "back\\slash.txt", "caf\u00e9.txt"):
+            write(self.root, name, "a\n")
+        self.repo.git("add", "-A")
+        added = vcs.staged_added_lines(self.root)
+        self.assertEqual(sorted(added), sorted(["back\\slash.txt", "caf\u00e9.txt", "my file.txt", 'q"uote.txt']))
+        self.assertEqual(added["my file.txt"], [(1, "a")])
+
     def test_secrets(self) -> None:
         write(self.root, "src/a.py", f"x = 1\nk = '{AWS}'\n")
         self.repo.commit("feat: committed secret")

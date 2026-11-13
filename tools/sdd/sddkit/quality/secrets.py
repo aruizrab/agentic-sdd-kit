@@ -1,6 +1,10 @@
 """Secret scanning: a small built-in high-precision rule set (stdlib only) plus gitleaks
 (>= 8.19) when it is installed and ``quality.secrets.gitleaks`` is true.
 
+The built-in rules read ``git diff --text --no-textconv``: a file git treats as binary (a NUL
+byte, ``-diff`` or ``binary`` in .gitattributes) is still scanned; gitleaks skips such files
+and a note names them.
+
 Findings are reported as rule id and location (``file:line`` or ``commit message``); the
 matched text is never printed or stored. gitleaks runs with ``--redact`` and its JSON report
 (written under ``<logs_dir>/quality/``) is read for ``RuleID``, ``File`` and ``StartLine`` only
@@ -95,6 +99,15 @@ def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[s
     return out
 
 
+def binary_notes(root: Path, cfg: Dict[str, Any], *diff_args: str) -> List[str]:
+    """Paths git treats as binary: the built-in rules scan their bytes as text, gitleaks skips them."""
+    if not gitleaks_available(cfg):
+        return []
+    allow = cfg["quality"]["secrets"]["allow_globs"]
+    return [f"{p}: binary to git (NUL byte or a .gitattributes `-diff`/`binary`): built-in rules scanned it as text, gitleaks did not"
+            for p in vcs.binary_paths(root, *diff_args) if not any_match(p, allow)]
+
+
 def gitleaks_note(cfg: Dict[str, Any], res: Result) -> None:
     """Record a SKIP note for a missing gitleaks (a failure in CI mode)."""
     if not cfg["quality"]["secrets"]["gitleaks"]:
@@ -111,6 +124,7 @@ def check(root: Path, cfg: Dict[str, Any]) -> Result:
     res = Result("secrets")
     base = vcs.merge_base(root, cfg)
     res.violations += scan_added(cfg, vcs.added_lines(root, base))
+    res.notes += binary_notes(root, cfg, base)
     if gitleaks_available(cfg):
         head = vcs.git(root, "rev-parse", "HEAD").strip()
         if head != base:

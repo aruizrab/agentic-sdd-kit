@@ -148,6 +148,8 @@ def _pre_commit(hook: _Hook) -> int:
     cfg, root = hook.cfg, hook.root
     t0 = time.monotonic()
     found = secrets.scan_added(cfg, vcs.staged_added_lines(root))
+    for n in secrets.binary_notes(root, cfg, "--cached"):
+        hook.say(n)
     if secrets.gitleaks_available(cfg):
         found += secrets.gitleaks(root, cfg, ["git", "--pre-commit", "--staged", "."])
     elif cfg["quality"]["secrets"]["gitleaks"]:

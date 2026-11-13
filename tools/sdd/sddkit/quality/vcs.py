@@ -55,6 +55,32 @@ def merge_base(root: Path, cfg: Dict[str, Any]) -> str:
 
 
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+_ESC = {"a": 7, "b": 8, "t": 9, "n": 10, "v": 11, "f": 12, "r": 13, '"': 34, "\\": 92}
+
+
+def unquote_path(name: str) -> str:
+    """A path as git prints it in a diff header: C-quoted (``"b/q\\"uote.txt"``) or followed by a
+    TAB when it holds a space. Returns the plain path, still with its ``a/``/``b/`` prefix."""
+    if name.endswith("\t"):
+        name = name.rstrip("\t")
+    if len(name) < 2 or not (name.startswith('"') and name.endswith('"')):
+        return name
+    out = bytearray()
+    body, i = name[1:-1], 0
+    while i < len(body):
+        c = body[i]
+        if c == "\\" and i + 1 < len(body):
+            nxt = body[i + 1]
+            if nxt in "0123" and re.match(r"[0-7]{3}", body[i + 1:i + 4]):
+                out.append(int(body[i + 1:i + 4], 8))
+                i += 4
+                continue
+            out.append(_ESC.get(nxt, ord(nxt)))
+            i += 2
+            continue
+        out += c.encode("utf-8")
+        i += 1
+    return out.decode("utf-8", errors="replace")
 
 
 def parse_diff(text: str) -> Dict[str, List[Tuple[int, str]]]:
@@ -68,7 +94,7 @@ def parse_diff(text: str) -> Dict[str, List[Tuple[int, str]]]:
             path, in_hunk = None, False
             continue
         if not in_hunk and raw.startswith("+++ "):
-            target = raw[4:]
+            target = unquote_path(raw[4:])
             path = None if target == "/dev/null" else (target[2:] if target.startswith("b/") else target)
             if path is not None:
                 out.setdefault(path, [])
@@ -85,7 +111,20 @@ def parse_diff(text: str) -> Dict[str, List[Tuple[int, str]]]:
 
 
 def _diff(root: Path, *args: str) -> str:
-    return git(root, "diff", "-U0", "--no-color", "--no-ext-diff", "--no-renames", "--diff-filter=ACMR", *args)
+    # --text --no-textconv: a file git treats as binary (a NUL byte, `-diff` or `binary` in
+    # .gitattributes) or shows through a textconv driver is still scanned as its real bytes.
+    # T: a type change (symlink -> file) adds content too.
+    return git(root, "diff", "-U0", "--no-color", "--no-ext-diff", "--text", "--no-textconv", "--no-renames", "--diff-filter=ACMRT", *args)
+
+
+def binary_paths(root: Path, *args: str) -> List[str]:
+    """Added or changed paths git treats as binary (``git diff --numstat`` prints ``-``)."""
+    out = []
+    for row in git(root, "diff", "--numstat", "-z", "--no-ext-diff", "--no-renames", "--diff-filter=ACMRT", *args).split("\0"):
+        parts = row.split("\t", 2)
+        if len(parts) == 3 and parts[0] == "-" and parts[1] == "-":
+            out.append(parts[2])
+    return out
 
 
 def changed_lines(root: Path, base: str) -> Dict[str, Set[int]]:
@@ -110,7 +149,7 @@ def tracked_files(root: Path) -> List[str]:
 
 
 def staged_files(root: Path) -> List[str]:
-    return [p for p in git(root, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR").split("\0") if p]
+    return [p for p in git(root, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMRT").split("\0") if p]
 
 
 def staged_content(root: Path, path: str) -> Optional[str]:
