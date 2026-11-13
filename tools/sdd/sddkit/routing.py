@@ -164,7 +164,15 @@ def table_problems(table: Dict[str, Any], formula: bool = False) -> List[str]:
     for name, role in table["roles"].items():
         if not isinstance(role, dict) or not all(isinstance(role.get(k), int) and 1 <= role[k] <= 6 for k in ("base", "min")):
             problems.append(f"roles.{name} needs integer 'base' and 'min' in 1-6")
-    problems.extend(_point_problems(table, formula))
+    point_problems = _point_problems(table, formula)
+    problems.extend(point_problems)
+    if formula and not point_problems and not any(p.startswith("floors") for p in problems):
+        # A level without a candidate would run its calls on the inherited session model.
+        best = max(p["intelligence"] for p in table["points"])
+        for level in LEVELS:
+            if floors[str(level)] > best:
+                problems.append(f"level {level}: no point reaches its floor {floors[str(level)]} (best intelligence {best}); "
+                                "add a point or lower floors")
     return problems
 
 

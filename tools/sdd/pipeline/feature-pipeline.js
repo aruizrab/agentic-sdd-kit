@@ -196,9 +196,12 @@ function levelOf(role, route, R) {
   return Math.min(6, Math.max(1, r.min, raw))
 }
 // Lesson: escalation only goes up. A retried work item never runs on a less intelligent point than its last attempt.
+// No candidate at the level: null, and the call pauses the run (never the inherited session model). No
+// candidate as smart as the previous attempt: stay on the previous point.
 function formulaPick(R, level, prev) {
   const list = R.candidates[String(level)] || []
-  return list.find((c) => !prev || prev.intelligence == null || c.intelligence >= prev.intelligence) || list[0] || null
+  if (!list.length) return null
+  return list.find((c) => !prev || prev.intelligence == null || c.intelligence >= prev.intelligence) || Object.assign({}, prev)
 }
 const EXHAUSTED = new Set() // pools whose usage cap was hit in this run
 let exhaustedCleared = !A.modelsFromPhase
@@ -210,7 +213,8 @@ function fallbackFor(R, pick) {
   if (!pick || pick.intelligence == null || !R.table) return null
   const pts = (R.table.points || []).filter((p) => p.intelligence >= pick.intelligence && !EXHAUSTED.has(p.pool))
   pts.sort((a, b) => a.cost_per_task - b.cost_per_task || b.intelligence - a.intelligence || (a.model < b.model ? -1 : a.model > b.model ? 1 : 0) || ((a.effort || '') < (b.effort || '') ? -1 : 1))
-  return pts[0] ? Object.assign({}, pts[0], { effort: pts[0].effort || '' }) : null
+  // A fallback point without its own effort keeps the pick's effort (never the call site's lower default).
+  return pts[0] ? Object.assign({}, pts[0], { effort: pts[0].effort || pick.effort || '' }) : null
 }
 function routeCall(opts, route) {
   const now = PHASE_ORDER.indexOf(opts.phase) >= MODELS_FROM
@@ -262,6 +266,11 @@ function agentR(prompt, opts) {
 // Any null/undefined/thrown result is a failed attempt; a failure on a capped pool exhausts that pool for the
 // run and moves the call to its fallback; the run pauses only when no equal-or-smarter point is left.
 async function attempts(prompt, opts, m) {
+  if (TIERING && m.mode === 'formula' && !m.pick) {
+    log(`${m.label0}: no point of the models table reaches level ${m.level}; pausing (fill the table or lower the floors, then resume)`)
+    PAUSED.value = true
+    return null
+  }
   let point = m.pick
   let fallbackOf = null
   let label = m.label0

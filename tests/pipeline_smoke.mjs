@@ -543,6 +543,23 @@ const task = (id, extra = {}) => Object.assign({ id, title: id, components: ['a'
   console.log('ok 22 usage caps')
 }
 
+// 22b. S14: a level without candidates pauses (never the session model); a blank-effort fallback keeps the pick's effort.
+{
+  const LOW = routingFor({ version: 1, pools: POOLS, points: [pt('low-s', 'medium', 50, 1, 'standard')] })
+  assert.equal(LOW.candidates['4'].length, 0)
+  const low = await run({ config: { ...CONFIG, routing: LOW }, stages: ['plan'] })
+  assert.equal(low.result.status, 'paused', JSON.stringify(low.result))
+  assert.ok(low.calls.every((c) => c.model), low.calls.map((c) => `${c.label}:${c.model}`).join(','))
+  assert.ok(!low.calls.some((c) => /^architect-planner/.test(c.label)))
+  const EFF = routingFor({ version: 1, pools: POOLS, floors: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 },
+    points: [pt('cap-a', 'high', 50, 1, 'capped'), pt('std-b', '', 50, 2, 'standard')] })
+  const eff = await run({ config: { ...CONFIG, routing: EFF }, stages: ['plan'] }, [], (o) => (o.model === 'cap-a' ? null : undefined))
+  const fb = eff.calls.filter((c) => /\(fallback\)$/.test(c.label))
+  assert.ok(fb.length, eff.calls.map((c) => c.label).join(','))
+  for (const c of fb) assert.deepEqual([c.model, c.effort], ['std-b', 'high'], c.label)
+  console.log('ok 22b empty level pauses, fallback keeps effort')
+}
+
 // 23. Telemetry: one record per agent() attempt, deterministic fields only; outcomes; no logging call in the script.
 {
   const FIELDS = ['call', 'attempt', 'label', 'role', 'level', 'model', 'effort', 'outcome', 'fallback_of', 'mode'].sort()

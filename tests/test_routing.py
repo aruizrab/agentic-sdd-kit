@@ -129,6 +129,14 @@ class TableTest(unittest.TestCase):
         finally:
             rm(root)
 
+    def test_formula_needs_a_candidate_per_level(self) -> None:
+        """S14: in formula mode a level whose floor no point reaches is a table problem."""
+        raw = {"version": 1, "pools": {"standard": {"capped": False}},
+               "points": [{"model": "low-s", "effort": "medium", "intelligence": 50, "cost_per_task": 1, "tokens_per_task": 1000, "pool": "standard"}]}
+        problems = routing.table_problems(routing.normalize(raw), formula=True)
+        self.assertTrue(any(p.startswith("level 6: no point reaches its floor") for p in problems), problems)
+        self.assertFalse(any(p.startswith("level") for p in routing.table_problems(routing.normalize(raw), formula=False)))
+
     def test_two_pool_hand_computed(self) -> None:
         out = self.table_json("two-pool.json")
         l3 = out["levels"]["3"]
