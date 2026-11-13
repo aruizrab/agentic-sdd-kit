@@ -331,6 +331,11 @@ mkdir -p .sdd/base-tools && git archive "$base" tools/sdd | tar -x -C .sdd/base-
 CI=true python3 -I .sdd/base-tools/tools/sdd/sdd.py --root . check protected
 ```
 
+Add your CI configuration to `protected_paths` too (for example `.github/**`,
+`.gitlab-ci.yml`, `.circleci/**`): a branch that edits the workflow could set
+`SDD_ALLOW_PROTECTED=1` or `SDD_BASE_REF` itself, or drop the check, and CI providers run the
+branch's own workflow file.
+
 Agents cannot edit the hooks and checkers locally either: `<tools_dir>/githooks/**`,
 `<tools_dir>/sddkit/**` and `<tools_dir>/sdd.py` are denied to every subagent (the pipeline's
 role fallback runs all roles as `general-purpose`, so a role-keyed denial would never fire).
