@@ -205,6 +205,7 @@ class BaselineTest(unittest.TestCase):
         self.repo.commit("chore: adopt baseline")
 
     def test_resolve_adjacent_and_last_entries(self) -> None:
+        rm(self.root)  # each case below uses its own repository
         for removed in (("src/b.py", "src/c.py"), ("src/c.py", "src/d.py")):
             with self.subTest(removed=removed):
                 root = make_tmp("basemerge-")
