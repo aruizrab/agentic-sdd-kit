@@ -344,6 +344,71 @@ class RefitTest(unittest.TestCase):
             rm(root)
 
 
+class RefitJournalInputTest(unittest.TestCase):
+    """Pluggable refit input: Workflow journals (level from a ' [L<n>]' label suffix, model from agent meta files)."""
+
+    JOURNALS = FIX / "journals"
+
+    def test_read_journal(self) -> None:
+        rows = routing.read_journal(self.JOURNALS / "run-a" / "journal.jsonl")
+        got = [(r["label"], r["level"], r["model"], r["outcome"], r["attempt"]) for r in rows]
+        self.assertEqual(got, [
+            ("setup", 1, "mech-a", "ok", 1),
+            ("T01 impl", 3, "mid-a", "fail", 1),
+            ("T01 impl retry", 4, "mid-a", "ok", 2),
+            ("spec-critic r1", 5, "inherit", "ok", 1),  # no model in the meta file: the session model
+            ("security-reviewer", 5, "strong-a", None, 1),  # null result: usage cap or outage
+            ("verify R1 #1", 5, "strong-a", None, 1),  # failed entry
+            ("perf-reviewer", 3, "mid-a", None, 1),  # started, never finished
+        ])  # the unrouted "gates post-implement #1" is skipped
+        self.assertEqual(routing.journal_paths([str(self.JOURNALS / "*")]), [self.JOURNALS / "run-a" / "journal.jsonl", self.JOURNALS / "run-b" / "journal.jsonl"])
+
+    def test_cli_journal_input(self) -> None:
+        root = project("frontier.json")
+        try:
+            res = run_cli(root, "routing", "refit", "--json", "--journal", str(self.JOURNALS / "run-a"), "--journal", str(self.JOURNALS / "run-b" / "journal.jsonl"))
+            self.assertEqual(res.returncode, 0, res.stderr)
+            out = json.loads(res.stdout)
+            self.assertEqual(out["inputs"], ["journal"])
+            l3 = out["levels"]["3"]
+            self.assertEqual((l3["samples"], l3["fail"], l3["infra"]), (3, 1, 1))
+            self.assertAlmostEqual(l3["retry_rate"], 1 / 3)  # the capped-fallback attempt
+            self.assertEqual({m: (v["samples"], v["fail"]) for m, v in l3["models"].items()}, {"mid-a": (2, 1), "mid-b": (1, 0)})
+            l5 = out["levels"]["5"]
+            self.assertEqual((l5["samples"], l5["infra"]), (1, 2))
+            glob_res = run_cli(root, "routing", "refit", "--json", "--input", "journal", "--journal", str(self.JOURNALS / "run-*"))
+            self.assertEqual(json.loads(glob_res.stdout)["levels"], out["levels"])
+            # Inputs pool: telemetry plus journals.
+            shutil.copy(FIX / "refit.jsonl", root / "routing.jsonl")
+            both = run_cli(root, "routing", "refit", "--json", "--input", "telemetry", "--input", "journal", "--file", str(root / "routing.jsonl"), "--journal", str(self.JOURNALS / "run-*"))
+            self.assertEqual(both.returncode, 0, both.stderr)
+            tel = json.loads(run_cli(root, "routing", "refit", "--json", "--file", str(root / "routing.jsonl")).stdout)
+            pooled = json.loads(both.stdout)
+            self.assertEqual(pooled["inputs"], ["telemetry", "journal"])
+            self.assertEqual(pooled["levels"]["3"]["samples"], tel["levels"].get("3", {"samples": 0})["samples"] + 3)
+            text = run_cli(root, "routing", "refit", "--journal", str(self.JOURNALS / "run-*"))
+            self.assertIn("from 2 journal(s)", text.stdout)
+            # No journals, or journals without routed labels: exit 2 with a reason.
+            none = run_cli(root, "routing", "refit", "--journal", str(root / "nothing-*"))
+            self.assertEqual(none.returncode, 2)
+            self.assertIn("no workflow journals", none.stderr)
+            write(root, "plain/journal.jsonl", json.dumps({"type": "started", "key": "k", "agentId": "x", "label": "setup"}) + "\n")
+            plain = run_cli(root, "routing", "refit", "--journal", str(root / "plain"))
+            self.assertEqual(plain.returncode, 2)
+            self.assertIn("[L<n>]", plain.stderr)
+        finally:
+            rm(root)
+
+    def test_failed_outcome_alias(self) -> None:
+        root = project("frontier.json")
+        try:
+            write(root, "t.jsonl", "".join(json.dumps({"label": f"c{i}", "level": 2, "model": "m", "outcome": o}) + "\n" for i, o in enumerate(["failed", "ok", None])))
+            out = json.loads(run_cli(root, "routing", "refit", "--json", "--file", str(root / "t.jsonl")).stdout)
+            self.assertEqual((out["levels"]["2"]["samples"], out["levels"]["2"]["fail"], out["levels"]["2"]["infra"]), (2, 1, 1))
+        finally:
+            rm(root)
+
+
 class CandidatesApiTest(unittest.TestCase):
     """The one implementation of the formula (used by the pipeline smoke test too)."""
 

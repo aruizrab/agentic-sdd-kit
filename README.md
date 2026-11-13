@@ -97,7 +97,7 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 | `sdd union-merge [files]` | resolves additive manifest conflicts only (union); refuses everything else |
 | `sdd spec-info DIR`, `sdd markers FILE` | Status, open clarification markers (ignores comments, code spans, prose), requirement counts |
 | `sdd tasks DIR [--lanes] [--validate]` | tasks.md as JSON: waves, tasks, components, lanes, the planner's `complexity` and `risk` ratings; plan exit criteria |
-| `sdd routing table [--json]`, `sdd routing log --output-file F`, `sdd routing refit` | model routing: the models table's candidates per level with their expected cost; append a run's telemetry to `<logs_dir>/routing.jsonl`; per-level failure rates and floor suggestions (report only) |
+| `sdd routing table [--json]`, `sdd routing log --output-file F`, `sdd routing refit` | model routing: the models table's candidates per level with their expected cost; append a run's telemetry to `<logs_dir>/routing.jsonl`; per-level failure rates and floor suggestions (report only) from the telemetry or from Workflow journals (`--input journal --journal <glob>`) |
 | `sdd source clause DOC SECTION`, `sdd source find DOC REGEX` | normative source lookup (configured command or built-in Markdown reader) |
 | `sdd hook NAME` | the hook logic behind `.claude/hooks/*.sh` (protect-paths, bash-guard, format, stop-check) |
 | `sdd doctor` | checks the installation and the configuration |

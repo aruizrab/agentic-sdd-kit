@@ -1,0 +1,16 @@
+{"type": "launched"}
+{"type": "started", "key": "v2:a1", "agentId": "a1", "label": "setup [L1]", "phase": "x"}
+{"type": "result", "key": "v2:a1", "agentId": "a1", "result": {"ok": true, "branch": "b"}}
+{"type": "started", "key": "v2:a2", "agentId": "a2", "label": "T01 impl [L3]", "phase": "x"}
+{"type": "result", "key": "v2:a2", "agentId": "a2", "result": {"ok": false, "summary": "failed"}}
+{"type": "started", "key": "v2:a3", "agentId": "a3", "label": "T01 impl retry [L4]", "phase": "x"}
+{"type": "result", "key": "v2:a3", "agentId": "a3", "result": {"ok": true}}
+{"type": "started", "key": "v2:a4", "agentId": "a4", "label": "spec-critic r1 [L5]", "phase": "x"}
+{"type": "result", "key": "v2:a4", "agentId": "a4", "result": {"verdict": "pass", "issues": []}}
+{"type": "started", "key": "v2:a5", "agentId": "a5", "label": "security-reviewer [L5]", "phase": "x"}
+{"type": "result", "key": "v2:a5", "agentId": "a5", "result": null}
+{"type": "started", "key": "v2:a6", "agentId": "a6", "label": "gates post-implement #1", "phase": "x"}
+{"type": "result", "key": "v2:a6", "agentId": "a6", "result": {"pass": true}}
+{"type": "started", "key": "v2:a7", "agentId": "a7", "label": "verify R1 #1 [L5]", "phase": "x"}
+{"type": "failed", "key": "v2:a7", "agentId": "a7", "error": "killed"}
+{"type": "started", "key": "v2:a8", "agentId": "a8", "label": "perf-reviewer [L3]", "phase": "x"}

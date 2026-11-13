@@ -166,4 +166,13 @@ logging a paused run and then its resume records each attempt once. `sdd routing
 samples (`ok` + `fail`), failure and retry rates and the infrastructure failures, and suggests
 raising a floor to the next frontier intelligence when the failure rate exceeds `--max-fail`
 with enough samples, or lowering it when there were no failures over 3x the samples. It never
-writes a file.
+writes a file. Its input is pluggable (`--input`, repeatable, rows pooled): `telemetry` (the
+default, the JSONL above) or `journal`: Workflow journals given with `--journal <file | run dir
+| glob>` (default: the journals under `~/.claude/projects`), for runs whose telemetry was never
+logged. A journal call counts only when its label carries the level as a ` [L<n>]` suffix (an
+orchestration script that routes by level adds it); the model comes from the
+`agent-<id>.meta.json` next to the journal (`inherit` when it names none), journals carry no
+effort, a null result or a failed or unfinished call is an infrastructure failure, and a label
+ending in `retry`, `(retry)` or `(... fallback)` is a second attempt. Telemetry outcomes
+`failed` are read as `fail`. Another log format is one more reader in `REFIT_INPUTS`
+(`sddkit/routing.py`).

@@ -167,7 +167,7 @@ def cmd_routing(args: argparse.Namespace) -> int:
             print("routing log: give --output-file <Workflow output file> or --file <summary JSON | ->", file=sys.stderr)
             return 2
         return routing.cmd_log(root, cfg, args.output_file, args.file, args.transcript_dir)
-    return routing.cmd_refit(root, cfg, args.file, args.json, args.min_samples, args.max_fail)
+    return routing.cmd_refit(root, cfg, args.file, args.json, args.min_samples, args.max_fail, args.input, args.journal)
 
 
 def cmd_new_feature(args: argparse.Namespace) -> int:
@@ -427,7 +427,13 @@ def build_parser() -> argparse.ArgumentParser:
     rl.add_argument("--transcript-dir", help="the run's transcript dir (journal.jsonl + agent-*.jsonl) for times when there is no output file")
     rf = ro_sub.add_parser("refit", help="per-level failure rates and floor suggestions (report only, never writes)")
     rf.add_argument("--json", action="store_true")
-    rf.add_argument("--file", help="routing JSONL (default: <logs_dir>/routing.jsonl)")
+    rf.add_argument("--file", help="routing JSONL for the telemetry input (default: <logs_dir>/routing.jsonl)")
+    rf.add_argument("--input", action="append", choices=sorted(routing.REFIT_INPUTS),
+                    help="where the attempts come from (repeatable; rows are pooled): telemetry (default) or journal "
+                         "(Workflow journals: level from a ' [L<n>]' label suffix, model from agent-<id>.meta.json)")
+    rf.add_argument("--journal", action="append", metavar="PATH",
+                    help="journal file, run directory or glob for the journal input (repeatable; implies --input journal; "
+                         "default: the Workflow journals under ~/.claude/projects)")
     rf.add_argument("--min-samples", type=int, default=10)
     rf.add_argument("--max-fail", type=float, default=0.25)
     ro.set_defaults(fn=cmd_routing)

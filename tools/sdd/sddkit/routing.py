@@ -11,14 +11,18 @@ with ``pool_mult`` = the pool's scarcity for a capped pool on L1-L3, else 1. ``s
 levels and walks the lists (retry and usage-cap rules). Telemetry: the script records one
 deterministic record per agent attempt; ``sdd routing log`` appends them, with host times, to
 ``<logs_dir>/routing.jsonl``; ``sdd routing refit`` reports per-level failure rates and floor
-suggestions and never changes a file.
+suggestions and never changes a file. Its input is pluggable (``REFIT_INPUTS``): the telemetry
+JSONL (default) or Workflow journals, where a routed call's label carries its level as a
+`` [L<n>]`` suffix and the model comes from the ``agent-<id>.meta.json`` next to the journal.
 """
 
 from __future__ import annotations
 
 import copy
+import glob as _glob
 import json
 import math
+import os
 import re
 import sys
 from collections import defaultdict
@@ -511,6 +515,11 @@ def _append(root: Path, cfg: Dict[str, Any], rows: List[Dict[str, Any]], unmatch
 # sdd routing refit
 # ---------------------------------------------------------------------------
 
+def _outcome(value: Any) -> Any:
+    """Outcome vocabulary: "ok", "fail" or None (infrastructure); "failed" (other telemetry formats) is "fail"."""
+    return "fail" if value == "failed" else value
+
+
 def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -526,10 +535,105 @@ def _read_jsonl(path: Path) -> List[Dict[str, Any]]:
             raise RoutingError(f"{path}:{i}: {exc}") from exc
         if not isinstance(row, dict) or "level" not in row or "outcome" not in row:
             raise RoutingError(f"{path}:{i}: not a routing record")
+        row["outcome"] = _outcome(row["outcome"])
         out.append(row)
     if not out:
         raise RoutingError(f"{path}: no records")
     return out
+
+
+LEVEL_SUFFIX = re.compile(r" \[L([1-6])\]")
+RETRY_SUFFIX = re.compile(r"(?: retry| \([^()]*\b(?:retry|fallback)\))$")  # "x retry", "x (retry)", "x (capped fallback)"
+DEFAULT_JOURNAL_GLOBS = (
+    "~/.claude/projects/*/*/subagents/workflows/*/journal.jsonl",
+    "~/.claude/projects/*/subagents/workflows/*/journal.jsonl",
+)
+
+
+def journal_paths(specs: Iterable[str]) -> List[Path]:
+    """Journal files from paths, directories (holding journal.jsonl) and globs, sorted and unique."""
+    out: List[Path] = []
+    for spec in specs:
+        spec = os.path.expanduser(spec)
+        hits = sorted(_glob.glob(spec)) if any(ch in spec for ch in "*?[") else [spec]
+        for h in hits:
+            p = Path(h)
+            p = p / "journal.jsonl" if p.is_dir() else p
+            if p.is_file() and p not in out:
+                out.append(p)
+    return out
+
+
+def read_journal(path: Path) -> List[Dict[str, Any]]:
+    """Attempt records of one Workflow journal: only calls whose label carries a ` [L<n>]` level suffix.
+
+    Outcome: a result with ``ok: false`` is "fail", another non-null result "ok"; a null result, a
+    ``failed`` entry or a call without a result is None (usage cap, outage, killed session).
+    The model is ``model`` from ``agent-<id>.meta.json`` next to the journal ("inherit" when absent:
+    the call ran on the session model); journals carry no effort. A label ending in ``retry``,
+    ``(retry)`` or ``(... fallback)`` is attempt 2.
+    """
+    started: Dict[str, Dict[str, Any]] = {}
+    results: Dict[str, Dict[str, Any]] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise RoutingError(f"{path}: {exc}") from exc
+    for line in lines:
+        try:
+            d = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        if d.get("type") == "started":
+            started[d.get("key")] = d
+        elif d.get("type") in ("result", "failed"):
+            results[d.get("key")] = d
+    rows = []
+    for key, st in started.items():
+        label = str(st.get("label") or "")
+        m = LEVEL_SUFFIX.search(label)
+        if not m:
+            continue  # not routed by level
+        model = "inherit"
+        meta = path.parent / f"agent-{st.get('agentId')}.meta.json"
+        try:
+            model = json.loads(meta.read_text(encoding="utf-8")).get("model") or "inherit"
+        except (OSError, ValueError, AttributeError):
+            pass
+        r = results.get(key)
+        res = r.get("result") if r and r.get("type") == "result" else None
+        outcome = None if res is None else "fail" if isinstance(res, dict) and res.get("ok") is False else "ok"
+        base = LEVEL_SUFFIX.sub("", label)
+        rows.append({"run": path.parent.name, "label": base, "level": int(m.group(1)), "model": model, "effort": None,
+                     "outcome": outcome, "attempt": 2 if RETRY_SUFFIX.search(base) else 1, "source": "journal"})
+    return rows
+
+
+def refit_from_telemetry(root: Path, cfg: Dict[str, Any], files: List[str]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    paths = [Path(f) for f in files] or [root / cfg["paths"]["logs_dir"] / "routing.jsonl"]
+    rows: List[Dict[str, Any]] = []
+    for p in paths:
+        rows.extend(_read_jsonl(p))
+    return rows, [str(p) for p in paths]
+
+
+def refit_from_journals(root: Path, cfg: Dict[str, Any], specs: List[str]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    paths = journal_paths(specs or DEFAULT_JOURNAL_GLOBS)
+    if not paths:
+        raise RoutingError(f"no workflow journals found ({', '.join(specs or DEFAULT_JOURNAL_GLOBS)})")
+    rows: List[Dict[str, Any]] = []
+    for p in paths:
+        rows.extend(read_journal(p))
+    if not rows:
+        raise RoutingError(f"no routed attempts (labels with a ' [L<n>]' suffix) in {len(paths)} journal(s)")
+    return rows, [f"{len(paths)} journal(s)"]
+
+
+# Refit inputs: name -> reader(root, cfg, sources) -> (rows, source descriptions). Each row needs "level" and
+# "outcome" ("ok" | "fail" | None) and may carry "model" and "attempt". Add a reader here for another log format.
+REFIT_INPUTS = {"telemetry": refit_from_telemetry, "journal": refit_from_journals}
 
 
 def _rates(rows: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
@@ -571,19 +675,30 @@ def refit(rows: List[Dict[str, Any]], table: Dict[str, Any], min_samples: int, m
     return {"levels": levels, "suggestions": suggestions, "min_samples": min_samples, "max_fail": max_fail}
 
 
-def cmd_refit(root: Path, cfg: Dict[str, Any], file: Optional[str], as_json: bool, min_samples: int, max_fail: float) -> int:
-    path = Path(file) if file else root / cfg["paths"]["logs_dir"] / "routing.jsonl"
+def cmd_refit(root: Path, cfg: Dict[str, Any], file: Optional[str], as_json: bool, min_samples: int, max_fail: float,
+              inputs: Optional[List[str]] = None, journals: Optional[List[str]] = None) -> int:
+    """``inputs``: names from REFIT_INPUTS (default telemetry, or journal when ``journals`` are given); rows of all are pooled."""
+    inputs = list(dict.fromkeys(inputs or (["journal"] if journals else ["telemetry"])))
+    sources = {"telemetry": [file] if file else [], "journal": list(journals or [])}
+    rows: List[Dict[str, Any]] = []
+    described: List[str] = []
     try:
-        rows = _read_jsonl(path)
+        for name in inputs:
+            if name not in REFIT_INPUTS:
+                raise RoutingError(f"unknown input {name!r} (known: {', '.join(REFIT_INPUTS)})")
+            got, desc = REFIT_INPUTS[name](root, cfg, sources.get(name, []))
+            rows.extend(got)
+            described.extend(desc)
         table, _ = load_table(root, cfg)
     except RoutingError as exc:
         print(f"routing refit: {exc}", file=sys.stderr)
         return 2
     out = refit(rows, table, min_samples, max_fail)
+    out["inputs"] = inputs
     if as_json:
         print(json.dumps(out, indent=2))
         return 0
-    print(f"routing refit over {len(rows)} attempt(s) from {path} (report only; nothing is changed)")
+    print(f"routing refit over {len(rows)} attempt(s) from {', '.join(described)} (report only; nothing is changed)")
     for level, s in out["levels"].items():
         print(f"L{level} floor {s['floor']}: {s['samples']} samples, failure {s['failure_rate']:.0%}, retries {s['retry_rate']:.0%}, infrastructure failures {s['infra']}")
         for model, m in s["models"].items():
