@@ -144,24 +144,39 @@ def binary_paths(root: Path, *args: str) -> List[str]:
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
+def binary_blob_ids(root: Path, *args: str) -> List[Tuple[str, str]]:
+    """[(path, blob id)] of the added or changed paths git treats as binary in ``git diff <args>``
+    (``--cached``: the staged blobs). Blob ids come from ``--raw``, never from a ``<rev>:<path>``
+    spec, which git can misread (``:0:x.dat`` is stage 0 of ``x.dat``)."""
+    binary = set(binary_paths(root, *args))
+    if not binary:
+        return []
+    tokens = git(root, "diff", "--raw", "-z", "--no-abbrev", "--no-ext-diff", "--no-renames", "--diff-filter=ACMRT", *args).split("\0")
+    out = []
+    for meta, path in zip(tokens[::2], tokens[1::2]):
+        fields = meta.split()
+        if meta.startswith(":") and len(fields) >= 4 and path in binary:
+            out.append((path, fields[3]))
+    return out
+
+
 def binary_blobs(root: Path, base: str, head: str, skip: List[str]) -> List[Tuple[str, str]]:
     """Every distinct blob a commit in ``base..head`` adds or changes at a path git treats as
-    binary and not matching ``skip`` (``allow_globs``), oldest first: [(path, ``<commit>:<path>``)].
+    binary and not matching ``skip`` (``allow_globs``), oldest first: [(path, blob id)].
     Each commit is compared with its first parent, so a secret added and removed again on the
     branch is still found. Skipped paths are dropped before deduplication: a blob first added at
     an allowed path is still scanned where it is copied to."""
     out: List[Tuple[str, str]] = []
     seen: Set[str] = set()
-    for c in git(root, "rev-list", "--reverse", f"{base}..{head}").split():
-        parent = f"{c}^" if git_ok(root, "rev-parse", "--verify", "-q", f"{c}^") else EMPTY_TREE
-        for p in binary_paths(root, parent, c):
-            if any_match(p, skip):
-                continue
-            oid = git(root, "rev-parse", f"{c}:{p}", check=False).strip()
-            if oid and oid in seen:
+    for row in git(root, "rev-list", "--reverse", "--parents", f"{base}..{head}").splitlines():
+        shas = row.split()
+        if not shas:
+            continue
+        for p, oid in binary_blob_ids(root, shas[1] if len(shas) > 1 else EMPTY_TREE, shas[0]):
+            if any_match(p, skip) or oid in seen:
                 continue
             seen.add(oid)
-            out.append((p, f"{c}:{p}"))
+            out.append((p, oid))
     return out
 
 
@@ -196,7 +211,7 @@ def staged_content(root: Path, path: str) -> Optional[str]:
 
 
 def blob(root: Path, spec: str) -> Optional[bytes]:
-    """The raw bytes of ``<rev>:<path>`` (``:<path>`` is the staged blob), or None."""
+    """The raw bytes of a blob (an id, or ``<rev>:<path>``), or None."""
     proc = subprocess.run(["git", "-C", str(root), "cat-file", "blob", spec], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     return proc.stdout if proc.returncode == 0 else None
 

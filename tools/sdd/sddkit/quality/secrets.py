@@ -146,15 +146,15 @@ def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[U
 
 def gitleaks_blobs(root: Path, cfg: Dict[str, Any], blobs: List[Tuple[str, str]], trusted_ref: str) -> List[Violation]:
     """Scan blobs that ``gitleaks git`` skips (paths git treats as binary: a NUL byte, ``-diff`` or
-    ``binary`` in .gitattributes) with ``gitleaks stdin``. ``blobs``: (path, ``<rev>:<path>`` or
-    ``:<path>``). A blob that cannot be read or scanned fails closed as ``secret-unscanned``."""
+    ``binary`` in .gitattributes) with ``gitleaks stdin``. ``blobs``: (path, blob id). A blob that
+    cannot be read or scanned fails closed as ``secret-unscanned``."""
     allow = cfg["quality"]["secrets"]["allow_globs"]
     out: List[Violation] = []
-    for path, spec in blobs:
+    for path, oid in blobs:
         if any_match(path, allow):
             continue
-        data = vcs.blob(root, spec)
-        problem = "" if data is not None else f"cannot read {spec}"
+        data = vcs.blob(root, oid)
+        problem = "" if data is not None else f"cannot read blob {oid}"
         if data is not None:
             try:
                 out += gitleaks(root, cfg, ["stdin"], stdin=data, trusted_ref=trusted_ref, path=path)

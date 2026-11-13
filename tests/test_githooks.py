@@ -394,7 +394,7 @@ class SecretsHookTest(unittest.TestCase):
                          [("secret", "app.cfg", 2, "gitleaks rule generic-api-key")])
         # A binary path gitleaks cannot scan fails closed.
         from sddkit.quality import secrets
-        found = secrets.gitleaks_blobs(self.r.root, self.r.cfg, [("gone.cfg", "HEAD:gone.cfg"), ("vectors/gone.cfg", "HEAD:vectors/gone.cfg")], "HEAD")
+        found = secrets.gitleaks_blobs(self.r.root, self.r.cfg, [("gone.cfg", "0" * 40), ("vectors/gone.cfg", "0" * 40)], "HEAD")
         self.assertEqual([(v.kind, v.file) for v in found], [("secret-unscanned", "gone.cfg")])
 
     GENERIC = 'api_key = "' + 'u8jzPde0IgxL' + 'd6GncfBAepfJBd0Kh8oO"\n'  # only gitleaks' generic rule finds it
@@ -422,6 +422,18 @@ class SecretsHookTest(unittest.TestCase):
         self.r.git("add", "src/k.dat")
         self.r.git("commit", "-q", "--no-verify", "-m", "chore: copy")
         self.assertEqual(self._ci_secrets(), [("secret", "src/k.dat", 1)])
+
+    def test_staged_blob_of_a_path_that_looks_like_a_stage_spec(self) -> None:
+        """`:0:x.dat` would name stage 0 of x.dat: the staged blob of `0:x.dat` is read by its id."""
+        self._gitleaks_branch()
+        write(self.r.root, "x.dat", "benign\n")
+        self.assertEqual(self.r.commit("chore: x", "x.dat").returncode, 0)
+        write(self.r.root, "0:x.dat", self.GENERIC)
+        proc = self.r.commit("chore: y", "0:x.dat")
+        self.assertNotEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("gitleaks:generic-api-key at 0:x.dat:1", proc.stderr)
+        self.r.git("commit", "-q", "--no-verify", "-m", "chore: y")
+        self.assertEqual(self._ci_secrets(), [("secret", "0:x.dat", 1)])
 
     def test_gitleaks_missing_skip_and_ci(self) -> None:
         path = no_gitleaks_path()
