@@ -144,7 +144,15 @@ def cmd_hooks(args: argparse.Namespace) -> int:
     if args.action == "run":
         return githooks.run(args.hook, args.hook_args)
     root, cfg = _cfg(args)
-    top = vcs.toplevel(Path.cwd()) or root
+    top = vcs.toplevel(root)
+    if top is None:
+        print(f"hooks: NOT installed: {root} is not inside a git repository", file=sys.stderr)
+        return 1
+    here = vcs.toplevel(Path.cwd())
+    if here is not None and here.resolve() != top.resolve():
+        print(f"hooks: NOT installed: the project root {top} is not the repository of the current directory ({here}); "
+              "run the command from inside the target repository", file=sys.stderr)
+        return 1
     return githooks.install(top, cfgmod.load(top) if (top / cfgmod.CONFIG_NAME).is_file() else cfg, args.force)
 
 

@@ -126,6 +126,50 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(self.local_config(), before)
         self.assertEqual(self.r.sdd("hooks", "install", "--force").returncode, 0)
 
+    def test_refuses_over_global_hooks_path(self) -> None:
+        """S3/C8: a global core.hooksPath (organisation hooks) is never shadowed without --force."""
+        org = self.r.root.parent / (self.r.root.name + "-orghooks")
+        org.mkdir()
+        (org / "pre-commit").write_text("#!/bin/sh\necho ORG-HOOK\n")
+        (org / "pre-commit").chmod(0o755)
+        gcfg = self.r.root.parent / (self.r.root.name + "-gitconfig")
+        gcfg.write_text(f"[core]\n\thooksPath = {org}\n")
+        try:
+            env = {"GIT_CONFIG_GLOBAL": str(gcfg)}
+            before = self.local_config()
+            proc = self.r.sdd("hooks", "install", env=env)
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn(str(gcfg), proc.stderr)
+            self.assertEqual(self.local_config(), before)
+            self.assertEqual(self.r.sdd("hooks", "install", "--force", env=env).returncode, 0)
+        finally:
+            rm(org)
+            gcfg.unlink()
+
+    def test_root_is_the_target_repository(self) -> None:
+        """S2: --root never configures the repository of the cwd; missing hook scripts refuse."""
+        other = HookRepo(base_cfg(), prefix="other-")
+        try:
+            other_before = other.git("config", "--list", "--local").stdout
+            proc = other.run(PY, "-I", str(self.r.root / "tools/sdd/sdd.py"), "--root", str(self.r.root), "hooks", "install")
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("not the repository of the current directory", proc.stderr)
+            self.assertEqual(other.git("config", "--list", "--local").stdout, other_before)
+            self.assertEqual(self.r.git("config", "--get", "core.hooksPath", check=False).stdout, "")
+            # From outside any repository, --root picks the target.
+            outside = self.r.root.parent
+            if subprocess.run(["git", "-C", str(outside), "rev-parse"], capture_output=True).returncode != 0:
+                proc = self.r.run(PY, "-I", str(self.r.root / "tools/sdd/sdd.py"), "--root", str(self.r.root), "hooks", "install", cwd=outside)
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+            # A checkout without the hook scripts: no config write.
+            shutil.rmtree(other.root / "tools" / "sdd" / "githooks")
+            proc = other.sdd("hooks", "install")
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("lacks", proc.stderr)
+            self.assertEqual(other.git("config", "--list", "--local").stdout, other_before)
+        finally:
+            other.close()
+
     def test_doctor(self) -> None:
         proc = self.r.sdd("doctor")
         self.assertIn("[warn] git hooks installed", proc.stdout)

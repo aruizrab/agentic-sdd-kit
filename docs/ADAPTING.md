@@ -238,9 +238,12 @@ and `{` are not; Python decorators are not counted. Put such files into
 ## 7. Git hooks
 
 `sdd hooks install` sets `core.hooksPath` to the relative `tools/sdd/githooks`, so every
-linked worktree runs its own checkout's hooks. It refuses (and changes nothing) when
-`core.hooksPath` already points elsewhere (husky) or `.git/hooks` holds executable hooks
-(git-lfs, the pre-commit framework), because git would then ignore them. Chain instead:
+linked worktree runs its own checkout's hooks. It acts on the repository of the project root
+and refuses when run from inside another repository or when `tools/sdd/githooks/` is missing
+there. It refuses (and changes nothing) when `core.hooksPath` already points elsewhere in any
+scope (husky locally, organisation hooks in the global or system config; the message names the
+file) or the hooks directory git uses holds executable hooks (git-lfs, the pre-commit
+framework), because git would then ignore them. Chain instead:
 
 - **git-lfs / your own hooks directory**: keep it, and add the kit call to each hook:
   ```sh

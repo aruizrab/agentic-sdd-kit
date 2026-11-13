@@ -1,8 +1,10 @@
 """Git hooks shipped in ``<tools_dir>/githooks/`` and their logic (``sdd hooks run <name>``).
 
 ``sdd hooks install`` sets ``core.hooksPath`` to the relative ``<tools_dir>/githooks`` in the
-repository at the cwd (only when the user runs it) and refuses to switch off hooks already in
-use. Hooks never stash, reset, check out, or write the index, the working tree or git config;
+repository of the project root (``--root``, else the cwd; only when the user runs it). It
+refuses when the cwd lies in another repository, when the hook scripts are missing there, and
+when it would switch off hooks already in use: a ``core.hooksPath`` from any scope (local,
+global, system) or executable hooks in the hooks directory git uses now. Hooks never stash, reset, check out, or write the index, the working tree or git config;
 checks that need file content read the staged blob, commands run on the working tree. The only
 files a hook writes are its notes in the git dir: the timing note ``sdd-hook-time`` and
 ``sdd-tests-green`` (test commands that passed since the branch's red-by-design test commit).
@@ -48,6 +50,13 @@ def _local_hooks_path(root: Path) -> str:
     return vcs.git(root, "config", "--local", "--get", "core.hooksPath", check=False).strip()
 
 
+def _effective_hooks_path(root: Path) -> Tuple[str, str]:
+    """(origin, value) of core.hooksPath over every scope (system, global, local, command line)."""
+    out = vcs.git(root, "config", "--show-origin", "--get", "core.hooksPath", check=False).strip()
+    origin, _, value = out.partition("\t")
+    return (origin, value) if value else ("", "")
+
+
 def _default_hooks_dir(root: Path) -> Path:
     common = Path(vcs.git(root, "rev-parse", "--git-common-dir").strip())
     return (common if common.is_absolute() else root / common) / "hooks"
@@ -69,17 +78,30 @@ def install(root: Path, cfg: Dict[str, Any], force: bool) -> int:
     found = []
     if current:
         found.append(f"core.hooksPath is already set to {current!r} (husky or another hook manager?)")
-    active = _active_hooks(_default_hooks_dir(root))
-    if active:
-        found.append(f"executable hooks in {_default_hooks_dir(root)}: {', '.join(active)} (git-lfs, pre-commit framework, ...)")
+    else:
+        origin, value = _effective_hooks_path(root)
+        if value:
+            found.append(f"core.hooksPath is set to {value!r} in {origin} (organisation-wide hooks?); a local value would shadow it")
+    dirs = [_default_hooks_dir(root)]
+    if not current:
+        eff = vcs.git_path(root, "hooks")
+        if eff.resolve() != dirs[0].resolve():
+            dirs.append(eff)
+    for d in dirs:
+        active = _active_hooks(d)
+        if active:
+            found.append(f"executable hooks in {d}: {', '.join(active)} (git-lfs, pre-commit framework, ...)")
     if found and not force:
         print("hooks: NOT installed; setting core.hooksPath would switch off hooks already in use:", file=sys.stderr)
         for f in found:
             print(f"  - {f}", file=sys.stderr)
         print("Chain them instead (docs/ADAPTING.md, 'Chaining the git hooks'), or re-run with --force.", file=sys.stderr)
         return 1
-    if not (root / rel).is_dir():
-        print(f"hooks: warning: {rel}/ does not exist in this checkout (install the kit tools first)", file=sys.stderr)
+    missing = [n for n in HOOK_NAMES if not (root / rel / n).is_file()]
+    if missing:
+        print(f"hooks: NOT installed: {rel}/ lacks {', '.join(missing)} in {root} (install the kit tools into this repository first); "
+              "git would silently run no hooks", file=sys.stderr)
+        return 1
     vcs.git(root, "config", "--local", "core.hooksPath", rel)
     print(f"hooks: installed (core.hooksPath = {rel}); pre-commit, commit-msg and pre-push now run the SDD checks")
     return 0
