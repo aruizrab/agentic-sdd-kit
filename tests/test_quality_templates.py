@@ -54,6 +54,18 @@ class TemplatePlansTest(unittest.TestCase):
             self.assertEqual([p for p in problems if "commit.trailers" not in p], [], path.name)
 
 
+class CommitTestStepTest(unittest.TestCase):
+    def test_python_src_layout_runs_the_whole_suite(self) -> None:
+        """C11: a src-layout package with a flat tests/ dir must not map to a missing tests/<package>."""
+        from types import SimpleNamespace
+
+        from sddkit.quality import githooks
+
+        cfg = load(KIT / "examples" / "configs" / "python.json")
+        cmds = githooks._test_commands(SimpleNamespace(cfg=cfg), ["src/app/domain/ops.py"])
+        self.assertEqual(cmds, [cfg["tests"]["run"]])
+
+
 class CapturedToolOutputTest(unittest.TestCase):
     def test_every_example_check_parses_its_fixture(self) -> None:
         expected = json.loads((FIX / "expected.json").read_text())

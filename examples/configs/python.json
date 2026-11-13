@@ -455,7 +455,7 @@
   },
   "tests": {
     "run": "pytest -q --no-header",
-    "run_component": "pytest -q --no-header tests/{component}",
+    "run_component": "",
     "red_check": ""
   },
   "sources": {

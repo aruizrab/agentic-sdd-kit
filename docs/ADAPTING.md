@@ -59,7 +59,9 @@ paths: `**/*.test.ts`, `**/__tests__/**`.
 Fast: `ruff format --check`, `ruff check` (both with `--extend-exclude tools/sdd`: the installed
 kit is not project code), `mypy src` (optional), `pytest -q -x`, trace. Full
 adds `--cov --cov-fail-under`, `pip-audit`, hypothesis property tests, `pytest-benchmark
---benchmark-compare`. Components: `^src/([^/]+)/`. Union manifests: `pyproject.toml`;
+--benchmark-compare`. Components: `^src/([^/]+)/` (lanes); `tests.run_component` stays empty in
+the example because a src layout usually has one flat `tests/`, so the commit test step runs
+`tests.run` (set `pytest -q --no-header tests/{component}` only when tests mirror the packages). Union manifests: `pyproject.toml`;
 lockfiles `poetry.lock`/`uv.lock`, regenerated after a union merge by
 `uv lock >/dev/null 2>&1 || poetry lock --no-update >/dev/null 2>&1 || true` (whichever the
 project uses). Tags: `# Implements: ID` comments, a docstring whose
