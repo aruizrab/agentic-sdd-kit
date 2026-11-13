@@ -40,7 +40,7 @@ name and threat model, languages, gate commands (fast/full/nightly, each with na
 timeout), quality-gate rules (size limits, layers, coverage and mutation tools, command
 checks, hook rules), test commands, requirement id regex, trace tag keywords and scan globs, component
 regex, protected / append-only / role-scoped paths, formatters, normative source lookup,
-explicit model ids per tier, worktree root, parallelism caps, commit trailers, shared build
+explicit model ids and efforts per tier (or the formula router's models table), worktree root, parallelism caps, commit trailers, shared build
 cache environment.
 
 ## Quick start
@@ -96,7 +96,8 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 | `sdd progress [--json]` | lifecycle-stage progress per feature, milestone and overall from the roadmap and git refs |
 | `sdd union-merge [files]` | resolves additive manifest conflicts only (union); refuses everything else |
 | `sdd spec-info DIR`, `sdd markers FILE` | Status, open clarification markers (ignores comments, code spans, prose), requirement counts |
-| `sdd tasks DIR [--lanes] [--validate]` | tasks.md as JSON: waves, tasks, components, lanes; plan exit criteria |
+| `sdd tasks DIR [--lanes] [--validate]` | tasks.md as JSON: waves, tasks, components, lanes, the planner's `complexity` and `risk` ratings; plan exit criteria |
+| `sdd routing table [--json]`, `sdd routing log --output-file F`, `sdd routing refit` | model routing: the models table's candidates per level with their expected cost; append a run's telemetry to `<logs_dir>/routing.jsonl`; per-level failure rates and floor suggestions (report only) |
 | `sdd source clause DOC SECTION`, `sdd source find DOC REGEX` | normative source lookup (configured command or built-in Markdown reader) |
 | `sdd hook NAME` | the hook logic behind `.claude/hooks/*.sh` (protect-paths, bash-guard, format, stop-check) |
 | `sdd doctor` | checks the installation and the configuration |
@@ -136,10 +137,60 @@ never grandfathered. `sdd baseline --report` is the work list of the remediation
 Configuration: docs/CONFIG.md (`quality.*`); per-language commands and heuristics:
 docs/ADAPTING.md.
 
+## Model routing
+
+Every agent call is routed to an explicit model and effort. The default, `"routing": "tiers"`,
+maps each role to a tier of `models` in `sdd.config.json`; a tier is a model id string or
+`{"id": "<model id>", "effort": "low|medium|high|xhigh|max"}`, and `""` inherits the session
+model (`sdd doctor` warns about empty tiers). The template's `_models_example` holds this
+default **efficient mapping**:
+
+| Work | Tier | Model and effort |
+|---|---|---|
+| setup, status, commits, red check, union merge | `mechanical` | cheapest model, default effort |
+| gate runner (long background waits, exact reporting) | `gate` (empty: `mid`) | small model, medium |
+| implementation, merges, perf and test-adequacy review, finalize | `mid` | mid model, medium |
+| spec, critic, product owner, plan, test author, compliance and security review, verifier | `strong` | top model, medium |
+| escalations: repeated fix, test arbitration, 2nd product-owner pass, semantic merge, judgment roles of `hard` features | `top` | top model, high |
+
+The highest efforts (`xhigh`, `max`) are never defaults: they cost two to three times as much
+for a point or two of intelligence. Use explicit ids, never aliases (a bare word such as a
+family name can silently move to a newer, pricier model). A tier's effort wins over the call
+site's; a plain id keeps the call site's effort (mechanical calls run at `low`).
+
+**Formula router** (opt-in, `"pipeline": {"routing": "formula"}`). A models table
+(`sdd.models.json` at the project root; template `tools/sdd/pipeline/models.json`, whose
+`example-` ids validation rejects in formula mode) lists the frontier points `{model, effort,
+intelligence, cost_per_task, tokens_per_task, pool}`. Each call gets a level
+L = role base + complexity (low -1, medium 0, high +1) + risk (+1 for `security` or
+`concurrency`) + hard feature (+1) + prior failed attempts, floored at the role minimum and
+clamped to 1-6; the planner rates every task in tasks.md (`complexity`, `risk`). A level is an
+intelligence floor (L1 none, L2 40, L3 47, L4 53, L5 56, L6 61); among the points at or above
+it the router takes the lowest expected cost
+`E = cost * (1 + p0 * exp(-(I - floor) / s) * retry_mult) * pool_mult` (p0 0.3, s 4,
+retry_mult 2; `pool_mult` = the scarcity price of a capped pool on L1-L3, which reserves capped
+models for L4-L6). Intelligence is a hard floor: a retry never runs on a less intelligent
+model than its previous attempt, and a dominated model/effort point is never picked.
+`sdd routing table` prints the candidates per level. The formula does not reproduce the tiers
+table above exactly (an implementer escalation lands on the judgment level, top model at
+medium effort), and does not claim to.
+
+**Usage caps** (both modes, for tiers that are points of the table). Any failed call (a null
+result, not only an error text: capped calls returned empty results) on a capped pool marks
+that pool exhausted for the run and retries on the cheapest point at least as intelligent as
+the call's pick; later calls skip straight to their fallback. The run pauses only when no
+equal-or-smarter point is left; caps can be weekly, not only per 5 h.
+
+**Telemetry.** The run summary carries one record per agent attempt (role, level, model,
+effort, outcome, fallback); after every run the orchestrator appends them with host times via
+`sdd routing log --output-file <Workflow output file>` to `<logs_dir>/routing.jsonl`.
+`sdd routing refit` reports per-level failure rates and suggests floor changes; it never
+changes the table. Reference: docs/CONFIG.md ("Model routing"), docs/PLAYBOOK.md §7.
+
 ## Testing the kit
 
 ```sh
-python3 -I -m unittest discover -s tests -v     # 105 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
+python3 -I -m unittest discover -s tests -v     # 126 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
 node tests/pipeline_smoke.mjs                   # drives feature-pipeline.js with a fake agent()
 ```
 

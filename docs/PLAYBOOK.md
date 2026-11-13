@@ -132,6 +132,13 @@ property tests. Gate logs live in `paths.logs_dir`.
 - To change model tiers for the remaining phases (e.g. a cheaper pool opened up), pass
   `models: {...}` plus `modelsFromPhase: "Gates"` and `modelsBefore: {...}` (the ids the
   completed phases used). Cached calls keep their original model, so the cache keys match.
+  In formula mode, edit the models table and pass `routingBefore: <summary.routing of the
+  paused run>` with `modelsFromPhase`; pools exhausted before that phase count as available
+  again (a pool still at its cap is marked again by its first failed call).
+- After **every** run end (finished, `blocked-*` or `paused`) append the telemetry:
+  `sdd routing log --output-file <the Workflow output file>` (or `--file` with the summary
+  and `--transcript-dir <transcriptDir>` when the output file is gone). Keep `runKey` the same
+  across resumes so the attempts of one logical run group together.
 - `blocked-<stage>`: read `reason`, the logs and review.md; fix the input or the
   infrastructure; re-run with `stages` starting at the failing stage. Done tasks stay `[x]`.
 - A journal with an empty or odd result: read `<transcriptDir>/journal.jsonl` before
@@ -147,6 +154,10 @@ property tests. Gate logs live in `paths.logs_dir`.
 ## 6. Usage limits
 
 - Tier the models (§7); the mechanical steps are the majority of calls.
+- A capped call can return an empty result with no error text, and caps can be weekly, not
+  only per 5 h. The pipeline treats any failed call on a capped pool as "pool exhausted for
+  this run", moves it to the cheapest equal-or-smarter point and pauses only when none is
+  left (declare which models share a cap as one `capped` pool in the models table).
 - Spread load across model pools when a pool is near its limit, using `modelsFromPhase` on
   resume rather than restarting.
 - Do not interrupt running agents to switch models; let the phase finish.
@@ -162,10 +173,23 @@ property tests. Gate logs live in `paths.logs_dir`.
 | strong | spec-author, spec-critic, product-owner, architect-planner, test-author, spec-compliance-reviewer, security-reviewer, verifier | a wrong answer here propagates unchecked |
 | top | a fix that already failed once, test arbitration, second product-owner resolution pass, semantic merge resolution, features flagged `hard` | hardest judgement calls |
 
+The gate runner has its own `gate` tier (a small model at medium effort: the cheapest model
+did not wait and report reliably); empty, it falls back to `mid`. Each tier is an id or
+`{id, effort}`; the default efficient mapping is in README "Model routing" and the template's
+`_models_example`. Never the highest efforts (`xhigh`, `max`) by default.
+
 Rules: explicit model ids in `sdd.config.json` (an alias silently moved to a newer, pricier
 model once); never trade quality for tokens where a wrong answer is not caught downstream;
 `pipeline.role_tiers` overrides the role->tier map; `tiering: false` makes every call
 inherit the session model.
+
+**Formula router** (`pipeline.routing: "formula"`): the planner rates each task (`complexity`,
+`risk`), every call gets a level L1-L6 and the cheapest-in-expectation model at or above that
+level's intelligence floor (README "Model routing", docs/CONFIG.md "Model routing"). Use it
+once you have a measured frontier; tune it with data, not by hand: after a few features run
+`sdd routing refit` and change a floor only when its suggestion holds over enough samples.
+Dominated model/effort points are never used, and a retry never downgrades intelligence (a
+failed attempt plus its retry costs more than the stronger model would have).
 
 ## 8. Security sign-off
 

@@ -104,8 +104,14 @@ Mark the corpus read-only in `protected_paths` (e.g. `{"glob": "specs/3gpp/**"}`
 
 ## 4. Models
 
-`models.mechanical|mid|strong|top`: explicit ids. Empty inherits the session model.
-`pipeline.role_tiers` overrides the role -> tier mapping (`{"test-adequacy-reviewer": "strong"}`).
+`models.mechanical|gate|mid|strong|top`: explicit ids, or `{"id": ..., "effort": ...}`. Empty
+inherits the session model; start from the template's `_models_example` (README "Model
+routing"). `pipeline.role_tiers` overrides the role -> tier mapping
+(`{"test-adequacy-reviewer": "strong"}`). For the formula router copy
+`tools/sdd/pipeline/models.json` to `sdd.models.json`, replace every `example-` point with your
+provider's models and efforts (intelligence from a public index, cost and tokens per task from
+your own runs, models that share a usage cap in one capped pool) and set
+`pipeline.routing: "formula"`; check it with `sdd routing table`.
 
 ## 5. Worked example: ferrocore
 
