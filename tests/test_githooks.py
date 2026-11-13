@@ -464,6 +464,18 @@ class SecretsHookTest(unittest.TestCase):
         self.r.git("commit", "-q", "--no-verify", "-m", "chore: binaries")
         self.assertEqual(sorted(f for _, f, _ in self._ci_secrets()), names)
 
+    def test_path_allowlist_cannot_match_the_scratch_dir(self) -> None:
+        """A trusted .gitleaks.toml allowlisting `logs/` must not hide blobs copied under <logs_dir>."""
+        write(self.r.root, ".gitleaks.toml", "[extend]\nuseDefault = true\n[allowlist]\npaths = ['''(^|/)logs/''']\n")
+        self.r.git("add", ".gitleaks.toml")
+        self._gitleaks_branch()
+        (self.r.root / "blob.dat").write_bytes(b"\0\n" + self.GENERIC.encode())
+        proc = self.r.commit("chore: blob", "blob.dat")
+        self.assertNotEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("gitleaks:generic-api-key at blob.dat:2", proc.stderr)
+        self.r.git("commit", "-q", "--no-verify", "-m", "chore: blob")
+        self.assertEqual(self._ci_secrets(), [("secret", "blob.dat", 2)])
+
     def test_secret_added_only_in_a_merge_commit(self) -> None:
         """`gitleaks git` gets no diff for a merge unless git log is told to diff against its first parent."""
         self._gitleaks_branch()

@@ -108,19 +108,21 @@ def gitleaks_ignore_problem(root: Path, cfg: Dict[str, Any], trusted_ref: str) -
 
 
 def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[str] = None, in_message: bool = False,
-             trusted_ref: str = "HEAD", names: Optional[Dict[str, str]] = None, line_offset: int = 0) -> List[Violation]:
+             trusted_ref: str = "HEAD", names: Optional[Dict[str, str]] = None, line_offset: int = 0,
+             cwd: Optional[Path] = None) -> List[Violation]:
     """Run gitleaks with a redacted JSON report and the trusted configuration; return findings as violations.
 
     ``names`` maps the base names of scanned scratch files to the paths they stand for;
-    ``line_offset`` lines were prepended to each of them."""
-    report = scratch_dir(root, cfg) / f"gitleaks-{abs(hash((tuple(args), stdin))) % 10**8}.json"
-    conf = gitleaks_config(root, cfg, trusted_ref)
+    ``line_offset`` lines were prepended to each of them. ``cwd`` (default: the root) is where
+    gitleaks runs; relative target paths are what its path allowlists see."""
+    report = (scratch_dir(root, cfg) / f"gitleaks-{abs(hash((tuple(args), stdin))) % 10**8}.json").resolve()
+    conf = gitleaks_config(root, cfg, trusted_ref).resolve()
     cmd = ["gitleaks", *args, "--config", str(conf), "--redact", "--no-banner", "--exit-code", "1", "--report-format", "json",
            "--report-path", str(report)]
     data_in = stdin.encode("utf-8") if stdin is not None else None
     try:
         try:
-            proc = subprocess.run(cmd, cwd=str(root), input=data_in, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
+            proc = subprocess.run(cmd, cwd=str(cwd or root), input=data_in, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise QualityError(f"gitleaks did not run: {exc}")
         if proc.returncode not in (0, 1):
@@ -153,8 +155,9 @@ def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[s
 def gitleaks_blobs(root: Path, cfg: Dict[str, Any], blobs: List[Tuple[str, str]], trusted_ref: str) -> List[Violation]:
     """Scan blobs that ``gitleaks git`` skips (paths git treats as binary: a NUL byte, ``-diff`` or
     ``binary`` in .gitattributes). ``blobs``: (path, blob id). All of them are written under
-    neutral names (no path allowlist of the config matches them) to one scratch directory under
-    the logs dir and scanned by a single ``gitleaks dir``; findings are mapped back to the paths.
+    neutral names to one scratch directory under the logs dir and scanned by a single
+    ``gitleaks dir .`` run inside that directory, so path allowlists see only names like
+    ``b000000``, never the project path or the scratch location; findings are mapped back.
     A blob that cannot be read, or every blob when gitleaks fails, is ``secret-unscanned``."""
     allow = cfg["quality"]["secrets"]["allow_globs"]
     todo = [(p, oid) for p, oid in blobs if not any_match(p, allow)]
@@ -180,7 +183,9 @@ def gitleaks_blobs(root: Path, cfg: Dict[str, Any], blobs: List[Tuple[str, str]]
                 unscanned(p, f"cannot read blob {oid}")
         if names:
             try:
-                found = gitleaks(root, cfg, ["dir", str(work)], trusted_ref=trusted_ref, names=names, line_offset=1)
+                # Run inside the scratch dir on `.`: gitleaks then sees only the neutral names, and
+                # a path allowlist (`logs/`, `.sdd/`, ...) cannot match the scratch location.
+                found = gitleaks(root, cfg, ["dir", "."], trusted_ref=trusted_ref, names=names, line_offset=1, cwd=work)
             except QualityError as exc:
                 for p, oid in todo:
                     if oid in written:

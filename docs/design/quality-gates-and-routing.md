@@ -1037,8 +1037,10 @@ Acceptance criteria:
   the staged blobs, and `sdd check secrets` every distinct blob a branch commit adds (a secret
   added and removed again stays in history), by id from `git diff --raw` (a `:<path>` spec is
   ambiguous for a path like `0:x.dat`), minus `allow_globs` paths before deduplication. They are
-  written under neutral names (so no path allowlist matches) to one scratch directory under the
-  logs dir and scanned by a single `gitleaks dir` with the trusted config: one process per blob
+  written under neutral names to one scratch directory under the logs dir and scanned by a
+  single `gitleaks dir .` run inside that directory with the trusted config, so its path
+  allowlists see only names like `b000000` (an allowlisted `logs/` or `.sdd/` cannot match the
+  scratch location): one process per blob
   cost about 0.5 s each and let a large binary commit outlast the gate timeout. Each copy starts
   with a newline (reported lines are shifted back): gitleaks sniffs a file's type from its first
   bytes and silently skips what looks like an application file (ELF, PDF, zip, gzip, 7z, tar,
