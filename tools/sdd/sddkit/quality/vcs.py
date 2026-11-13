@@ -210,10 +210,36 @@ def staged_content(root: Path, path: str) -> Optional[str]:
     return proc.stdout.decode("utf-8", errors="replace") if proc.returncode == 0 else None
 
 
-def blob(root: Path, spec: str) -> Optional[bytes]:
-    """The raw bytes of a blob (an id, or ``<rev>:<path>``), or None."""
-    proc = subprocess.run(["git", "-C", str(root), "cat-file", "blob", spec], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    return proc.stdout if proc.returncode == 0 else None
+def write_blobs(root: Path, files: Dict[str, Path]) -> Set[str]:
+    """Write each blob id's raw bytes to its file with one ``git cat-file --batch`` (streamed, never
+    held in memory); returns the ids written (a missing id is left out)."""
+    if not files:
+        return set()
+    done: Set[str] = set()
+    req = files[next(iter(files))].parent / "cat-file-input"
+    req.write_text("".join(f"{oid}\n" for oid in files), encoding="ascii")
+    with req.open("rb") as inp:
+        proc = subprocess.Popen(["git", "-C", str(root), "cat-file", "--batch"], stdin=inp, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        assert proc.stdout is not None
+        for oid in files:
+            header = proc.stdout.readline().decode("ascii", "replace").split()
+            if len(header) != 3 or header[1] != "blob":
+                continue  # "<id> missing" / "ambiguous": no body follows
+            left = int(header[2])
+            with files[oid].open("wb") as fh:
+                while left:
+                    chunk = proc.stdout.read(min(left, 1 << 20))
+                    if not chunk:
+                        break
+                    fh.write(chunk)
+                    left -= len(chunk)
+            proc.stdout.read(1)  # the newline after the body
+            if not left and header[0] == oid:
+                done.add(oid)
+        proc.stdout.close()
+        proc.wait()
+    req.unlink()
+    return done
 
 
 def show(root: Path, ref: str, path: str) -> Optional[str]:

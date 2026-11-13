@@ -366,7 +366,7 @@ class SecretsHookTest(unittest.TestCase):
         self.assertIn("cfg.ini:1: gitleaks rule generic-api-key", proc.stdout)
 
     def test_gitleaks_scans_binary_to_git_paths(self) -> None:
-        """S1: gitleaks git skips paths git treats as binary; their blobs are scanned with gitleaks stdin."""
+        """S1: gitleaks git skips paths git treats as binary; their blobs are scanned with gitleaks dir."""
         if not shutil.which("gitleaks"):
             self.skipTest("gitleaks not installed")
         self.r.cfg["quality"]["secrets"]["gitleaks"] = True
@@ -434,6 +434,34 @@ class SecretsHookTest(unittest.TestCase):
         self.assertIn("gitleaks:generic-api-key at 0:x.dat:1", proc.stderr)
         self.r.git("commit", "-q", "--no-verify", "-m", "chore: y")
         self.assertEqual(self._ci_secrets(), [("secret", "0:x.dat", 1)])
+
+    def test_many_binary_blobs_take_one_gitleaks_run(self) -> None:
+        """Perf: 50 binary blobs are scanned by one `gitleaks dir`, in the hook and in the check;
+        a failing gitleaks leaves every one of them `secret-unscanned`."""
+        self._gitleaks_branch()
+        wrap = self.r.root / ".sdd" / "fakebin"
+        wrap.mkdir(parents=True)
+        log = wrap / "calls.log"
+        (wrap / "gitleaks").write_text(f'#!/bin/sh\necho "$1" >> "{log}"\n'
+                                       'if [ "$1" = dir ] && [ -n "$FAIL_DIR" ]; then exit 2; fi\n'
+                                       f'exec "{shutil.which("gitleaks")}" "$@"\n')
+        (wrap / "gitleaks").chmod(0o755)
+        env = {"PATH": f"{wrap}{os.pathsep}{self.r.env['PATH']}"}
+        for i in range(50):
+            (self.r.root / "data").mkdir(exist_ok=True)
+            (self.r.root / "data" / f"f{i:02d}.dat").write_bytes(b"\0\1" + os.urandom(64) + (self.GENERIC.encode() if i == 37 else b""))
+        self.r.git("add", "data")
+        proc = self.r.commit("chore: data", env=env)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("gitleaks:generic-api-key at data/f37.dat:", proc.stderr)
+        self.assertEqual(log.read_text().split().count("dir"), 1)
+        proc = self.r.commit("chore: data", env=dict(env, FAIL_DIR="1"))
+        self.assertEqual(proc.stderr.count("gitleaks could not scan it"), 50, proc.stderr)
+        self.r.git("commit", "-q", "--no-verify", "-m", "chore: data")
+        log.unlink()
+        proc = self.r.sdd("check", "secrets", "--json", env=dict(env, CI="true", SDD_BASE_REF="main"))
+        self.assertEqual([(v["kind"], v["file"]) for v in json.loads(proc.stdout)["violations"]], [("secret", "data/f37.dat")])
+        self.assertEqual(log.read_text().split(), ["git", "dir"])
 
     def test_gitleaks_missing_skip_and_ci(self) -> None:
         path = no_gitleaks_path()

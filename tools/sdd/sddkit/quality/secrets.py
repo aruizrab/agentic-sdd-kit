@@ -3,9 +3,10 @@
 
 The built-in rules read ``git diff --text --no-textconv``: a file git treats as binary (a NUL
 byte, ``-diff`` or ``binary`` in .gitattributes) is still scanned. ``gitleaks git`` skips such
-files, so each one's blob (the staged blob in the hook; every distinct blob the branch's commits
-add in ``sdd check secrets``) is piped to ``gitleaks stdin`` with the same trusted config; a blob
-that cannot be read or scanned fails as ``secret-unscanned`` unless ``allow_globs`` covers it.
+files, so their blobs (the staged blobs in the hook; every distinct blob the branch's commits add
+in ``sdd check secrets``) are written under neutral names to one scratch directory and scanned by
+one ``gitleaks dir`` with the same trusted config; a blob that cannot be read or scanned fails as
+``secret-unscanned`` unless ``allow_globs`` covers it.
 
 Findings are reported as rule id and location (``file:line`` or ``commit message``); the
 matched text is never printed or stored. gitleaks runs with ``--redact`` and its JSON report
@@ -22,8 +23,9 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from . import QualityError, Result, Violation, ci_mode, scratch_dir, vcs
 from .protected import APPROVAL_ENV, approved
@@ -105,16 +107,16 @@ def gitleaks_ignore_problem(root: Path, cfg: Dict[str, Any], trusted_ref: str) -
                       f"branch (owner approval: {APPROVAL_ENV}=1)")]
 
 
-def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[Union[str, bytes]] = None, in_message: bool = False,
-             trusted_ref: str = "HEAD", path: Optional[str] = None) -> List[Violation]:
+def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[str] = None, in_message: bool = False,
+             trusted_ref: str = "HEAD", names: Optional[Dict[str, str]] = None) -> List[Violation]:
     """Run gitleaks with a redacted JSON report and the trusted configuration; return findings as violations.
 
-    ``path`` names the file whose content arrives on stdin (gitleaks reports no file for stdin)."""
-    report = scratch_dir(root, cfg) / f"gitleaks-{abs(hash((tuple(args), stdin, path))) % 10**8}.json"
+    ``names`` maps the base names of scanned scratch files to the paths they stand for."""
+    report = scratch_dir(root, cfg) / f"gitleaks-{abs(hash((tuple(args), stdin))) % 10**8}.json"
     conf = gitleaks_config(root, cfg, trusted_ref)
     cmd = ["gitleaks", *args, "--config", str(conf), "--redact", "--no-banner", "--exit-code", "1", "--report-format", "json",
            "--report-path", str(report)]
-    data_in = stdin.encode("utf-8") if isinstance(stdin, str) else stdin
+    data_in = stdin.encode("utf-8") if stdin is not None else None
     try:
         try:
             proc = subprocess.run(cmd, cwd=str(root), input=data_in, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
@@ -136,7 +138,9 @@ def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[U
         if in_message:
             out.append(Violation("secret", "commit message", None, {"file": "commit message", "message": f"gitleaks:{rid}"}, 1, f"gitleaks rule {rid}"))
             continue
-        file = path if path is not None else str(f.get("File", ""))
+        file = str(f.get("File", ""))
+        if names is not None:
+            file = names.get(file.replace("\\", "/").rsplit("/", 1)[-1], file)
         if any_match(file, allow):
             continue
         line = f.get("StartLine")
@@ -146,23 +150,46 @@ def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[U
 
 def gitleaks_blobs(root: Path, cfg: Dict[str, Any], blobs: List[Tuple[str, str]], trusted_ref: str) -> List[Violation]:
     """Scan blobs that ``gitleaks git`` skips (paths git treats as binary: a NUL byte, ``-diff`` or
-    ``binary`` in .gitattributes) with ``gitleaks stdin``. ``blobs``: (path, blob id). A blob that
-    cannot be read or scanned fails closed as ``secret-unscanned``."""
+    ``binary`` in .gitattributes). ``blobs``: (path, blob id). All of them are written under
+    neutral names (no path allowlist of the config matches them) to one scratch directory under
+    the logs dir and scanned by a single ``gitleaks dir``; findings are mapped back to the paths.
+    A blob that cannot be read, or every blob when gitleaks fails, is ``secret-unscanned``."""
     allow = cfg["quality"]["secrets"]["allow_globs"]
+    todo = [(p, oid) for p, oid in blobs if not any_match(p, allow)]
+    if not todo:
+        return []
     out: List[Violation] = []
-    for path, oid in blobs:
-        if any_match(path, allow):
-            continue
-        data = vcs.blob(root, oid)
-        problem = "" if data is not None else f"cannot read blob {oid}"
-        if data is not None:
+
+    def unscanned(path: str, problem: str) -> None:
+        out.append(Violation("secret-unscanned", path, None, {"file": path, "message": "unscanned"}, 1,
+                             f"{path}: binary to git and gitleaks could not scan it ({problem}); secret scan incomplete"))
+
+    work = Path(tempfile.mkdtemp(prefix="gitleaks-blobs-", dir=str(scratch_dir(root, cfg))))
+    try:
+        files = {oid: work / f"b{i:06d}" for i, oid in enumerate(dict.fromkeys(oid for _, oid in todo))}
+        written = vcs.write_blobs(root, files)
+        names: Dict[str, str] = {}
+        for p, oid in todo:
+            if oid in written:
+                names.setdefault(files[oid].name, p)
+            else:
+                unscanned(p, f"cannot read blob {oid}")
+        if names:
             try:
-                out += gitleaks(root, cfg, ["stdin"], stdin=data, trusted_ref=trusted_ref, path=path)
+                found = gitleaks(root, cfg, ["dir", str(work)], trusted_ref=trusted_ref, names=names)
             except QualityError as exc:
-                problem = str(exc)
-        if problem:
-            out.append(Violation("secret-unscanned", path, None, {"file": path, "message": "unscanned"}, 1,
-                                 f"{path}: binary to git and gitleaks could not scan it ({problem}); secret scan incomplete"))
+                for p, oid in todo:
+                    if oid in written:
+                        unscanned(p, str(exc))
+                return out
+            out += found
+            # The same blob at several paths: report it at each.
+            for p, oid in todo:
+                if oid in written and names[files[oid].name] != p:
+                    out += [Violation(v.kind, p, v.line, dict(v.key, file=p), v.value, v.message) for v in found
+                            if v.file == names[files[oid].name]]
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
     return out
 
 
