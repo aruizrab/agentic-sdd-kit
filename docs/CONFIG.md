@@ -41,7 +41,7 @@ Workflow script takes as `args.config`.
 | `quality.generated` | globs of generated files: excluded from size, coverage and mutation | `[]` |
 | `quality.test_globs` | extra test-code globs, added to `tests/**`, `**/tests/**`, `test/**`, `**/test/**` and the language registry's patterns; test code is excluded from coverage and mutation, still size-checked | `[]` |
 | `quality.languages` | extra extension -> language (`rust`, `python`, `typescript`, `go`, or `none` = plain: file size only) | `{}` |
-| `quality.size.globs` / `exclude` | measured files (git-tracked only); `[]` = every extension the registry knows | `[]` / `[]` |
+| `quality.size.globs` / `exclude` | measured files (git-tracked only); `[]` = every extension the registry knows. The installed kit (`<paths.tools_dir>/**`) is never project code: size, arch, coverage, mutation, the commit test step and `{files}` of the pre-commit steps always skip it | `[]` / `[]` |
 | `quality.size.function_warn` / `function_fail` | code lines per function; `0` disables | `0` / `80` |
 | `quality.size.file_warn` / `file_fail` | code lines per file; `0` disables | `600` / `1000` |
 | `quality.arch.modules` | `[{name, paths, imports?, may_depend_on?, forbid?: [{pattern, reason}]}]`: a file belongs to the first module whose `paths` match; `imports` regexes map import specifiers to modules | `[]` |
@@ -64,7 +64,7 @@ Workflow script takes as `args.config`.
 | `quality.hooks.scope_regex` | `""` = scope optional and free; else required and must match | `""` |
 | `quality.hooks.required_trailers` | regexes; each must match a line of the message's last paragraph | `[]` |
 | `quality.hooks.required_trailers_env` | trailers are required only when this env var is `1` (agent sessions); `""` = always | `CLAUDECODE` |
-| `quality.hooks.pre_commit` | fast steps `[{name, command, glob?, timeout?: 300}]`; `{files}` = staged files matching `glob` | `[]` |
+| `quality.hooks.pre_commit` | fast steps `[{name, command, glob?, exclude?, timeout?: 300}]`; `{files}` = staged files matching `glob`, minus `exclude` globs and the installed kit (`<paths.tools_dir>/**`); a step whose `{files}` would be empty is skipped | `[]` |
 | `quality.hooks.commit_tests` | commit-msg runs `tests.run_component` per component of the staged source and test files (`tests.run` for root files) | `true` |
 | `quality.hooks.skip_tests_for_types` | commit types whose test step is skipped (red-by-design test commits) | `["test"]` |
 | `quality.hooks.test_timeout` | seconds for the commit-msg test step (exceeding it rejects; keep below the agent shell limit, 600 s) | `300` |

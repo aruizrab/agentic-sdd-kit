@@ -4,7 +4,7 @@ Runs ``quality.coverage.command`` (unless ``--no-run`` or empty), then parses ``
 or Cobertura). Considered lines: the lines changed in the working tree since the merge-base,
 in files of ``coverage.globs`` (``[]`` = the effective size globs), minus test code (generic
 test directories, registry test patterns, ``quality.test_globs``, test regions such as Rust
-``#[cfg(test)]`` items) and ``quality.generated``. A considered line with 0 hits fails unless a
+``#[cfg(test)]`` items), ``quality.generated`` and the installed kit (``<paths.tools_dir>/**``). A considered line with 0 hits fails unless a
 ``cov:unreachable: <reason>`` comment marks it (at the end of the line, or on a comment-only
 line directly above). A changed considered file absent from the report fails as
 ``coverage-unmeasured`` unless it cannot hold executable code.
@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from . import QualityError, Result, Violation, langs, missing_programs, normalize_path, run_command, skip, tail, tool_env, vcs
+from . import QualityError, Result, Violation, kit_globs, langs, missing_programs, normalize_path, run_command, skip, tail, tool_env, vcs
 from ..util import any_match
 from .size import effective_globs
 
@@ -31,7 +31,7 @@ def considered_files(root: Path, cfg: Dict[str, Any], changed: Dict[str, Set[int
     globs = q[tool]["globs"] or effective_globs(cfg)
     out = {}
     for path, lines in sorted(changed.items()):
-        if not any_match(path, globs) or any_match(path, q["generated"]) or langs.is_test_file(path, cfg):
+        if not any_match(path, globs) or any_match(path, q["generated"]) or any_match(path, kit_globs(cfg)) or langs.is_test_file(path, cfg):
             continue
         p = root / path
         if not p.is_file():

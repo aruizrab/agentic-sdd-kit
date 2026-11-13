@@ -44,7 +44,7 @@ Trace tags: `/// Implements: ID` doc lines and `#[trace::implements("ID")]` /
 is recognised).
 
 ### TypeScript
-Fast: `npx prettier --check .`, `npx eslint . --max-warnings 0`, `npx tsc --noEmit -p .`,
+Fast: `npx prettier --check . '!tools/sdd/**'`, `npx eslint . --ignore-pattern 'tools/sdd/**' --max-warnings 0`, `npx tsc --noEmit -p .`,
 `npm test -- --run`, trace. Full adds coverage, `npm audit --audit-level=high`, contract tests
 and a benchmark compare as package scripts (`npm run test:contract --if-present`,
 `npm run bench:compare --if-present`: a project without the script passes). Formatter and
@@ -56,7 +56,8 @@ comments or `implements("ID")` / `verifies("ID")` calls in test helpers. Impleme
 paths: `**/*.test.ts`, `**/__tests__/**`.
 
 ### Python
-Fast: `ruff format --check`, `ruff check`, `mypy src` (optional), `pytest -q -x`, trace. Full
+Fast: `ruff format --check`, `ruff check` (both with `--extend-exclude tools/sdd`: the installed
+kit is not project code), `mypy src` (optional), `pytest -q -x`, trace. Full
 adds `--cov --cov-fail-under`, `pip-audit`, hypothesis property tests, `pytest-benchmark
 --benchmark-compare`. Components: `^src/([^/]+)/`. Union manifests: `pyproject.toml`;
 lockfiles `poetry.lock`/`uv.lock`, regenerated after a union merge by

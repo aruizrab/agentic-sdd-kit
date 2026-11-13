@@ -166,6 +166,16 @@ def missing_programs(requires: List[str], env: Optional[Dict[str, str]] = None) 
     return [p for p in requires or [] if shutil.which(p, path=path) is None]
 
 
+def kit_globs(cfg: Dict[str, Any]) -> List[str]:
+    """The installed kit itself (``<paths.tools_dir>/**``): never project code.
+
+    Size, arch, coverage, mutation, the commit test step and ``{files}`` of the pre-commit steps
+    skip it, so adopting or upgrading the kit never trips the project's own thresholds.
+    """
+    d = (cfg.get("paths") or {}).get("tools_dir", "").strip().strip("/")
+    return [f"{d}/**"] if d else []
+
+
 def tail(text: str, n: int = 40) -> str:
     return "\n".join(text.splitlines()[-n:])
 

@@ -87,12 +87,12 @@
     "fast": [
       {
         "name": "fmt",
-        "command": "npx prettier --check .",
+        "command": "npx prettier --check . '!tools/sdd/**'",
         "timeout": 300
       },
       {
         "name": "lint",
-        "command": "npx eslint . --max-warnings 0",
+        "command": "npx eslint . --ignore-pattern 'tools/sdd/**' --max-warnings 0",
         "timeout": 600
       },
       {
@@ -144,12 +144,12 @@
     "full": [
       {
         "name": "fmt",
-        "command": "npx prettier --check .",
+        "command": "npx prettier --check . '!tools/sdd/**'",
         "timeout": 300
       },
       {
         "name": "lint",
-        "command": "npx eslint . --max-warnings 0",
+        "command": "npx eslint . --ignore-pattern 'tools/sdd/**' --max-warnings 0",
         "timeout": 600
       },
       {

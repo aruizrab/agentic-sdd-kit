@@ -12,7 +12,7 @@
 #   templates/specs/*          -> <target>/specs/
 #   templates/sdd.config.json  -> <target>/sdd.config.json       (or the chosen example config)
 # Existing files are never overwritten unless --force is given. {{PROJECT}} is replaced by
-# --name (default: the target directory name). Appends .wt/ and .sdd/ to .gitignore.
+# --name (default: the target directory name). Appends .wt/, .sdd/ and __pycache__/ to .gitignore.
 set -euo pipefail
 
 KIT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -120,7 +120,7 @@ fi
 # 5. .gitignore entries.
 if [ "$DRY" -ne 1 ]; then
   touch "$TARGET/.gitignore"
-  for entry in ".wt/" ".sdd/"; do
+  for entry in ".wt/" ".sdd/" "__pycache__/"; do
     grep -qxF "$entry" "$TARGET/.gitignore" || printf '%s\n' "$entry" >> "$TARGET/.gitignore"
   done
 fi

@@ -106,6 +106,39 @@ class InstallTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout)
         self.assertIn("GATES_EXIT=0", proc.stdout)
 
+    def test_adoption_commit_passes_the_hooks(self) -> None:
+        """C2: the kit's own files are not project code: the adoption commit passes the installed
+        hooks with no baseline, and the kit never lands in the baseline or the commit test step."""
+        for config in ("python", "go", "template"):
+            with self.subTest(config=config):
+                root = make_tmp(f"adopt-{config}-")
+                try:
+                    repo = GitRepo(root)
+                    repo.init()
+                    write(root, "README.md", "# demo\n")
+                    repo.commit("init")
+                    args = ["--config", config] if config != "template" else []
+                    proc = sh("bash", str(KIT / "install.sh"), str(root), "--name", "demo", *args, cwd=KIT)
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    self.assertIn("__pycache__/\n", (root / ".gitignore").read_text())
+                    env = {k: v for k, v in repo.env.items() if k not in ("CLAUDECODE", "CI", "SDD_BASE_REF", "SDD_FEATURE")}
+                    tool = [sys.executable, "-I", "tools/sdd/sdd.py"]
+                    proc = subprocess.run([*tool, "hooks", "install"], cwd=str(root), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    self.assertEqual(proc.returncode, 0, proc.stdout)
+                    proc = subprocess.run([*tool, "check", "size"], cwd=str(root), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    self.assertNotIn("tools/sdd/", proc.stdout)
+                    subprocess.run(["git", "add", "-A"], cwd=str(root), env=env, check=True)
+                    proc = subprocess.run(["git", "-c", "commit.gpgsign=false", "commit", "-m", "chore: adopt the SDD kit"], cwd=str(root), env=env,
+                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    self.assertEqual(proc.returncode, 0, proc.stdout)
+                    self.assertNotIn("size:", proc.stdout)
+                    self.assertIn("test step skipped", proc.stdout)
+                    self.assertFalse((root / "sdd.baseline.json").exists())
+                    files = subprocess.run(["git", "ls-files"], cwd=str(root), env=env, stdout=subprocess.PIPE, text=True).stdout
+                    self.assertNotIn(".pyc", files)
+                finally:
+                    rm(root)
+
     def test_dry_run_writes_nothing(self) -> None:
         proc = sh("bash", str(KIT / "install.sh"), str(self.root), "--dry-run", cwd=KIT)
         self.assertEqual(proc.returncode, 0, proc.stderr)

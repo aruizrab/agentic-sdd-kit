@@ -86,12 +86,12 @@
     "fast": [
       {
         "name": "fmt",
-        "command": "ruff format --check .",
+        "command": "ruff format --check --extend-exclude tools/sdd .",
         "timeout": 120
       },
       {
         "name": "lint",
-        "command": "ruff check .",
+        "command": "ruff check --extend-exclude tools/sdd .",
         "timeout": 300
       },
       {
@@ -145,12 +145,12 @@
     "full": [
       {
         "name": "fmt",
-        "command": "ruff format --check .",
+        "command": "ruff format --check --extend-exclude tools/sdd .",
         "timeout": 120
       },
       {
         "name": "lint",
-        "command": "ruff check .",
+        "command": "ruff check --extend-exclude tools/sdd .",
         "timeout": 300
       },
       {

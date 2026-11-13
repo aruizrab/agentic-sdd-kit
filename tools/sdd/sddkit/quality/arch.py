@@ -2,7 +2,7 @@
 
 ``quality.arch.modules`` lists modules ``{name, paths, imports, may_depend_on, forbid}``. A file
 belongs to the first module whose ``paths`` globs match; files in no module or in
-``quality.arch.exclude`` are not checked. Each dependency the language registry extracts is
+``quality.arch.exclude`` or the installed kit (``<paths.tools_dir>/**``) are not checked. Each dependency the language registry extracts is
 resolved to a module: a relative specifier by path (``paths`` globs), anything else by the
 ``imports`` regexes; no match means external and is ignored. A dependency on another module
 that is not in ``may_depend_on`` is an ``arch-dep`` violation; every ``forbid`` pattern that
@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import Result, Violation, baseline, langs, vcs
+from . import Result, Violation, baseline, kit_globs, langs, vcs
 from ..util import any_match
 
 
@@ -42,7 +42,7 @@ def analyse(root: Path, cfg: Dict[str, Any]) -> Result:
     mods = _Modules(cfg)
     if not mods.mods:
         return res
-    exclude = cfg["quality"]["arch"]["exclude"]
+    exclude = list(cfg["quality"]["arch"]["exclude"]) + kit_globs(cfg)
     files = vcs.tracked_files(root)
     for path in files:
         if any_match(path, exclude):

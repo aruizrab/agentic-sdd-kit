@@ -281,6 +281,7 @@ class PreCommitStepsTest(unittest.TestCase):
             {"name": "fail-step", "command": "echo FAIL-STEP; exit 1", "glob": "*.fail"},
             {"name": "slow-step", "command": "sleep 5", "glob": "*.slow", "timeout": 1},
             {"name": "budget-step", "command": "sleep 1.2", "glob": "*.budget"},
+            {"name": "txt-step", "command": "echo TXT-STEP {files}", "glob": "*.txt", "exclude": ["vendor/**"]},
         ], "budget_seconds": 2}))
         self.r.cfg["tests"]["run"] = "sleep 1.2"
         self.r.set_cfg()
@@ -297,6 +298,18 @@ class PreCommitStepsTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("PY-STEP 'docs/a b.py'", proc.stderr)
         self.assertNotIn("TS-STEP", proc.stderr)
+        # C2: the installed kit and a step's `exclude` globs never reach {files}.
+        write(self.r.root, "tools/sdd/sddkit/extra.py", "x = 1\n")
+        write(self.r.root, "vendor/v.txt", "v\n")
+        proc = self.r.commit("chore: kit and vendor", "tools/sdd/sddkit/extra.py", "vendor/v.txt")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("PY-STEP", proc.stderr)
+        self.assertNotIn("TXT-STEP", proc.stderr)
+        self.assertIn("test step skipped: no source or test files staged", proc.stderr)
+        write(self.r.root, "notes/a.txt", "a\n")
+        write(self.r.root, "vendor/w.txt", "w\n")
+        proc = self.r.commit("docs: notes", "notes/a.txt", "vendor/w.txt")
+        self.assertIn("TXT-STEP notes/a.txt\n", proc.stderr + "\n")
         write(self.r.root, "x.fail", "x\n")
         proc = self.r.commit("docs: f", "x.fail")
         self.assertNotEqual(proc.returncode, 0)

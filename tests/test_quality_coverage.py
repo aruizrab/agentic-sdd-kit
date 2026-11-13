@@ -124,6 +124,21 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(unmeasured, ["src/app/new.py", "src/lib/core.rs", "src/web/new.ts"])
         self.assertEqual(code, 1)
 
+    def test_kit_upgrade_is_not_project_code(self) -> None:
+        """C2: a changed file of the installed kit (<paths.tools_dir>/**) is neither measured nor unmeasured."""
+        write(self.root, "cov/lcov.fixture", LCOV.format(root=self.root))
+        self.repo.git("add", "-A")
+        self.repo.commit("feature edits")
+        self.repo.git("switch", "-q", "main")
+        self.repo.git("switch", "-q", "-c", "chore/kit-upgrade")
+        write(self.root, "tools/sdd/sddkit/util.py", "def added():\n    return 1\n")
+        write(self.root, "tools/sdd/pipeline/feature-pipeline.js", "export function f() {\n  return 1\n}\n")
+        self.repo.git("add", "-A")
+        code, out = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out["violations"], [])
+        self.assertIn("no changed hand-written lines", out["notes"])
+
     def test_tool_errors_and_stale_reports(self) -> None:
         self.cfg["quality"]["coverage"].update({"command": "echo boom; exit 4", "ok_exits": [0]})
         write_config(self.root, self.cfg)

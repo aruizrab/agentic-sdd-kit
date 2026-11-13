@@ -4,7 +4,7 @@ A code line is a non-blank line that is not comment-only (documentation comments
 docstrings included, see :mod:`.langs`). Measured files: ``git ls-files`` (or, with
 ``--staged``, the staged files and their staged content) matching the effective
 ``quality.size.globs`` (``[]`` = every extension the language registry knows), minus
-``quality.size.exclude`` and ``quality.generated``.
+``quality.size.exclude``, ``quality.generated`` and the installed kit (``<paths.tools_dir>/**``).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import Result, Violation, baseline, langs, vcs
+from . import Result, Violation, baseline, kit_globs, langs, vcs
 from ..util import any_match
 
 
@@ -22,7 +22,8 @@ def effective_globs(cfg: Dict[str, Any]) -> List[str]:
 
 def measured(path: str, cfg: Dict[str, Any]) -> bool:
     q = cfg["quality"]
-    return bool(any_match(path, effective_globs(cfg))) and not any_match(path, q["size"]["exclude"]) and not any_match(path, q["generated"])
+    return (bool(any_match(path, effective_globs(cfg))) and not any_match(path, q["size"]["exclude"])
+            and not any_match(path, q["generated"]) and not any_match(path, kit_globs(cfg)))
 
 
 def measure_text(path: str, text: str, cfg: Dict[str, Any], res: Result) -> None:
