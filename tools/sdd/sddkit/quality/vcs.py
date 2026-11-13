@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import QualityError
+from ..util import any_match
 
 
 def git(root: Path, *args: str, check: bool = True, input_text: Optional[str] = None) -> str:
@@ -143,15 +144,19 @@ def binary_paths(root: Path, *args: str) -> List[str]:
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 
-def binary_blobs(root: Path, base: str, head: str) -> List[Tuple[str, str]]:
+def binary_blobs(root: Path, base: str, head: str, skip: List[str]) -> List[Tuple[str, str]]:
     """Every distinct blob a commit in ``base..head`` adds or changes at a path git treats as
-    binary, oldest first: [(path, ``<commit>:<path>``)]. Each commit is compared with its first
-    parent, so a secret added and removed again on the branch is still found."""
+    binary and not matching ``skip`` (``allow_globs``), oldest first: [(path, ``<commit>:<path>``)].
+    Each commit is compared with its first parent, so a secret added and removed again on the
+    branch is still found. Skipped paths are dropped before deduplication: a blob first added at
+    an allowed path is still scanned where it is copied to."""
     out: List[Tuple[str, str]] = []
     seen: Set[str] = set()
     for c in git(root, "rev-list", "--reverse", f"{base}..{head}").split():
         parent = f"{c}^" if git_ok(root, "rev-parse", "--verify", "-q", f"{c}^") else EMPTY_TREE
         for p in binary_paths(root, parent, c):
+            if any_match(p, skip):
+                continue
             oid = git(root, "rev-parse", f"{c}:{p}", check=False).strip()
             if oid and oid in seen:
                 continue

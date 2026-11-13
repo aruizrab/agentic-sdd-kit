@@ -187,7 +187,7 @@ def check(root: Path, cfg: Dict[str, Any]) -> Result:
         head = vcs.git(root, "rev-parse", "HEAD").strip()
         if head != base:
             res.violations += gitleaks(root, cfg, ["git", f"--log-opts={base}..{head}", "."], trusted_ref=base)
-            res.violations += gitleaks_blobs(root, cfg, vcs.binary_blobs(root, base, head), base)
+            res.violations += gitleaks_blobs(root, cfg, vcs.binary_blobs(root, base, head, cfg["quality"]["secrets"]["allow_globs"]), base)
     else:
         gitleaks_note(cfg, res)
     return res.finish()

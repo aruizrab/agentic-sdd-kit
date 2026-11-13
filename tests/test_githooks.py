@@ -397,6 +397,32 @@ class SecretsHookTest(unittest.TestCase):
         found = secrets.gitleaks_blobs(self.r.root, self.r.cfg, [("gone.cfg", "HEAD:gone.cfg"), ("vectors/gone.cfg", "HEAD:vectors/gone.cfg")], "HEAD")
         self.assertEqual([(v.kind, v.file) for v in found], [("secret-unscanned", "gone.cfg")])
 
+    GENERIC = 'api_key = "' + 'u8jzPde0IgxL' + 'd6GncfBAepfJBd0Kh8oO"\n'  # only gitleaks' generic rule finds it
+
+    def _gitleaks_branch(self, attributes: str = "*.dat binary\n") -> None:
+        if not shutil.which("gitleaks"):
+            self.skipTest("gitleaks not installed")
+        self.r.cfg["quality"]["secrets"]["gitleaks"] = True
+        self.r.set_cfg()
+        write(self.r.root, ".gitattributes", attributes)
+        self.assertEqual(self.r.commit("chore: gitleaks on", "sdd.config.json", ".gitattributes").returncode, 0)
+        self.r.git("switch", "-q", "-c", "feat/F001-x")
+
+    def _ci_secrets(self) -> list:
+        proc = self.r.sdd("check", "secrets", "--json", env={"CI": "true", "SDD_BASE_REF": "main"})
+        return [(v["kind"], v["file"], v["line"]) for v in json.loads(proc.stdout)["violations"]]
+
+    def test_allowed_copy_does_not_hide_a_blob(self) -> None:
+        """A blob first added at an allow_globs path is still scanned where it is copied to."""
+        self._gitleaks_branch()
+        write(self.r.root, "vectors/k.dat", self.GENERIC)
+        self.r.git("add", "vectors/k.dat")
+        self.r.git("commit", "-q", "--no-verify", "-m", "test: vector")
+        write(self.r.root, "src/k.dat", self.GENERIC)
+        self.r.git("add", "src/k.dat")
+        self.r.git("commit", "-q", "--no-verify", "-m", "chore: copy")
+        self.assertEqual(self._ci_secrets(), [("secret", "src/k.dat", 1)])
+
     def test_gitleaks_missing_skip_and_ci(self) -> None:
         path = no_gitleaks_path()
         if not shutil.which("git", path=path) or not shutil.which("python3", path=path):
