@@ -82,6 +82,31 @@ def run_lookup(cfg: Dict[str, Any], root: Path, args: List[str]) -> int:
     return subprocess.run(full, shell=True, cwd=str(root)).returncode
 
 
+def read_clause(cfg: Dict[str, Any], root: Path, doc: str, clause_id: str) -> Optional[str]:
+    """The text of one clause (heading included) for the tools, or None when it cannot be read.
+
+    Same lookup as ``sdd source clause``: the configured command (its stdout on exit 0) wins
+    over the built-in Markdown reader.
+    """
+    cmd = cfg["sources"].get("lookup_command") or ""
+    if cmd:
+        full = cmd.replace("{args}", " ".join(shlex.quote(a) for a in (doc, clause_id))).replace("{doc}", shlex.quote(doc)).replace("{clause}", shlex.quote(clause_id))
+        try:
+            proc = subprocess.run(full, shell=True, cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                  text=True, encoding="utf-8", errors="replace", timeout=120)
+        except subprocess.TimeoutExpired:
+            return None
+        return proc.stdout if proc.returncode == 0 and proc.stdout.strip() else None
+    text_dir = cfg["sources"].get("text_dir") or ""
+    if not text_dir or not (root / text_dir).is_dir():
+        return None
+    path = find_doc(root / text_dir, doc)
+    if path is None:
+        return None
+    found = extract_clause(path.read_text(encoding="utf-8", errors="replace"), clause_id, cfg["sources"]["heading_regex"])
+    return "\n".join(found[1]) if found else None
+
+
 def clause(cfg: Dict[str, Any], root: Path, doc: str, clause_id: str) -> int:
     rc = run_lookup(cfg, root, [doc, clause_id])
     if rc != 127:

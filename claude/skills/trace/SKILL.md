@@ -13,7 +13,11 @@ Commands:
 - `sdd trace --check [--feature 011]` is the CI gate. It fails on: unknown or malformed ids
   in tags (orphans, typos); duplicate requirement ids across features (ids are global); a
   `must` requirement of a feature in `requirements.enforce_for_statuses` with no verifying
-  test or no implementation site (unless `[behaviour-only]`).
+  test or no implementation site (unless `[behaviour-only]`); with
+  `trace.procedure_steps.enabled`, procedure-step defects (unmapped, missing or invented
+  steps, malformed tables, unknown ids or features, empty reasons, a spec with no entry) in
+  Approved/Implemented specs, as warnings in Drafts. The output ends with the procedure step
+  coverage.
 
 Tag syntax (configured in `sdd.config.json` `trace`; defaults):
 - Implementation: a comment line `Implements: <ID>, <ID>` (any comment syntax) or an

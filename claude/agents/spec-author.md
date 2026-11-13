@@ -47,6 +47,12 @@ to the feature directory.
 7. **Observability.** List what the feature must emit (events, logs, metrics) as requirements.
 8. Keep design out of spec.md: no module names, no types. Those go in design.md.
 9. Leave `Status: Draft`. Only the product owner sets `Approved`.
+10. **Procedure steps** (only when `trace.procedure_steps.enabled` is true in
+    `sdd.config.json`): read the step text of every procedure of the source in scope and
+    write, as the template's "Procedure steps" subsection shows, its step table and the
+    Responsibilities table, or an exemption line with a reason; for a feature that runs no
+    procedure, one `No step table: <reason>` line. Never leave the subsection empty. Check
+    with `sdd trace --check --feature NNN` (a Draft only warns).
 
 When addressing spec-critic issues, fix each one or answer it under *Open questions* with a
 reason; prefer simplifying or deferring over adding requirements; never delete a requirement

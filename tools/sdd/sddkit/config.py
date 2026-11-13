@@ -67,6 +67,12 @@ DEFAULTS: Dict[str, Any] = {
         "implements_keywords": ["Implements"],
         "verifies_keywords": ["Verifies"],
         "attribute_forms": True,
+        "procedure_steps": {
+            "enabled": False,
+            "statuses": ["Approved", "Implemented"],
+            "source_check": True,
+            "label_regex": "",
+        },
     },
     "components": {
         "path_regex": r"^src/([^/]+)/",
@@ -289,6 +295,7 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
             re.compile(cfg["features"][name])
         except re.error as exc:
             problems.append(f"features.{name} does not compile: {exc}")
+    problems.extend(_validate_procedure_steps(cfg["trace"].get("procedure_steps")))
     if cfg["components"].get("path_regex"):
         try:
             re.compile(cfg["components"]["path_regex"])
@@ -359,6 +366,23 @@ def _regex(problems: List[str], where: str, pattern: Any, groups: tuple = ()) ->
     for g in groups:
         if g not in rx.groupindex:
             problems.append(f"{where} needs the named group (?P<{g}>...)")
+
+
+def _validate_procedure_steps(ps: Any) -> List[str]:
+    if not isinstance(ps, dict):
+        return ["trace.procedure_steps must be an object"]
+    problems: List[str] = []
+    for key in ("enabled", "source_check"):
+        if not isinstance(ps.get(key), bool):
+            problems.append(f"trace.procedure_steps.{key} must be true or false")
+    statuses = ps.get("statuses")
+    if not isinstance(statuses, list) or not all(isinstance(s, str) for s in statuses):
+        problems.append("trace.procedure_steps.statuses must be a list of spec statuses")
+    if ps.get("label_regex"):
+        _regex(problems, "trace.procedure_steps.label_regex", ps["label_regex"], ("label",))
+    elif not isinstance(ps.get("label_regex"), str):
+        problems.append("trace.procedure_steps.label_regex must be a regex string (\"\" = the built-in step-label grammar)")
+    return problems
 
 
 def _validate_quality(q: Dict[str, Any]) -> List[str]:

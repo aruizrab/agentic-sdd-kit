@@ -333,3 +333,92 @@ until somebody looks, even after the limit has reset.
 - **Expect cross-worktree cache hits mainly for registry dependencies**: they have the same
   absolute paths in every worktree; the project's own packages are compiled from a different
   path per worktree and usually miss across worktrees (hits come from rebuilds in the same one).
+
+## 15. Procedure step tables (optional)
+
+Some normative sources describe architecture-level **procedures**: call flows, sequence
+diagrams, numbered steps between parties (for example the procedures of a 3GPP Stage 2
+specification, an OAuth or payment flow, a protocol handshake). Requirements traced clause by
+clause can still skip a step, invent one or give a step to the wrong party. Procedure step
+tables make that mechanical. They are off by default; turn them on with
+`trace.procedure_steps.enabled` (docs/CONFIG.md).
+
+**What a spec carries.** The "Procedure steps" subsection of the spec template (section 4)
+defines the exact forms. With the option on, every spec has an explicit entry, one of:
+- a **step table** per procedure in scope: heading `Step table: <doc> §<section> [title]`,
+  header `| Step | Description | Mapping |`, one row per step label of the section's own
+  text, each Mapping cell holding requirement ids (any feature's: cite, do not restate),
+  `owned by F<NNN>: <reason>` or `out of scope: <reason>`, joined with `;`; plus a
+  **Responsibilities** table (`| Owner | Responsibility | Source | Requirements |`) whose
+  quotes come from the cited source sections;
+- an **exemption line** per procedure in scope that gets no table:
+  `No step table for <doc> §<section>: <reason>`;
+- a **feature-wide reason** when no procedure applies: `No step table: <reason>`.
+
+The explicit entry is the point: an absent section ("never checked") must look different from
+"checked, none applies", so the trace check can enforce the review uniformly.
+
+**Checks** (`sdd trace --check`, the `trace` gate; for a spec whose status is in
+`trace.procedure_steps.statuses`, by default Approved and Implemented; a Draft gets the same
+findings as `warning:` lines and never fails CI):
+- a step table that is malformed: no table after the heading, a wrong header, a row with the
+  wrong number of cells, a step with two rows, a second table for the same procedure;
+- a row whose cell is not accounted for (no requirement id and no disposition), a requirement
+  id no spec defines, `owned by` naming the spec's own feature or a feature without a roadmap
+  entry, an empty reason in a disposition, an exemption line or a feature-wide reason;
+- with `source_check` (default): a step of the section with no row, a row for a label that is
+  not a step of the section, a section the `sources` lookup cannot open or whose own text has
+  no step label; a Responsibility not quoted from its cited section;
+- a step table without a Responsibilities table;
+- a spec with no entry at all.
+
+Headings and lines that look like these structures but do not match (`### Step Table ...`,
+`No step-table ...`) give a warning, so a typo cannot silently drop a table. Fenced code
+blocks and HTML comments are ignored, so docs and the template can show examples.
+
+Step labels are read from the section's **own text** (up to its first sub-section) by
+`label_regex`; the built-in grammar recognises `1.`, `1\.`, `9a.`, `9b ` (no full stop),
+`7(A).`, `3a)`, `3c:`, `10.1.`, `Step 25:` and ranges (`14a-c.`, `13-20.`, `4a - 4b.`,
+`14.-15.`, `2a. - 2c.`, `2a to 2c.`, `1a and 1b.`), each compared in canonical form
+(`2a-2c`) and as a set. It errs on the side of recognising: a numbered line that is not a
+step costs one row `out of scope: not a step (<what it is>)`, and a void step one row
+`out of scope: void`. A source whose steps the grammar cannot see gets its own `label_regex`,
+or `source_check: false` (cells only) when the steps are not machine-readable at all.
+
+**Coverage report.** Every `sdd trace` run (plain, `--feature`, `--json` under
+`procedures`) lists, per feature with an entry, each step table with its number of steps and
+of rows mapped to requirements, owned by other features, out of scope, and mapped rows whose
+`must` requirements all have a verifying test (each row counts in the first category that
+fits), then the exemption lines and the feature-wide reason.
+
+**Call-flow conformance helper.** A spec's step table is also the oracle for the order of a
+run: `sddkit.callflow.check(spec_text, procedure, expectations, skips, events)` in Python
+tests, or `sdd callflow <spec.md> --procedure "<doc> §<section>" --expect <json> --events
+<json|jsonl>` from a test suite in any language (exit 0 conforms, 1 violations, 2 bad input).
+Events are records with an integer `seq` (the recorded total order); an expectation names a
+step and a predicate (a callable in Python, or field values that must all be equal), ordered
+by default or unordered for steps the source runs in parallel; a skip names a step and a
+reason. Every step of the table needs exactly one expectation or skip. Ordered expectations
+are matched in table order, each to the first matching event after the previous match; one
+with no such event is reported **out of order** (naming the last matched step) when an
+earlier event matches, else **missing**. Only `seq` orders events, so the result is
+deterministic. The **golden-scenario rule**: every step table is checked by at least one
+acceptance scenario that records a run and passes it through the helper (the template has an
+example); the spec critic checks the scenario exists and the test-adequacy reviewer checks the
+test.
+
+**Roles.** The spec author reads every procedure in scope and writes its table or exemption
+line; the spec critic checks completeness against the source text, the owners against the
+source, consistency between procedure-level and detailed requirements, and the golden
+scenario; the trace gate does the mechanical part.
+
+**Migration note (turning the option on in a project with specs).** Every spec in a checked
+status fails until it has an entry, so retrofit them in the commit that enables the option:
+- most merged specs get one feature-wide line, for example `No step table: parsers and data
+  types only; no procedure of <doc> applies`;
+- a merged spec that does implement a procedure gets its step table and Responsibilities
+  table (or an exemption line with a reason, and a follow-up feature);
+- a feature that is paused or in progress adds its tables, exemption lines and golden
+  scenarios when it resumes, before it is (re-)approved; Drafts only warn meanwhile.
+Run `sdd trace --check` on main after the retrofit; the coverage report then lists every
+feature.

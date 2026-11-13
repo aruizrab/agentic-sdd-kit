@@ -47,6 +47,76 @@ Source text is read with `sdd source clause <doc> <section>`. Never cite from me
 |---|---|---|
 | <client / peer / component> | <...> | <API / protocol / file> |
 
+### Procedure steps
+
+<!--
+Only when `trace.procedure_steps.enabled` is true in sdd.config.json; otherwise delete this
+subsection. With the option on, every spec carries an explicit entry here, so that "never
+checked" and "checked, none applies" look different. The entry is one of:
+- one step table per procedure of the normative source in scope (call flow, sequence
+  diagram, numbered steps), with the Responsibilities table below it;
+- an exemption line per procedure in scope that gets no table:
+  `No step table for <doc> §<section>: <reason>`;
+- for a feature that runs no procedure at all, one feature-wide line:
+  `No step table: <reason>` (for example "parsers only; no procedure of <doc> applies").
+
+Step table rules (`sdd trace --check` enforces them once the spec is Approved; a Draft gets
+warnings):
+- Heading of level 2-4, exactly `Step table: <doc> §<section> [title]`; `<doc> §<section>`
+  is what `sdd source clause <doc> <section>` opens. One table per procedure.
+- Header `| Step | Description | Mapping |`; one row per step label of the section's own
+  text (sub-sections excluded), in canonical form: `1`, `9a`, `7(A)`, `10.1`, ranges as
+  `14a-c` or `2a-2c` (written `2a to 2c` or `2a. - 2c.` in the source). With
+  `procedure_steps.source_check` the rows must match the source's labels both ways: a
+  missing row and an invented step both fail. A void step gets a row
+  `out of scope: void`; a line the label grammar recognises that is not a step gets
+  `out of scope: not a step (<what it is>)`.
+- A Mapping cell is accounted for when it holds at least one requirement id that some spec
+  defines (cite existing ids of any feature instead of restating them), or a disposition
+  `owned by F<NNN>: <reason>` (another feature of the roadmap) or `out of scope: <reason>`.
+  Mix them with `;`: `PRJ-AUTH-R110; owned by F014: IdP side`.
+- A step whose behaviour no other requirement states gets a requirement of this feature's
+  block with the source `(Source: <doc> §<section> step <label>)`.
+- Responsibilities table (required with any step table): heading `Responsibilities`, header
+  `| Owner | Responsibility | Source | Requirements |`; each Responsibility is quoted from
+  the cited `<doc> §<section>` (case, white space, escapes and a final full stop are
+  ignored); the Requirements cell is accounted for like a Mapping cell.
+- Golden-scenario rule: every step table is checked by at least one acceptance scenario that
+  runs the procedure and checks its recorded events against the table with the call-flow
+  helper (`sddkit.callflow` in Python tests, `sdd callflow` for any language). Example:
+
+  ### AS-07 Login call flow — verifies: PRJ-AUTH-R110, PRJ-AUTH-R111
+  - **Given** a client, the gateway and a stub identity provider
+  - **When** the client logs in and the events of the run are recorded
+  - **Then** `sdd callflow spec.md --procedure "<doc> §<section>"` with one expectation per
+    step (ordered; unordered for steps the source runs in parallel) and a skip with a
+    reason for each step the scenario does not observe reports no violation
+  - Oracle: the step table (order from the source)
+
+Example (outside a code block it would be checked; the ids are illustrative):
+
+```markdown
+#### Step table: <doc> §<section> <procedure title>
+
+| Step | Description | Mapping |
+|---|---|---|
+| 1 | Client to Gateway: Login Request | PRJ-AUTH-R110 |
+| 2 | Gateway to IdP: Token Request | PRJ-AUTH-R111; owned by F014: IdP side |
+| 3 | IdP to Gateway: Token | owned by F014: IdP side |
+| 4 | Audit record | out of scope: <reason> |
+
+#### Responsibilities
+
+| Owner | Responsibility | Source | Requirements |
+|---|---|---|---|
+| Gateway | <text quoted from the source> | <doc> §<section> | PRJ-AUTH-R110 |
+
+No step table for <doc> §<other section>: <reason>
+```
+-->
+
+<Step tables with the Responsibilities table, exemption lines, or one "No step table: <reason>" line.>
+
 ## 5. Requirements (EARS)
 
 Format, exactly one requirement per line:

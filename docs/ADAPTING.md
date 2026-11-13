@@ -102,6 +102,15 @@ Requirement ids: `requirements.id_regex`. Examples:
 - product: `REQ-[A-Z0-9]+-R\d{2,3}` keyed by area.
 Mark the corpus read-only in `protected_paths` (e.g. `{"glob": "specs/3gpp/**"}`).
 
+Sources that describe procedures (call flows, sequence diagrams, numbered steps between
+parties: 3GPP Stage 2 procedures, an OAuth flow, a payment or provisioning flow) can also be
+traced step by step with `trace.procedure_steps` (docs/PLAYBOOK.md §15). The step labels are
+read through the same lookup, so `sdd source clause <doc> <section>` must print the section
+with its heading. If the source numbers steps in a way the built-in grammar does not see
+(`S1:`, `[1]`), set `trace.procedure_steps.label_regex` with a named group `label`; if the
+flows are pictures, set `source_check: false` and let the spec critic compare the tables with
+the diagrams.
+
 ## 3. Paths and roles
 
 - `protected_paths`: always blocked (constitution, `.claude/**`, `sdd.config.json`, corpus).

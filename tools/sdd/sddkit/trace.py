@@ -26,7 +26,8 @@ Sources of truth (all configurable in ``sdd.config.json``):
 4. a ``must`` requirement of a feature whose status is in
    ``requirements.require_impl_for_statuses`` has no implementation site and
    is not ``[behaviour-only]``;
-5. ``(superseded by <ID>)`` names an unknown ID.
+5. ``(superseded by <ID>)`` names an unknown ID;
+6. with ``trace.procedure_steps.enabled``, a procedure-step defect (see ``procedures``).
 
 A superseded requirement is exempt from rules 3 and 4.
 """
@@ -39,6 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from . import procedures
 from .util import any_match, glob_match, strip_html_comments
 
 # A comment line in any of the supported syntaxes, or the first line of a Python docstring
@@ -427,18 +429,27 @@ def run(root: Path, cfg: Dict[str, Any], feature: Optional[str], do_check: bool,
     if allow_missing_impl:
         cfg = json.loads(json.dumps(cfg))
         cfg["requirements"]["require_impl_for_statuses"] = []
+    steps = procedures.evaluate(root, cfg, m, feature) if procedures.enabled(cfg) else None
     if as_json:
         out = to_json(m, feature)
-        problems = check(m, cfg, feature) if do_check else []
+        problems = check(m, cfg, feature) + (steps.errors if steps else []) if do_check else []
+        if steps:
+            out["procedures"] = steps.coverage
         if do_check:
             out["problems"] = problems
+            if steps:
+                out["warnings"] = steps.warnings
         print(json.dumps(out, indent=2))
         return 1 if problems else 0
     print(to_markdown(m, feature), end="")
+    if steps:
+        print(procedures.to_markdown(steps.coverage), end="")
     if m.outside_scan:
         print(f"outside trace.scan_globs (found only via --include): {', '.join(m.outside_scan)}")
     if do_check:
-        problems = check(m, cfg, feature)
+        problems = check(m, cfg, feature) + (steps.errors if steps else [])
+        for w in steps.warnings if steps else []:
+            print(f"warning: {w}")
         for p in problems:
             print(f"error: {p}")
         if problems:

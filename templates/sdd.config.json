@@ -39,7 +39,13 @@
     "exclude_globs": ["**/target/**", "**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**", "**/.venv/**"],
     "implements_keywords": ["Implements"],
     "verifies_keywords": ["Verifies"],
-    "attribute_forms": true
+    "attribute_forms": true,
+    "procedure_steps": {
+      "enabled": false,
+      "statuses": ["Approved", "Implemented"],
+      "source_check": true,
+      "label_regex": ""
+    }
   },
   "components": {
     "path_regex": "^(?:packages|services|apps|pkg)/([^/]+)/",

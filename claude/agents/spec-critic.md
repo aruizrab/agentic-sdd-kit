@@ -30,6 +30,15 @@ Check, in this order:
    spec.md is a finding.
 6. **Leftovers.** Clarification markers that block approval; product decisions that were
    silently guessed.
+7. **Procedure steps** (only when `trace.procedure_steps.enabled` is true): every procedure
+   of the source in scope has a step table or an exemption line with a true reason, and a
+   feature-wide `No step table:` reason is true (a procedure the feature runs without a table
+   is blocking); each step's Mapping is right (the cited requirement states that step; an
+   `owned by` feature really owns it); each Responsibility belongs to its Owner in the source
+   (wrong owner: blocking); procedure-level and detailed requirements do not contradict each
+   other (blocking); every step table is checked by an acceptance scenario that runs the
+   call-flow helper (missing: major). `sdd trace --check --feature NNN` shows the mechanical
+   defects.
 
 Severity:
 - `blocking`: wrong or hallucinated citation, a missing `must` behaviour, an untestable `must`,

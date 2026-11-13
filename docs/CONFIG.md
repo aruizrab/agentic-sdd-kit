@@ -34,6 +34,10 @@ Workflow script takes as `args.config`.
 | `trace.scan_globs` / `exclude_globs` | files scanned for tags | `src/**/*`, `tests/**/*` / build dirs |
 | `trace.implements_keywords` / `verifies_keywords` | tag keywords (case-insensitive) | `Implements` / `Verifies` |
 | `trace.attribute_forms` | also recognise `implements("ID")` call/attribute/decorator forms | `true` |
+| `trace.procedure_steps.enabled` | procedure step tables (PLAYBOOK §15): `sdd trace` parses step tables, Responsibilities tables, exemption lines and feature-wide reasons, prints the procedure step coverage (JSON: `procedures`), and `--check` fails on their defects and on a checked spec with no entry at all | `false` |
+| `trace.procedure_steps.statuses` | spec statuses whose procedure-step defects fail `trace --check`; specs in other statuses get warnings | `["Approved","Implemented"]` |
+| `trace.procedure_steps.source_check` | read each step table's `<doc> §<section>` through the `sources` lookup: its step labels must match the table's rows both ways, and each Responsibility must be quoted from its cited section. `false`: only the cells are checked (sources without machine-readable steps) | `true` |
+| `trace.procedure_steps.label_regex` | step labels at the start of a line of a section's own text; named group `label`, canonicalised (`2a to 2c` -> `2a-2c`); `""` = the built-in grammar (`1`, `9a`, `7(A)`, `10.1`, `Step 25:`, ranges such as `14a-c`, `4a - 4b`, `1a and 1b`) | `""` |
 | `components.path_regex` | first capture group = component of a file (lanes) | `^src/([^/]+)/` |
 | `components.root`, `components.word` | component of root files; the word used in prompts | `workspace`, `component` |
 | `gates.fast` / `gates.full` / `gates.nightly` | gate plans (`sdd gates --plan`): `{name, command, timeout, optional?, skip_if_missing?, env?, install?, skip_exit?}`; `install` is the hint shown on a SKIP row; `skip_exit` (0-255) is the exit code that means "tool missing, SKIP" (the templates set `3` on `sdd check` entries only); with `CI=true` every skip fails | `[]` |

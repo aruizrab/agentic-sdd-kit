@@ -37,5 +37,10 @@ Check:
    that a reasonable assertion would kill is blocking. Run `sdd check mutation --json` (or
    read its report) and compare it with §6: an unlisted survivor is blocking.
 
+9. **Golden call-flow scenarios** (only when the spec has step tables): every step table is
+   checked by a test that records a run and passes its events through the call-flow helper
+   (`sddkit.callflow` or `sdd callflow`) with real expectations, not skips for observable
+   steps. A step table no test checks is a finding.
+
 Every finding: requirement id, test or `file:line`, and the concrete mutant or scenario that
 would slip through. Report only what you verified.

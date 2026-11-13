@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from . import config as cfgmod
-from . import gates, hooks, new_feature, progress, routing, source, specs, trace, union_merge
+from . import callflow, gates, hooks, new_feature, progress, routing, source, specs, trace, union_merge
 from . import quality
 from .quality import arch, baseline, checks, commits, coverage, githooks, mutation, protected, secrets, size, vcs
 
@@ -268,6 +268,10 @@ def cmd_source(args: argparse.Namespace) -> int:
     return source.find(cfg, root, args.doc, args.clause)
 
 
+def cmd_callflow(args: argparse.Namespace) -> int:
+    return callflow.run(Path(args.spec), args.procedure, Path(args.expect), Path(args.events), args.json)
+
+
 def cmd_hook(args: argparse.Namespace) -> int:
     fn = hooks.HOOKS.get(args.name)
     if not fn:
@@ -476,6 +480,14 @@ def build_parser() -> argparse.ArgumentParser:
     so.add_argument("doc")
     so.add_argument("clause", help="clause id, or a regex for 'find'")
     so.set_defaults(fn=cmd_source)
+
+    cf = sub.add_parser("callflow", help="check a recorded event trace against a spec's step table")
+    cf.add_argument("spec", help="the spec.md holding the step table")
+    cf.add_argument("--procedure", required=True, help="the step table's procedure, e.g. 'PROTO §4.2'")
+    cf.add_argument("--expect", required=True, metavar="FILE", help='JSON: {"expect": [{"step", "match", "ordered"?}], "skip": [{"step", "reason"}]}')
+    cf.add_argument("--events", required=True, metavar="FILE", help="JSON array or JSON Lines of events, each with an integer seq")
+    cf.add_argument("--json", action="store_true")
+    cf.set_defaults(fn=cmd_callflow)
 
     h = sub.add_parser("hook", help="Claude Code hook entry points (JSON on stdin)")
     h.add_argument("name", choices=list(hooks.HOOKS))

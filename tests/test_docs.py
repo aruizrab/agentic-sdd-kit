@@ -57,9 +57,10 @@ class LessonsTest(unittest.TestCase):
         24: ("machine-readable", "reload"),
         25: ("out of memory", "idle host"),
         26: ("wake-up", "reset"),
+        27: ("none applies", "explicit entry"),
     }
 
-    def test_entries_16_to_26(self) -> None:
+    def test_entries_16_to_27(self) -> None:
         text = read("docs/LESSONS.md")
         rows = {}
         for line in text.splitlines():
@@ -129,6 +130,27 @@ class PlaybookPipelineAndPausesTest(unittest.TestCase):
         for word in ("one-shot wake-up", "reset time", "two heavy build or test jobs", "idle host", "without the compiler-cache wrapper", "registry dependencies"):
             self.assertIn(word, pauses)
         self.assertTrue((KIT / "tests" / "pipeline_cachekeys.mjs").is_file())
+
+
+class ProcedureStepsDocTest(unittest.TestCase):
+    """Procedure step tables: PLAYBOOK section with the migration note, template section, agents."""
+
+    def test_playbook(self) -> None:
+        body = section(read("docs/PLAYBOOK.md"), r"(?:\d+\.\s+)?Procedure step tables")
+        for word in ("trace.procedure_steps.enabled", "Step table: <doc> §<section>", "Responsibilities",
+                     "No step table for <doc> §<section>: <reason>", "No step table: <reason>", "Coverage report",
+                     "sdd callflow", "out of order", "golden-scenario rule", "Migration note", "feature-wide line"):
+            self.assertIn(word, body)
+
+    def test_template_and_agents(self) -> None:
+        spec = read("templates/specs/templates/spec.md")
+        for word in ("### Procedure steps", "| Step | Description | Mapping |", "| Owner | Responsibility | Source | Requirements |",
+                     "No step table for <doc> §<section>: <reason>", "`No step table: <reason>`", "owned by F<NNN>: <reason>",
+                     "out of scope: <reason>", "(Source: <doc> §<section> step <label>)", "Golden-scenario rule", "sdd callflow"):
+            self.assertIn(word, spec)
+        for agent in ("spec-author", "spec-critic", "test-adequacy-reviewer"):
+            text = read(f"claude/agents/{agent}.md")
+            self.assertTrue("trace.procedure_steps.enabled" in text or "step table" in text, agent)
 
 
 class PlaybookAdoptionTest(unittest.TestCase):

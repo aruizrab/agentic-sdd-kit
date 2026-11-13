@@ -59,6 +59,13 @@ take the quick path in `docs/DEVELOPMENT.md`.
 - Only comment lines, a docstring's opening line and attribute/decorator forms are scanned; a tag buried inside a longer docstring is not.
 - A `must` requirement with no implementation site fails `trace --check` once the feature is
   Implemented, unless its spec line carries `[behaviour-only]`.
+- <Only with `trace.procedure_steps.enabled`; else delete this bullet> Procedure steps: a
+  heading `Step table: <doc> §<section>` with `| Step | Description | Mapping |`, Mapping
+  cells holding requirement ids, `owned by F<NNN>: <reason>` or `out of scope: <reason>`
+  (joined with `;`); a `Responsibilities` table with every step table; otherwise
+  `No step table for <doc> §<section>: <reason>` or one `No step table: <reason>`. A step no
+  other requirement states gets an id of this feature's block with
+  `(Source: <doc> §<section> step <label>)`.
 
 ## Coding rules (from the constitution)
 1. <rule 1: e.g. no crash/hang/unbounded allocation on untrusted input; typed errors>
