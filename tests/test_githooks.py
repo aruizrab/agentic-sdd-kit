@@ -386,6 +386,38 @@ class TestStepAndPrePushTest(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("timed out", proc.stderr)
 
+    def test_red_tests_then_task_by_task(self) -> None:
+        """C1: after a red-by-design test(...) commit, a task commit is not rejected for the tests
+        of tasks not done yet; once the command passed on the branch, a failure is a regression."""
+        self.r.cfg["tests"]["run"] = "grep -q T01 src/ops.py && grep -q T02 src/ops.py"
+        self.r.set_cfg()
+        self.r.commit("chore: tests", "sdd.config.json")
+        # Without a red test commit on the branch every failure rejects (unchanged behaviour).
+        self.r.git("switch", "-q", "-c", "feat/F002-other")
+        write(self.r.root, "src/ops.py", "# T01\n")
+        proc = self.r.commit("feat(F002): T01 only", "src/ops.py")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("tests: failed", proc.stderr)
+        self.assertNotIn("red-by-design", proc.stderr)
+        self.r.git("rm", "-q", "--cached", "src/ops.py")
+        self.r.git("switch", "-q", "main")
+        self.r.git("switch", "-q", "-c", "feat/F001-ops")
+        write(self.r.root, "tests/test_ops.py", "def test_t01(): ...\ndef test_t02(): ...\n")
+        proc = self.r.commit("test(F001): failing tests for T01 and T02", "tests/test_ops.py")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        write(self.r.root, "src/ops.py", "# T01\n")
+        proc = self.r.commit("feat(F001): T01 mul", "src/ops.py")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("red-by-design tests", proc.stderr)
+        write(self.r.root, "src/ops.py", "# T01\n# T02\n")
+        proc = self.r.commit("feat(F001): T02 div", "src/ops.py")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("red-by-design", proc.stderr)
+        write(self.r.root, "src/ops.py", "# T01\n")
+        proc = self.r.commit("refactor(F001): drop div", "src/ops.py")
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("a regression", proc.stderr)
+
     def test_pre_push(self) -> None:
         remote = make_tmp("remote-")
         try:

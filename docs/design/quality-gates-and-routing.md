@@ -903,7 +903,14 @@ Acceptance criteria:
 - D-04 The test step runs in commit-msg. git gives pre-commit no message, and the `test(...)`
   skip needs it. It runs only for staged source and test files: the pipeline makes many docs,
   spec and chore commits, and running the whole suite inside each `git commit` would cost
-  minutes and could outlast an agent's shell limit. (QGR-11)
+  minutes and could outlast an agent's shell limit. The step rejects only regressions: the
+  Tests stage commits the failing tests of every task as one `test(...)` commit and
+  implementers then commit task by task, so the tests of tasks not done yet are red by design.
+  While merge-base..HEAD holds a commit of a `skip_tests_for_types` type and the failing
+  command has not passed since it (per-worktree note `sdd-tests-green` in the git dir), the
+  hook prints the failure and accepts the commit; once that command passed, a failure rejects
+  as a regression. Timeouts always reject; the Tests and Gates stages stay the authority.
+  (QGR-11)
 - D-05 Merge commits are recognised by `MERGE_HEAD`, not by message, and skip format, trailer
   and test checks; the secret scan still runs. Lane merges and `Merge branch ...` must pass;
   both sides were checked when committed.

@@ -4,14 +4,16 @@
 repository at the cwd (only when the user runs it) and refuses to switch off hooks already in
 use. Hooks never stash, reset, check out, or write the index, the working tree or git config;
 checks that need file content read the staged blob, commands run on the working tree. The only
-file a hook writes is its timing note ``sdd-hook-time`` in the git dir.
+files a hook writes are its notes in the git dir: the timing note ``sdd-hook-time`` and
+``sdd-tests-green`` (test commands that passed since the branch's red-by-design test commit).
 
 * pre-commit: secret scan of the staged added lines (built-in rules, then gitleaks when
   enabled and installed); ``sdd check size --staged``; ``quality.hooks.pre_commit`` steps whose
   ``glob`` matches a staged file (``{files}`` = those files, shell-quoted).
 * commit-msg: secret scan of the message; merge commits (``MERGE_HEAD``) stop there; the
   Conventional Commit header; required trailers; the test step for the components of staged
-  source and test files (skipped for ``skip_tests_for_types``); the time budget warning.
+  source and test files (skipped for ``skip_tests_for_types``; while the branch holds a
+  red-by-design test commit, only a regression rejects); the time budget warning.
 * pre-push: ``sdd gates --fast``.
 """
 
@@ -34,6 +36,7 @@ from ..util import any_match
 
 HOOK_NAMES = ("pre-commit", "commit-msg", "pre-push")
 TIME_NOTE = "sdd-hook-time"
+GREEN_NOTE = "sdd-tests-green"
 
 
 def hooks_rel(cfg: Dict[str, Any]) -> str:
@@ -221,6 +224,77 @@ def _test_commands(hook: _Hook, staged: List[str]) -> List[str]:
     return [tests["run_component"].replace("{component}", shlex.quote(c)) for c in comps if c]
 
 
+def _red_test_commit(hook: _Hook) -> Optional[str]:
+    """The newest red-by-design test commit (type in ``skip_tests_for_types``) in merge-base..HEAD."""
+    try:
+        base = vcs.merge_base(hook.root, hook.cfg)
+    except QualityError:
+        return None
+    log = vcs.git(hook.root, "log", "--no-merges", "--format=%H%x00%s", f"{base}..HEAD", check=False)
+    for row in log.splitlines():
+        sha, _, subject = row.partition("\0")
+        if commits.commit_type(subject) in hook.h["skip_tests_for_types"]:
+            return sha
+    return None
+
+
+def _green_note(hook: _Hook, red: str) -> List[str]:
+    """Test commands that passed since the red test commit ``red`` (per worktree, in the git dir)."""
+    try:
+        data = json.loads(vcs.git_path(hook.root, GREEN_NOTE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return list(data.get("green") or []) if isinstance(data, dict) and data.get("red") == red else []
+
+
+def _record_green(hook: _Hook, red: str, cmd: str) -> None:
+    green = _green_note(hook, red)
+    if cmd in green:
+        return
+    try:
+        vcs.git_path(hook.root, GREEN_NOTE).write_text(json.dumps({"red": red, "green": green + [cmd]}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _run_tests(hook: _Hook, cmds: List[str]) -> bool:
+    """Run the test commands; reject only regressions (docs/design D-04).
+
+    The Tests stage commits failing tests for every task as one red-by-design commit
+    (``test(...)``), and implementers then commit task by task: the tests of the tasks not done
+    yet are still red. While merge-base..HEAD holds such a commit and the failing command has
+    not passed since it (a per-worktree note in the git dir), a failure is reported and the
+    commit is accepted; the gates stay the authority. Timeouts always reject.
+    """
+    red = _red_test_commit(hook) if cmds else None
+    deadline = time.monotonic() + float(hook.h["test_timeout"])
+    for cmd in cmds:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            hook.say(f"tests: exceeded test_timeout {hook.h['test_timeout']} s; commit rejected")
+            return False
+        t0 = time.monotonic()
+        hook.say(f"tests: $ {cmd}")
+        rc, out, timed_out = run_command(cmd, hook.root, hook.env, left)
+        hook.timed("tests", t0)
+        if timed_out:
+            hook.say(f"tests: timed out after {int(left)} s; commit rejected\n{tail(out, 20)}")
+            return False
+        if rc == 0:
+            if red:
+                _record_green(hook, red, cmd)
+            continue
+        if red and cmd not in _green_note(hook, red):
+            hook.say(f"tests: failed (exit {rc}), but {red[:12]} on this branch committed red-by-design tests and this "
+                     f"command has not passed since: accepted as tests of tasks not done yet (the gates stay the authority)\n"
+                     f"{tail(out, 15)}")
+            continue
+        hook.say(f"tests: failed (exit {rc}); commit rejected" + (" (these tests passed earlier on this branch: a regression)" if red else "")
+                 + f"\n{tail(out, 40)}")
+        return False
+    return True
+
+
 def _commit_msg(hook: _Hook, msg_file: str) -> int:
     cfg, root = hook.cfg, hook.root
     p = Path(msg_file)
@@ -260,14 +334,7 @@ def _commit_msg(hook: _Hook, msg_file: str) -> int:
         cmds = _test_commands(hook, vcs.staged_files(root))
         if not cmds:
             hook.say("test step skipped: no source or test files staged")
-        deadline = time.monotonic() + float(hook.h["test_timeout"])
-        for cmd in cmds:
-            left = deadline - time.monotonic()
-            if left <= 0 or not hook.run_step("tests", cmd, left):
-                if left <= 0:
-                    hook.say(f"tests: exceeded test_timeout {hook.h['test_timeout']} s; commit rejected")
-                ok = False
-                break
+        ok = _run_tests(hook, cmds)
     note = _read_note(hook)
     mine = max(hook.steps, key=lambda s: s[1]) if hook.steps else ("", 0.0)
     total = time.monotonic() - hook.start + (float(note["elapsed"]) if note else 0.0)

@@ -250,8 +250,12 @@ linked worktree runs its own checkout's hooks. It refuses (and changes nothing) 
   ```
 
 The hooks never stash, reset, check out, or write the index, the working tree or git
-config; the only file they write is the timing note `sdd-hook-time` in the git directory.
-The commit-msg test step runs the configured component tests and must stay below an agent's
+config; the only files they write are two notes in the git directory: the timing note
+`sdd-hook-time` and `sdd-tests-green`. The commit-msg test step rejects only regressions:
+after a red-by-design `test(...)` commit on the branch (the pipeline's Tests stage), a failing
+test command is reported and the task commit is accepted until that command has passed once
+on the branch (recorded in `sdd-tests-green`); from then on a failure rejects. Without such a
+commit every failure rejects. The step runs the configured component tests and must stay below an agent's
 shell limit (`quality.hooks.test_timeout`, default 300 s); agents give `git commit` a 600 s
 shell timeout. Put slow checks in `gates.fast` (pre-push) instead; the hooks warn when
 pre-commit and commit-msg together exceed `quality.hooks.budget_seconds`.
