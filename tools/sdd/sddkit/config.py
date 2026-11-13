@@ -82,6 +82,7 @@ DEFAULTS: Dict[str, Any] = {
         "generated": [],
         "test_globs": [],
         "languages": {},
+        "tool_dirs": [],
         "size": {
             "globs": [],
             "exclude": [],
@@ -359,7 +360,7 @@ def _regex(problems: List[str], where: str, pattern: Any, groups: tuple = ()) ->
 
 def _validate_quality(q: Dict[str, Any]) -> List[str]:
     problems: List[str] = []
-    for key in ("generated", "test_globs"):
+    for key in ("generated", "test_globs", "tool_dirs"):
         if not isinstance(q.get(key), list):
             problems.append(f"quality.{key} must be a list of globs")
     for ext, lang in (q.get("languages") or {}).items():

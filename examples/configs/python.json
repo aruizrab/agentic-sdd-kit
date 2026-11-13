@@ -345,7 +345,7 @@
       "timeout": 3600
     },
     "mutation": {
-      "command": "mutmut run --max-children 4 >/dev/null; mutmut results",
+      "command": "mutmut run --max-children 4 >/dev/null && mutmut results",
       "report": "",
       "format": "regex",
       "survivor_regex": "(?m)^\\s+(?P<file>[\\w.]+?)\\.(?P<mutation>x\\w*__mutmut_\\d+): survived$",
@@ -392,7 +392,7 @@
       },
       {
         "name": "flaky",
-        "command": "pytest -q -p rerunfailures --reruns 2 -rR",
+        "command": "python3 -c 'import pytest_rerunfailures' 2>/dev/null || exit 127; pytest -q -p rerunfailures --reruns 2 -rR",
         "violation_regex": "(?m)^RERUN (?P<file>[^:\\s]+)::(?P<message>\\S+)",
         "baseline": false,
         "requires": [

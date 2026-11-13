@@ -140,7 +140,7 @@ def run(cfg: Dict[str, Any], root: Path, fast: bool, only: Optional[List[str]], 
             start = time.monotonic()
             name = gate["name"]
             missing = gate.get("skip_if_missing")
-            if missing and shutil.which(missing) is None:
+            if missing and shutil.which(missing, path=env.get("PATH")) is None:
                 results.append(_skip(name, f"{missing} not installed", gate, 0.0))
                 continue
             gate_env = dict(env)

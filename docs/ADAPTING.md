@@ -44,12 +44,12 @@ Trace tags: `/// Implements: ID` doc lines and `#[trace::implements("ID")]` /
 is recognised).
 
 ### TypeScript
-Fast: `npx prettier --check . '!tools/sdd/**'`, `npx eslint . --ignore-pattern 'tools/sdd/**' --max-warnings 0`, `npx tsc --noEmit -p .`,
+Fast: `npx --no-install prettier --check . '!tools/sdd/**'`, `npx --no-install eslint . --ignore-pattern 'tools/sdd/**' --max-warnings 0`, `npx --no-install tsc --noEmit -p .`,
 `npm test -- --run`, trace. Full adds coverage, `npm audit --audit-level=high`, contract tests
 and a benchmark compare as package scripts (`npm run test:contract --if-present`,
 `npm run bench:compare --if-present`: a project without the script passes). Formatter and
-pre-commit step: `npx prettier --write {file}` / `npx prettier --check {files}`; stop check:
-`npx tsc --noEmit -p .`. Components: `^packages/([^/]+)/` (monorepo) or drop the regex for a single package.
+pre-commit step: `npx --no-install prettier --write {file}` / `npx --no-install prettier --check {files}`; stop check:
+`npx --no-install tsc --noEmit -p .`. Components: `^packages/([^/]+)/` (monorepo) or drop the regex for a single package.
 Union manifests: `package.json`, `packages/*/package.json`; lockfile `package-lock.json`;
 `after_union: npm install --package-lock-only --ignore-scripts`. Tags: `// Implements: ID`
 comments or `implements("ID")` / `verifies("ID")` calls in test helpers. Implementer-denied
@@ -150,7 +150,7 @@ has no executable code).
 |---|---|---|
 | Rust | `cargo llvm-cov --workspace --lcov --output-path lcov.info` -> `lcov.info` (lcov) | every crate member is compiled, so every file is listed |
 | Python | `coverage run --source=src -m pytest -q && coverage lcov -o lcov.info` -> `lcov.info` (lcov) | `--source=src` (or `[tool.coverage.run] source`) |
-| TypeScript | `npx vitest run --coverage.enabled --coverage.reporter=lcov --coverage.all` -> `coverage/lcov.info` (lcov) | `--coverage.all` / `coverage.include`; Jest: `collectCoverageFrom` |
+| TypeScript | `vitest run --coverage.enabled --coverage.reporter=lcov --coverage.all` -> `coverage/lcov.info` (lcov) | `--coverage.all` / `coverage.include`; Jest: `collectCoverageFrom` |
 | Go | `go test -coverprofile=cover.out ./... && gocover-cobertura < cover.out > coverage.xml` -> `coverage.xml` (cobertura) | `-coverpkg=./...` for cross-package coverage |
 
 **Mutation** must judge only the diff, or at least only report it: survivors on unchanged
@@ -161,8 +161,8 @@ run completed" (any other code, e.g. a failing unmutated baseline, is a tool err
 | Language | `mutation.command` | Survivors | `ok_exits` |
 |---|---|---|---|
 | Rust | `cargo mutants --workspace --in-diff {diff_file} --no-shuffle` | `report: mutants.out/missed.txt`, regex `^(?P<file>[^:\n]+):(?P<line>\d+):\d+: (?P<mutation>.+)$` | `[0, 2, 3]` (2 = missed mutants, 3 = timeouts; 1 usage error, 4 baseline failed) |
-| Python | `mutmut run --max-children 4 >/dev/null; mutmut results` | stdout, regex on `    <module>.x_<fn>__mutmut_<n>: survived` (file = dotted module, no line: every survivor needs a fix or a justification) | `[0]` |
-| TypeScript | `npx stryker run --incremental --reporters json` | `report: reports/mutation/mutation.json`, `format: mutation-testing-report` | `[0]` |
+| Python | `mutmut run --max-children 4 >/dev/null && mutmut results` (`&&`: a failed run is a tool error, never "no survivors") | stdout, regex on `    <module>.x_<fn>__mutmut_<n>: survived` (file = dotted module, no line: every survivor needs a fix or a justification) | `[0]` |
+| TypeScript | `stryker run --incremental --reporters json` | `report: reports/mutation/mutation.json`, `format: mutation-testing-report` | `[0]` |
 | Go | `gremlins unleash ./...` | stdout, regex `LIVED (?P<mutation>\S+) at (?P<file>...):(?P<line>\d+)` | `[0]` |
 
 A survivor that no test can kill is justified in the feature's review.md §6 as
@@ -175,7 +175,7 @@ an absolute floor instead of the 100 % changed-lines rule.
 |---|---|---|
 | Rust | `cargo llvm-cov --workspace --fail-under-lines 90` | `cargo mutants --workspace --no-shuffle` |
 | Python | `coverage run --source=src -m pytest -q && coverage report --fail-under=90` | `mutmut run` |
-| TypeScript | `npx vitest run --coverage.enabled --coverage.all --coverage.thresholds.lines=90` | `npx stryker run` |
+| TypeScript | `npx --no-install vitest run --coverage.enabled --coverage.all --coverage.thresholds.lines=90` | `npx --no-install stryker run` |
 | Go | `go test -cover ./...` | `gremlins unleash ./...` |
 
 Long fuzzing (`FUZZ_BUDGET_SECS=3600 scripts/fuzz-changed.sh`) and benchmarks belong here too.
@@ -187,14 +187,24 @@ Long fuzzing (`FUZZ_BUDGET_SECS=3600 scripts/fuzz-changed.sh`) and benchmarks be
 | Language | docs / warnings | unused dependencies | flaky tests (`baseline: false`) |
 |---|---|---|---|
 | Rust | `cargo doc --no-deps --workspace` (`warning: ...` + `--> file:line`) | `cargo machete --skip-target-dir` (`ok_exits [0, 1]`; `<crate> -- <Cargo.toml>:` header, tab-indented names) | `cargo nextest run --workspace --retries 2` (`FLAKY n/m [..] <binary> <test>`; `ok_exits [0, 100]`) |
-| Python | `ruff check --select D --output-format concise src` (`ok_exits [0, 1]`) | `deptry src` (`DEP00n` lines; `ok_exits [0, 1]`) | `pytest -p rerunfailures --reruns 2 -rR` (`RERUN <file>::<test>`) |
-| TypeScript | `npx eslint --format unix src` with eslint-plugin-jsdoc (only `[.../jsdoc/...]` lines) | `npx depcheck` (`ok_exits [0, 255]`) | `npx vitest run --retry=2 --reporter=verbose` (`(retry xN)`) |
+| Python | `ruff check --select D --output-format concise src` (`ok_exits [0, 1]`) | `deptry src` (`DEP00n` lines; `ok_exits [0, 1]`) | `python3 -c 'import pytest_rerunfailures' 2>/dev/null \|\| exit 127; pytest -p rerunfailures --reruns 2 -rR` (`RERUN <file>::<test>`; the guard turns a missing plugin into a SKIP) |
+| TypeScript | `eslint --format unix src` with eslint-plugin-jsdoc (only `[.../jsdoc/...]` lines) | `depcheck` (`ok_exits [0, 255]`) | `vitest run --retry=2 --reporter=verbose` (`(retry xN)`) |
 | Go | `revive -formatter default ./...` (`exported ...` lines) | `go mod tidy -diff` (Go 1.23+; `ok_exits [0, 1]`) | `gotestsum --rerun-fails=2 --format testname` (`PASS <pkg>.<Test> (re-run n)`) |
 
 The regex has the named groups `file` and `message` and optionally `line`. A match without
 `file` inherits the file of the previous match and a match without `message` only sets the
 file, so "header line, then indented items" outputs need one regex with two alternatives.
 Paths are made relative to the project root.
+
+**A missing tool must SKIP, never pass.** `requires` names the programs the command runs, so a
+missing one shows SKIP with the `install` hint (exit 3; a failure with `CI=true`). Never list
+a launcher such as `npx` there: it is always present, then downloads an unpinned package or
+fails with an exit code that `ok_exits` may accept as "no findings". Put project-local tool
+directories in `quality.tool_dirs` (the TypeScript example: `["node_modules/.bin"]`) and name
+the tools themselves (`vitest`, `eslint`, `stryker`, `depcheck`); gates that still go through
+npx use `npx --no-install`. Guard plugin-dependent commands so a missing plugin exits 127
+(`python3 -c 'import pytest_rerunfailures' 2>/dev/null || exit 127; pytest ...`), and chain
+steps with `&&`, never `;`, so a failed run is not followed by an empty report.
 
 **Layers** (`quality.arch.modules`): a module is `{name, paths, imports, may_depend_on,
 forbid}`. Relative imports resolve by path; any other specifier is matched against the

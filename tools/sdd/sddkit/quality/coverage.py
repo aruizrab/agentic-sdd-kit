@@ -126,7 +126,7 @@ def run_tool(root: Path, cfg: Dict[str, Any], section: str, extra_cmd: Optional[
     if timed_out:
         raise QualityError(f"{section} command timed out after {t['timeout']} s:\n{tail(out)}")
     if rc == 127:
-        return skip(section, cmd.split()[0], t["install"]), out
+        return skip(section, f"a program `{cmd.split()[0]}` runs (exit 127)", t["install"]), out
     if rc not in (t["ok_exits"] or [0]):
         raise QualityError(f"{section} command exited {rc} (ok_exits {t['ok_exits']}); the tool did not complete:\n{tail(out)}")
     if t["report"] and not (root / t["report"]).is_file():

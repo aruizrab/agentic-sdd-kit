@@ -80,6 +80,7 @@
     "generated": [],
     "test_globs": [],
     "languages": {},
+    "tool_dirs": [],
     "size": {"globs": [], "exclude": [], "function_warn": 0, "function_fail": 80, "file_warn": 600, "file_fail": 1000},
     "arch": {"modules": [], "exclude": ["tests/**", "**/tests/**", "test/**", "**/test/**"]},
     "coverage": {

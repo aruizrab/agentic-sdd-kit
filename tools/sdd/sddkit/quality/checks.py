@@ -54,7 +54,7 @@ def execute(root: Path, cfg: Dict[str, Any], chk: Dict[str, Any]) -> Result:
     if timed_out:
         raise QualityError(f"{name}: timed out after {chk.get('timeout', 1800)} s:\n{tail(out)}")
     if rc == 127:
-        return skip(name, chk["command"].split()[0], chk.get("install", ""))
+        return skip(name, f"a program `{chk['command'].split()[0]}` runs (exit 127)", chk.get("install", ""))
     res = Result(name)
     if not chk.get("violation_regex"):
         if rc != 0:

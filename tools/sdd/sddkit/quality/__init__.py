@@ -128,8 +128,14 @@ def emit(res: Result, as_json: bool, out=None) -> int:
 
 
 def tool_env(cfg: Dict[str, Any], root: Path, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    """Environment for every command the kit runs for gates, checks and git hooks."""
+    """Environment for every command the kit runs for gates, checks and git hooks.
+
+    ``quality.tool_dirs`` (root-relative, e.g. ``node_modules/.bin``) go in front of ``PATH``, so
+    ``requires`` finds project-local tools and a missing one SKIPs instead of being downloaded."""
     env = dict(os.environ)
+    dirs = [str(root / d) for d in (cfg.get("quality") or {}).get("tool_dirs") or []]
+    if dirs:
+        env["PATH"] = os.pathsep.join(dirs + ([env["PATH"]] if env.get("PATH") else []))
     env["SDD_ROOT"] = str(root)
     env.setdefault("SDD_FEATURE", "")
     for k, v in ((cfg.get("build_cache") or {}).get("env") or {}).items():

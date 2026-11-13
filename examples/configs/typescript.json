@@ -87,17 +87,17 @@
     "fast": [
       {
         "name": "fmt",
-        "command": "npx prettier --check . '!tools/sdd/**'",
+        "command": "npx --no-install prettier --check . '!tools/sdd/**'",
         "timeout": 300
       },
       {
         "name": "lint",
-        "command": "npx eslint . --ignore-pattern 'tools/sdd/**' --max-warnings 0",
+        "command": "npx --no-install eslint . --ignore-pattern 'tools/sdd/**' --max-warnings 0",
         "timeout": 600
       },
       {
         "name": "typecheck",
-        "command": "npx tsc --noEmit -p .",
+        "command": "npx --no-install tsc --noEmit -p .",
         "timeout": 600
       },
       {
@@ -144,17 +144,17 @@
     "full": [
       {
         "name": "fmt",
-        "command": "npx prettier --check . '!tools/sdd/**'",
+        "command": "npx --no-install prettier --check . '!tools/sdd/**'",
         "timeout": 300
       },
       {
         "name": "lint",
-        "command": "npx eslint . --ignore-pattern 'tools/sdd/**' --max-warnings 0",
+        "command": "npx --no-install eslint . --ignore-pattern 'tools/sdd/**' --max-warnings 0",
         "timeout": 600
       },
       {
         "name": "typecheck",
-        "command": "npx tsc --noEmit -p .",
+        "command": "npx --no-install tsc --noEmit -p .",
         "timeout": 600
       },
       {
@@ -249,12 +249,12 @@
     "nightly": [
       {
         "name": "coverage-full",
-        "command": "npx vitest run --coverage.enabled --coverage.all --coverage.thresholds.lines=90",
+        "command": "npx --no-install vitest run --coverage.enabled --coverage.all --coverage.thresholds.lines=90",
         "timeout": 7200
       },
       {
         "name": "mutation-full",
-        "command": "npx stryker run",
+        "command": "npx --no-install stryker run",
         "timeout": 21600
       }
     ]
@@ -267,6 +267,9 @@
     ],
     "test_globs": [],
     "languages": {},
+    "tool_dirs": [
+      "node_modules/.bin"
+    ],
     "size": {
       "globs": [],
       "exclude": [
@@ -322,7 +325,7 @@
       ]
     },
     "coverage": {
-      "command": "npx vitest run --coverage.enabled --coverage.reporter=lcov --coverage.all",
+      "command": "vitest run --coverage.enabled --coverage.reporter=lcov --coverage.all",
       "report": "coverage/lcov.info",
       "format": "lcov",
       "globs": [],
@@ -331,13 +334,13 @@
         0
       ],
       "requires": [
-        "npx"
+        "vitest"
       ],
       "install": "npm install --save-dev vitest @vitest/coverage-v8",
       "timeout": 3600
     },
     "mutation": {
-      "command": "npx stryker run --incremental --reporters json",
+      "command": "stryker run --incremental --reporters json",
       "report": "reports/mutation/mutation.json",
       "format": "mutation-testing-report",
       "survivor_regex": "",
@@ -346,7 +349,7 @@
       ],
       "globs": [],
       "requires": [
-        "npx"
+        "stryker"
       ],
       "install": "npm install --save-dev @stryker-mutator/core @stryker-mutator/vitest-runner",
       "timeout": 3600
@@ -354,11 +357,11 @@
     "checks": [
       {
         "name": "docs",
-        "command": "npx eslint --format unix src",
+        "command": "eslint --format unix src",
         "violation_regex": "(?m)^(?P<file>[^:\\n]+):(?P<line>\\d+):\\d+: (?P<message>.+\\[(?:Warning|Error)/jsdoc/[\\w-]+\\])$",
         "baseline": true,
         "requires": [
-          "npx"
+          "eslint"
         ],
         "install": "npm install --save-dev eslint eslint-plugin-jsdoc",
         "timeout": 900,
@@ -369,11 +372,11 @@
       },
       {
         "name": "unused-deps",
-        "command": "npx depcheck",
+        "command": "depcheck",
         "violation_regex": "(?m)^(?P<file>Unused (?:dev)?[dD]ependencies)$|^\\* (?P<message>\\S+)$",
         "baseline": true,
         "requires": [
-          "npx"
+          "depcheck"
         ],
         "install": "npm install --save-dev depcheck",
         "timeout": 600,
@@ -384,11 +387,11 @@
       },
       {
         "name": "flaky",
-        "command": "npx vitest run --retry=2 --reporter=verbose",
+        "command": "vitest run --retry=2 --reporter=verbose",
         "violation_regex": "(?m)^\\s*✓ (?P<file>\\S+) > (?P<message>.+?) (?:\\d+ms )?\\(retry x\\d+\\)",
         "baseline": false,
         "requires": [
-          "npx"
+          "vitest"
         ],
         "install": "npm install --save-dev vitest",
         "timeout": 3600,
@@ -426,7 +429,7 @@
       "pre_commit": [
         {
           "name": "prettier",
-          "command": "npx prettier --check {files}",
+          "command": "npx --no-install prettier --check {files}",
           "glob": "*.ts",
           "timeout": 60
         }
@@ -517,7 +520,7 @@
   "formatters": [
     {
       "glob": "*.ts",
-      "command": "npx prettier --write {file}",
+      "command": "npx --no-install prettier --write {file}",
       "exclude": [
         "**/node_modules/**",
         "**/dist/**"
@@ -525,14 +528,14 @@
     },
     {
       "glob": "*.tsx",
-      "command": "npx prettier --write {file}"
+      "command": "npx --no-install prettier --write {file}"
     }
   ],
   "build_cache": {
     "env": {}
   },
   "stop_check": {
-    "command": "npx tsc --noEmit -p .",
+    "command": "npx --no-install tsc --noEmit -p .",
     "changed_globs": [
       "*.ts",
       "*.tsx"

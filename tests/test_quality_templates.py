@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import unittest
 from pathlib import Path
 
-from helpers import KIT
+from helpers import KIT, make_tmp, rm
 
 from sddkit import config as cfgmod
-from sddkit.quality import checks, mutation
+from sddkit import quality
+from sddkit.quality import checks, coverage, mutation
 
 FIX = KIT / "tests" / "fixtures" / "quality" / "tools"
 EXAMPLES = ["rust", "python", "typescript", "go"]
@@ -69,6 +72,69 @@ class CapturedToolOutputTest(unittest.TestCase):
                 got = [[f, ln, m] for f, ln, m in mutation.parse_survivors((FIX / lang / "mutation.txt").read_text(), cfg, root)]
                 self.assertEqual(got, expected[key], key)
         self.assertEqual(seen, set(expected))
+
+
+# Programs a bare machine has; the example's project tools (linters, test runners, mutation tools) are left out.
+BASE_PROGRAMS = ["sh", "bash", "env", "cat", "grep", "sed", "test", "[", "ls", "mkdir", "rm", "cp", "mv", "tr", "head", "tail",
+                 "dirname", "basename", "uname", "python3", "git", "node", "npx", "npm"]
+
+
+class MissingToolTest(unittest.TestCase):
+    """C4: with its tool missing, every example quality command SKIPs (3) or errors (2), never passes."""
+
+    def setUp(self) -> None:
+        self.root = make_tmp("missing-tool-")
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        for prog in BASE_PROGRAMS:
+            found = shutil.which(prog)
+            if found:
+                os.symlink(found, self.bin / prog)
+        # pytest without the rerunfailures plugin: the plugin guard must turn that into a SKIP.
+        pytest = shutil.which("pytest")
+        if pytest and os.system(f"{shutil.which('python3')} -c 'import pytest_rerunfailures' 2>/dev/null") != 0:
+            os.symlink(pytest, self.bin / "pytest")
+        (self.root / "src").mkdir()
+        self.saved = dict(os.environ)
+        for k in ("CI", "SDD_ROOT"):
+            os.environ.pop(k, None)
+        os.environ.update({"PATH": str(self.bin), "npm_config_offline": "true", "npm_config_yes": "false", "HOME": str(self.root)})
+
+    def tearDown(self) -> None:
+        os.environ.clear()
+        os.environ.update(self.saved)
+        rm(self.root)
+
+    def outcome(self, fn) -> str:
+        try:
+            return fn().status
+        except quality.QualityError:
+            return "error"
+
+    def test_every_example_tool_command(self) -> None:
+        for lang in EXAMPLES:
+            cfg = load(KIT / "examples" / "configs" / f"{lang}.json")
+            for chk in cfg["quality"]["checks"]:
+                with self.subTest(lang=lang, check=chk["name"]):
+                    self.assertIn(self.outcome(lambda: checks.execute(self.root, cfg, chk)), ("skip", "error"))
+            for section in ("coverage", "mutation"):
+                with self.subTest(lang=lang, check=section):
+                    def run():
+                        failed, _ = coverage.run_tool(self.root, cfg, section, cfg["quality"][section]["command"].replace("{diff_file}", "x.patch")
+                                                      .replace("{changed_files}", "src/a"))
+                        return failed or quality.Result(section, status="pass")
+                    self.assertIn(self.outcome(run), ("skip", "error"))
+
+
+    def test_tool_dirs_find_project_local_tools(self) -> None:
+        cfg = load(KIT / "examples" / "configs" / "typescript.json")
+        tool = self.root / "node_modules" / ".bin" / "eslint"
+        tool.parent.mkdir(parents=True)
+        tool.write_text("#!/bin/sh\necho 'src/a.ts:3:1: Missing JSDoc comment. [Warning/jsdoc/require-jsdoc]'\nexit 1\n")
+        tool.chmod(0o755)
+        chk = checks.find(cfg, "docs")
+        res = checks.execute(self.root, cfg, chk)
+        self.assertEqual([(v.file, v.line) for v in res.violations], [("src/a.ts", 3)])
 
 
 if __name__ == "__main__":

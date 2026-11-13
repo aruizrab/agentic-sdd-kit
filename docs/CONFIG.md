@@ -40,6 +40,7 @@ Workflow script takes as `args.config`.
 | `quality.base_ref` | base branch for "changed lines" (else `SDD_BASE_REF`, else `features.main_branch`, else `origin/<main_branch>`) | `""` |
 | `quality.generated` | globs of generated files: excluded from size, coverage and mutation | `[]` |
 | `quality.test_globs` | extra test-code globs, added to `tests/**`, `**/tests/**`, `test/**`, `**/test/**` and the language registry's patterns; test code is excluded from coverage and mutation, still size-checked | `[]` |
+| `quality.tool_dirs` | project-local tool directories (root-relative, e.g. `node_modules/.bin`) put in front of `PATH` for every gate, check and git hook command; `requires` and `skip_if_missing` look there too, so a missing project tool SKIPs with its install hint instead of being downloaded | `[]` |
 | `quality.languages` | extra extension -> language (`rust`, `python`, `typescript`, `go`, or `none` = plain: file size only) | `{}` |
 | `quality.size.globs` / `exclude` | measured files (git-tracked only); `[]` = every extension the registry knows. The installed kit (`<paths.tools_dir>/**`) is never project code: size, arch, coverage, mutation, the commit test step and `{files}` of the pre-commit steps always skip it | `[]` / `[]` |
 | `quality.size.function_warn` / `function_fail` | code lines per function; `0` disables | `0` / `80` |
