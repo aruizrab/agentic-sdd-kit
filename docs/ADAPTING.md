@@ -69,7 +69,8 @@ decorators (define them as no-op decorators in a tiny `trace` module).
 Stop check: `python3 -m compileall -q src` (not `python`: many hosts have no such alias).
 
 ### Go
-Fast: `gofmt -l`, `go vet`, `golangci-lint` (optional), `go test ./...`, trace. Full adds
+Fast: `gofmt -l` (as `out=$(gofmt -l .) && test -z "$out"`, so a gofmt error is not an empty
+list), `go vet`, `golangci-lint` (optional), `go test ./...`, trace. Full adds
 `-race -cover`, `govulncheck`, native fuzzing of changed targets, benchstat compare.
 Components: `^(?:internal|pkg|cmd)/([^/]+)/`, root `module`. Union manifests: `go.mod`;
 lockfile `go.sum`; `after_union: go mod tidy`. Stop check: `go build ./...`. Tags: `// Implements: ID` and

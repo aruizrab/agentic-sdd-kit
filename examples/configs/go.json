@@ -80,7 +80,7 @@
     "fast": [
       {
         "name": "fmt",
-        "command": "test -z \"$(gofmt -l .)\"",
+        "command": "out=$(gofmt -l .) && test -z \"$out\"",
         "timeout": 120
       },
       {
@@ -139,7 +139,7 @@
     "full": [
       {
         "name": "fmt",
-        "command": "test -z \"$(gofmt -l .)\"",
+        "command": "out=$(gofmt -l .) && test -z \"$out\"",
         "timeout": 120
       },
       {
@@ -429,7 +429,7 @@
       "pre_commit": [
         {
           "name": "gofmt",
-          "command": "test -z \"$(gofmt -l {files})\"",
+          "command": "out=$(gofmt -l -- {files}) && test -z \"$out\"",
           "glob": "*.go",
           "timeout": 60
         }

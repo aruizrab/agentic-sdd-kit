@@ -202,7 +202,8 @@ def tail(text: str, n: int = 40) -> str:
 
 
 def quote_files(files: List[str]) -> str:
-    return " ".join(shlex.quote(f) for f in files)
+    """Shell-quoted file arguments; a name starting with ``-`` gets ``./`` so no tool reads it as an option."""
+    return " ".join(shlex.quote("./" + f if f.startswith("-") else f) for f in files)
 
 
 def scratch_dir(root: Path, cfg: Dict[str, Any]) -> Path:

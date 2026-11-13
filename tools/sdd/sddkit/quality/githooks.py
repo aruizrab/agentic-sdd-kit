@@ -12,7 +12,7 @@ files a hook writes are its notes in the git dir: the timing note ``sdd-hook-tim
 * pre-commit: secret scan of the staged added lines (built-in rules, then gitleaks when
   enabled and installed); ``sdd check size --staged``; ``quality.hooks.pre_commit`` steps whose
   ``glob`` matches a staged file outside the installed kit and the step's ``exclude`` globs
-  (``{files}`` = those files, shell-quoted).
+  (``{files}`` = those files, shell-quoted; a name starting with ``-`` gets ``./``).
 * commit-msg: secret scan of the message; merge commits (``MERGE_HEAD``) stop there; the
   Conventional Commit header; required trailers; the test step for the components of staged
   source and test files (skipped for ``skip_tests_for_types``; while the branch holds a
@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .. import config as cfgmod
-from . import QualityError, Result, ci_mode, kit_globs, langs, run_command, size, tail, tool_env, vcs
+from . import QualityError, Result, ci_mode, kit_globs, langs, quote_files, run_command, size, tail, tool_env, vcs
 from . import commits, secrets
 from ..util import any_match
 
@@ -201,7 +201,7 @@ def _pre_commit(hook: _Hook) -> int:
         files = [f for f in staged if (not glob or any_match(f, [glob])) and not any_match(f, skip)]
         if not files and (glob or "{files}" in step["command"]):
             continue
-        cmd = step["command"].replace("{files}", " ".join(shlex.quote(f) for f in files))
+        cmd = step["command"].replace("{files}", quote_files(files))
         ok = hook.run_step(step["name"], cmd, float(step.get("timeout", 300))) and ok
     _write_note(hook)
     return 0 if ok else 1

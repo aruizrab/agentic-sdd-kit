@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -405,6 +406,11 @@ class PreCommitStepsTest(unittest.TestCase):
         proc = self.r.commit("docs: a", "docs/a b.py", "docs/c.md")
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("PY-STEP 'docs/a b.py'", proc.stderr)
+        # S8: a staged name that looks like an option reaches the tool as a path.
+        write(self.r.root, "-e.py", "x = 1\n")
+        proc = self.r.commit("docs: dash", "--", "-e.py")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("PY-STEP ./-e.py", proc.stderr)
         self.assertNotIn("TS-STEP", proc.stderr)
         # C2: the installed kit and a step's `exclude` globs never reach {files}.
         write(self.r.root, "tools/sdd/sddkit/extra.py", "x = 1\n")
@@ -428,6 +434,23 @@ class PreCommitStepsTest(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("slow-step: timed out", proc.stderr)
         self.r.git("rm", "-q", "--cached", "x.slow")
+
+    def test_go_example_step_with_option_like_name(self) -> None:
+        """S8: the Go example's gofmt step fails on gofmt errors and on unformatted files even
+        next to a staged `-e.go`."""
+        if not shutil.which("gofmt"):
+            self.skipTest("gofmt not installed")
+        go = json.loads((KIT / "examples" / "configs" / "go.json").read_text())
+        r = HookRepo(base_cfg(hooks={"pre_commit": go["quality"]["hooks"]["pre_commit"]}), prefix="gofmt-")
+        try:
+            r.install()
+            write(r.root, "bad.go", "package x\nfunc  F( ) {}\n")
+            write(r.root, "-e.go", "")
+            proc = r.commit("feat: go", "--", "bad.go", "-e.go")
+            self.assertNotEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("gofmt: failed", proc.stderr)
+        finally:
+            r.close()
 
     def test_budget_warns_once_and_passes(self) -> None:
         write(self.r.root, "src/x.budget", "x\n")
