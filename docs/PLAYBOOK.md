@@ -264,3 +264,35 @@ Never grandfather new code: no agent adds baseline entries, raises thresholds or
 globs to get a gate green (the code-writing roles cannot edit the config, the hooks or the
 checkers). A `cov:unreachable: <reason>` marker or a mutant justification in review.md §6 is
 reviewed like code.
+
+## 13. Changing the pipeline safely
+
+A paused or running Workflow run is resumed with the same args, and the runtime replays every
+completed agent call whose key, the exact `(prompt, opts)` pair, is unchanged. Edit a prompt
+or an opts field of an already completed call and the resumed run silently runs that call
+again (cost, and possibly a different answer than the one the later phases built on). So:
+
+1. **Every new behaviour is opt-in**, behind a new pipeline arg or a new `pipeline.*` config
+   key that defaults to off (example: `readViaGit`).
+   Without it, every prompt and opts object must stay byte-identical to the previous script.
+2. **Prove it with the cache-key equivalence test**, `node tests/pipeline_cachekeys.mjs
+   [--baseline <git-rev>]`. It loads the current script and the baseline script
+   (`git show <rev>:tools/sdd/pipeline/feature-pipeline.js`) under a stub runtime whose
+   `agent()` records every `(prompt, opts)` and answers from the call's label and per-label
+   count only (never from the prompt), so both scripts walk the same path. Over several arg
+   sets (tiers, hard, worktree root, main checkout with lanes, read via git, orchestrator
+   approval, formula routing, stages from the middle) and scenarios (normal, a capped pool
+   failing) it compares the call sequences and the run summaries byte for byte, and checks that
+   the scenarios really reach the interesting paths (retries, test arbiter, second security
+   review, verify, fixes, the cap fallback). Then it checks each opt-in arg changes exactly
+   what it should and nothing else.
+3. **Move the baseline when a change is installed**: after the change merges, pass the merge
+   commit as `--baseline` (or update the default in the test) so the next change is compared
+   against what the running copies use.
+4. A resumed run may add an opt-in only when the calls it changes lie after the phase the run
+   resumes in; the test shows which calls each arg touches. Install the new script in the live
+   location only between runs, or for new launches.
+
+The same pattern works for any orchestration script whose host caches calls by their inputs:
+record the calls of old and new under a deterministic stub, and diff them.
+
