@@ -91,6 +91,18 @@ class CommandCheckTest(unittest.TestCase):
         self.assertRegex(proc.stdout, r"deny +FAIL")
         self.assertRegex(proc.stdout, r"opt +FAIL")
 
+    def test_doctor_soft_for_skippable_and_nightly_gates(self) -> None:
+        """C10: a nightly gate or one with skip_if_missing whose tool is missing is a warning, not a doctor failure."""
+        self.cfg["gates"]["full"].append({"name": "mut", "command": "definitely-not-a-tool-xyz run", "skip_if_missing": "definitely-not-a-tool-xyz"})
+        self.cfg["gates"]["nightly"] = [{"name": "cov-full", "command": "definitely-not-a-tool-xyz report"}]
+        write_config(self.root, self.cfg)
+        out = run_cli(self.root, "doctor").stdout
+        self.assertIn("[warn] gate full/mut: definitely-not-a-tool-xyz NOT on PATH", out)
+        self.assertIn("[warn] gate nightly/cov-full: definitely-not-a-tool-xyz NOT on PATH", out)
+        self.cfg["gates"]["full"].append({"name": "hard", "command": "definitely-not-a-tool-xyz check"})
+        write_config(self.root, self.cfg)
+        self.assertRegex(run_cli(self.root, "doctor").stdout, r"\[(FAIL|fail) ?\] gate full/hard")
+
     def test_nightly_plan(self) -> None:
         proc = run_cli(self.root, "gates", "--plan", "nightly")
         self.assertEqual(proc.returncode, 0, proc.stdout)

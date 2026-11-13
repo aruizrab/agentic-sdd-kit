@@ -305,8 +305,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 check(False, f"gate {mode}/{g['name']}: still the template placeholder (set a real command; see docs/ADAPTING.md)", warn=bool(g.get("optional")))
                 continue
             prog = g["command"].split()[0] if g["command"].split() else ""
-            found = shutil.which(prog) is not None or prog in ("python3", "sdd", "sh")
-            check(found, f"gate {mode}/{g['name']}: {prog} {'on' if found else 'NOT on'} PATH", warn=bool(g.get("optional")))
+            path = quality.tool_env(cfg, root).get("PATH")
+            found = shutil.which(prog, path=path) is not None or prog in ("python3", "sdd", "sh") or "=" in prog
+            # A gate that SKIPs when its tool is missing (skip_if_missing), an optional one and the
+            # nightly plan (CI only) warn; only a gate that would FAIL is a doctor problem.
+            soft = bool(g.get("optional") or g.get("skip_if_missing")) or mode == "nightly"
+            check(found, f"gate {mode}/{g['name']}: {prog} {'on' if found else 'NOT on'} PATH", warn=soft)
     q = cfg["quality"]
     for tool in ("coverage", "mutation"):
         if not q[tool]["command"] and not q[tool]["report"]:
