@@ -1,0 +1,3 @@
+     KILLED CONDITIONALS_BOUNDARY at internal/domain/order.go:20:9
+      LIVED ARITHMETIC_BASE at internal/domain/order.go:14:12
+NOT COVERED INCREMENT_DECREMENT at internal/domain/order.go:30:3

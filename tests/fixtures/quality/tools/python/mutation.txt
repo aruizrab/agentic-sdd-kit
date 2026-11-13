@@ -1,0 +1,4 @@
+    app.domain.order.x_total__mutmut_1: killed
+    app.domain.order.x_total__mutmut_2: survived
+    app.domain.order.x_is_discounted__mutmut_4: survived
+    app.domain.order.x_is_discounted__mutmut_5: timeout

@@ -1,0 +1,17 @@
+{
+  "rust/docs": [["crates/domain/src/lib.rs", 12, "unresolved link to `Clock`"], ["crates/infra/src/db.rs", 40, "missing documentation for a function"]],
+  "rust/unused-deps": [["crates/domain/Cargo.toml", null, "serde"], ["crates/domain/Cargo.toml", null, "thiserror"], ["crates/infra/Cargo.toml", null, "regex"]],
+  "rust/flaky": [["infra", null, "db::tests::reconnects"]],
+  "rust/mutation": [["crates/domain/src/price.rs", 14, "replace Price::total -> u64 with 0"], ["crates/domain/src/price.rs", 22, "replace > with >= in Price::is_discounted"]],
+  "python/docs": [["src/app/domain/order.py", 1, "D100 Missing docstring in public module"], ["src/app/infra/db.py", 12, "D103 Missing docstring in public function"]],
+  "python/unused-deps": [["pyproject.toml", null, "DEP002 'requests' defined as a dependency but not used in the codebase"], ["src/app/infra/db.py", 3, "DEP001 'psycopg' imported but missing from the dependency definitions"]],
+  "python/flaky": [["tests/test_db.py", null, "test_reconnect"]],
+  "python/mutation": [["app.domain.order", null, "x_total__mutmut_2"], ["app.domain.order", null, "x_is_discounted__mutmut_4"]],
+  "typescript/docs": [["src/domain/order.ts", 3, "Missing JSDoc comment. [Warning/jsdoc/require-jsdoc]"], ["src/infra/db.ts", 22, "Missing JSDoc @returns declaration. [Warning/jsdoc/require-returns]"]],
+  "typescript/unused-deps": [["Unused dependencies", null, "left-pad"], ["Unused dependencies", null, "lodash"], ["Unused devDependencies", null, "jest"]],
+  "typescript/flaky": [["src/infra/db.test.ts", null, "db > reconnects"]],
+  "go/docs": [["internal/domain/order.go", 12, "exported function Total should have comment or be unexported"], ["internal/infra/db.go", 8, "exported type Pool should have comment or be unexported"]],
+  "go/unused-deps": [["go.mod", null, "example.com/lib/unused v0.3.1"]],
+  "go/flaky": [["example.com/app/internal/infra", null, "TestReconnect"]],
+  "go/mutation": [["internal/domain/order.go", 14, "ARITHMETIC_BASE"]]
+}

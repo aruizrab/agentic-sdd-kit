@@ -44,6 +44,11 @@ class InstallTest(unittest.TestCase):
                     "tools/sdd/sdd.py", "tools/sdd/pipeline/feature-pipeline.js", "specs/templates/spec.md", "specs/features/README.md", "docs/DEVELOPMENT.md", "docs/ROADMAP.md"]:
             self.assertTrue((self.root / rel).is_file(), rel)
         self.assertTrue(os.access(self.root / ".claude/hooks/protect-paths.sh", os.X_OK))
+        for hook in ("pre-commit", "commit-msg", "pre-push"):
+            self.assertTrue(os.access(self.root / "tools/sdd/githooks" / hook, os.X_OK), hook)
+        # install.sh never sets core.hooksPath; it prints the `sdd hooks install` hint.
+        self.assertEqual(sh("git", "config", "--local", "--get", "core.hooksPath", cwd=self.root).stdout, "")
+        self.assertIn("hooks install", proc.stdout)
         self.assertIn(".wt/\n", (self.root / ".gitignore").read_text())
         self.assertFalse(list(self.root.rglob("__pycache__")))
 

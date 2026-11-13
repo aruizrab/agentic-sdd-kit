@@ -1,0 +1,2 @@
+crates/domain/src/price.rs:14:9: replace Price::total -> u64 with 0
+crates/domain/src/price.rs:22:20: replace > with >= in Price::is_discounted

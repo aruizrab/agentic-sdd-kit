@@ -1,0 +1,7 @@
+    Starting 42 tests across 3 binaries
+        PASS [   0.012s] domain clock::tests::monotonic
+   TRY 1 FAIL [   0.103s] infra db::tests::reconnects
+   TRY 2 PASS [   0.099s] infra db::tests::reconnects
+         FLAKY 2/3 [   0.099s] infra db::tests::reconnects
+------------
+     Summary [   1.204s] 42 tests run: 42 passed (1 flaky), 0 skipped

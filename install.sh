@@ -140,7 +140,12 @@ Next steps
   2. Fill the placeholders in CLAUDE.md, docs/CONSTITUTION.md (articles 7-9), docs/DEVELOPMENT.md
      (gate table, oracles) and docs/ROADMAP.md (features own their numbers).
   3. Add the project's build/test commands to .claude/settings.json "permissions.allow".
-  4. Commit. Then start a feature: python3 -I tools/sdd/sdd.py new-feature 001 <slug>, or in
+  4. Install the git hooks (pre-commit, commit-msg, pre-push) in this repository:
+     python3 -I tools/sdd/sdd.py hooks install
+     (sets core.hooksPath; refuses over existing hooks such as git-lfs: see docs/ADAPTING.md).
+     Adopting the gates on an existing codebase: python3 -I tools/sdd/sdd.py baseline --init
+     (docs/PLAYBOOK.md, "Adopting the gates on an existing codebase").
+  5. Commit. Then start a feature: python3 -I tools/sdd/sdd.py new-feature 001 <slug>, or in
      Claude Code: /feature F001 <slug>   (the pipeline runs in the worktree .wt/F001).
-  5. Read docs/PLAYBOOK.md and docs/LESSONS.md in the kit before the first autonomous run.
+  6. Read docs/PLAYBOOK.md and docs/LESSONS.md in the kit before the first autonomous run.
 EOF

@@ -109,6 +109,36 @@
         "name": "trace",
         "command": "python3 -I tools/sdd/sdd.py trace --check",
         "timeout": 60
+      },
+      {
+        "name": "size",
+        "command": "python3 -I tools/sdd/sdd.py check size",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "arch",
+        "command": "python3 -I tools/sdd/sdd.py check arch",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "baseline",
+        "command": "python3 -I tools/sdd/sdd.py check baseline",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "commits",
+        "command": "python3 -I tools/sdd/sdd.py check commits",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "secrets",
+        "command": "python3 -I tools/sdd/sdd.py check secrets",
+        "timeout": 600,
+        "skip_exit": 3
       }
     ],
     "full": [
@@ -154,8 +184,259 @@
         "command": "npm run bench:compare --if-present",
         "timeout": 1800,
         "optional": true
+      },
+      {
+        "name": "size",
+        "command": "python3 -I tools/sdd/sdd.py check size",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "arch",
+        "command": "python3 -I tools/sdd/sdd.py check arch",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "baseline",
+        "command": "python3 -I tools/sdd/sdd.py check baseline",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "commits",
+        "command": "python3 -I tools/sdd/sdd.py check commits",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "secrets",
+        "command": "python3 -I tools/sdd/sdd.py check secrets",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "coverage",
+        "command": "python3 -I tools/sdd/sdd.py check coverage",
+        "timeout": 3600,
+        "skip_exit": 3
+      },
+      {
+        "name": "mutation",
+        "command": "python3 -I tools/sdd/sdd.py check mutation",
+        "timeout": 3600,
+        "skip_exit": 3
+      },
+      {
+        "name": "docs",
+        "command": "python3 -I tools/sdd/sdd.py check docs",
+        "timeout": 1800,
+        "skip_exit": 3
+      },
+      {
+        "name": "unused-deps",
+        "command": "python3 -I tools/sdd/sdd.py check unused-deps",
+        "timeout": 1800,
+        "skip_exit": 3
+      },
+      {
+        "name": "flaky",
+        "command": "python3 -I tools/sdd/sdd.py check flaky",
+        "timeout": 1800,
+        "skip_exit": 3
+      }
+    ],
+    "nightly": [
+      {
+        "name": "coverage-full",
+        "command": "npx vitest run --coverage.enabled --coverage.all --coverage.thresholds.lines=90",
+        "timeout": 7200
+      },
+      {
+        "name": "mutation-full",
+        "command": "npx stryker run",
+        "timeout": 21600
       }
     ]
+  },
+  "quality": {
+    "baseline_file": "sdd.baseline.json",
+    "base_ref": "",
+    "generated": [
+      "src/generated/**"
+    ],
+    "test_globs": [],
+    "languages": {},
+    "size": {
+      "globs": [],
+      "exclude": [
+        "**/node_modules/**",
+        "**/dist/**"
+      ],
+      "function_warn": 0,
+      "function_fail": 80,
+      "file_warn": 600,
+      "file_fail": 1000
+    },
+    "arch": {
+      "modules": [
+        {
+          "name": "domain",
+          "paths": [
+            "src/domain/**"
+          ],
+          "imports": [
+            "^@app/domain(/|$)"
+          ],
+          "may_depend_on": [],
+          "forbid": [
+            {
+              "pattern": "\\bfetch\\(",
+              "reason": "the domain does no I/O"
+            },
+            {
+              "pattern": "\\bDate\\.now\\(",
+              "reason": "domain logic takes time as input"
+            }
+          ]
+        },
+        {
+          "name": "infra",
+          "paths": [
+            "src/infra/**"
+          ],
+          "imports": [
+            "^@app/infra(/|$)"
+          ],
+          "may_depend_on": [
+            "domain"
+          ],
+          "forbid": []
+        }
+      ],
+      "exclude": [
+        "tests/**",
+        "**/tests/**",
+        "test/**",
+        "**/test/**"
+      ]
+    },
+    "coverage": {
+      "command": "npx vitest run --coverage.enabled --coverage.reporter=lcov --coverage.all",
+      "report": "coverage/lcov.info",
+      "format": "lcov",
+      "globs": [],
+      "unmeasured_ok": [],
+      "ok_exits": [
+        0
+      ],
+      "requires": [
+        "npx"
+      ],
+      "install": "npm install --save-dev vitest @vitest/coverage-v8",
+      "timeout": 3600
+    },
+    "mutation": {
+      "command": "npx stryker run --incremental --reporters json",
+      "report": "reports/mutation/mutation.json",
+      "format": "mutation-testing-report",
+      "survivor_regex": "",
+      "ok_exits": [
+        0
+      ],
+      "globs": [],
+      "requires": [
+        "npx"
+      ],
+      "install": "npm install --save-dev @stryker-mutator/core @stryker-mutator/vitest-runner",
+      "timeout": 3600
+    },
+    "checks": [
+      {
+        "name": "docs",
+        "command": "npx eslint --format unix src",
+        "violation_regex": "(?m)^(?P<file>[^:\\n]+):(?P<line>\\d+):\\d+: (?P<message>.+\\[(?:Warning|Error)/jsdoc/[\\w-]+\\])$",
+        "baseline": true,
+        "requires": [
+          "npx"
+        ],
+        "install": "npm install --save-dev eslint eslint-plugin-jsdoc",
+        "timeout": 900,
+        "ok_exits": [
+          0,
+          1
+        ]
+      },
+      {
+        "name": "unused-deps",
+        "command": "npx depcheck",
+        "violation_regex": "(?m)^(?P<file>Unused (?:dev)?[dD]ependencies)$|^\\* (?P<message>\\S+)$",
+        "baseline": true,
+        "requires": [
+          "npx"
+        ],
+        "install": "npm install --save-dev depcheck",
+        "timeout": 600,
+        "ok_exits": [
+          0,
+          255
+        ]
+      },
+      {
+        "name": "flaky",
+        "command": "npx vitest run --retry=2 --reporter=verbose",
+        "violation_regex": "(?m)^\\s*✓ (?P<file>\\S+) > (?P<message>.+?) (?:\\d+ms )?\\(retry x\\d+\\)",
+        "baseline": false,
+        "requires": [
+          "npx"
+        ],
+        "install": "npm install --save-dev vitest",
+        "timeout": 3600,
+        "ok_exits": [
+          0,
+          1
+        ]
+      }
+    ],
+    "secrets": {
+      "gitleaks": true,
+      "patterns": [],
+      "allow_globs": []
+    },
+    "hooks": {
+      "types": [
+        "build",
+        "chore",
+        "ci",
+        "docs",
+        "feat",
+        "fix",
+        "perf",
+        "refactor",
+        "revert",
+        "style",
+        "test"
+      ],
+      "scope_regex": "",
+      "required_trailers": [
+        "^Co-Authored-By: .+ <.+>$"
+      ],
+      "required_trailers_env": "CLAUDECODE",
+      "pre_commit": [
+        {
+          "name": "prettier",
+          "command": "npx prettier --check {files}",
+          "glob": "*.ts",
+          "timeout": 60
+        }
+      ],
+      "commit_tests": true,
+      "skip_tests_for_types": [
+        "test"
+      ],
+      "test_timeout": 300,
+      "budget_seconds": 60
+    }
   },
   "tests": {
     "run": "npm test --silent -- --run",
@@ -221,7 +502,15 @@
       "**/*.spec.ts",
       "**/__tests__/**",
       "test/**",
-      "tests/**"
+      "tests/**",
+      "tools/sdd/githooks/**",
+      "tools/sdd/sddkit/**",
+      "tools/sdd/sdd.py"
+    ],
+    "test-author": [
+      "tools/sdd/githooks/**",
+      "tools/sdd/sddkit/**",
+      "tools/sdd/sdd.py"
     ]
   },
   "formatters": [

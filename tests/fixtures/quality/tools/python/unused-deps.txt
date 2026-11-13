@@ -1,0 +1,7 @@
+Scanning 14 files...
+
+pyproject.toml: DEP002 'requests' defined as a dependency but not used in the codebase
+src/app/infra/db.py:3:1: DEP001 'psycopg' imported but missing from the dependency definitions
+Found 2 dependency issues.
+
+For more information, see the documentation: https://deptry.com/

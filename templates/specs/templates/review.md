@@ -60,7 +60,17 @@ Non-blocking findings (recorded, not gating):
 
 ## 6. Coverage gaps and mutation survivors (justified)
 
-<mutant / location — why acceptable>
+`sdd check mutation` accepts a surviving mutant only with a line in exactly this form (same file
+and mutation text as the tool prints, an em dash, a non-empty reason; the line is optional):
+
+<!--
+- mutant: <file>[:<line>]: <mutation> — <why no test can kill it (equivalent mutant, ...)>
+-->
+
+Coverage gaps are not justified here: they are marked in the code with
+`cov:unreachable: <reason>` (comment syntax of the language) and listed by `sdd check coverage`.
+Markers on changed lines (count and list from the coverage gate): <n>; reviewed by
+test-adequacy-reviewer: <yes/no>.
 
 ## 7. Independent evidence
 

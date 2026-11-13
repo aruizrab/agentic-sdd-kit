@@ -1,0 +1,8 @@
+diff current/go.mod tidy/go.mod
+--- current/go.mod
++++ tidy/go.mod
+@@ -5,6 +5,5 @@
+ require (
+ 	example.com/lib/clock v1.2.0
+-	example.com/lib/unused v0.3.1
+ )

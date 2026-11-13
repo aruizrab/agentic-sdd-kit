@@ -1,0 +1,18 @@
+ Documenting domain v0.1.0 (/work/app/crates/domain)
+warning: unresolved link to `Clock`
+ --> crates/domain/src/lib.rs:12:18
+  |
+12 | /// Uses [`Clock`] to read the time.
+  |           ^^^^^ no item named `Clock` in scope
+  |
+  = help: to escape `[` and `]` characters, add '\' before them like `\[` or `\]`
+  = note: `#[warn(rustdoc::broken_intra_doc_links)]` on by default
+
+warning: missing documentation for a function
+ --> crates/infra/src/db.rs:40:1
+  |
+40 | pub fn connect() -> Pool {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `domain` (lib doc) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.21s

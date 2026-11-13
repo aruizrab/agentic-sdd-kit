@@ -104,6 +104,36 @@
         "name": "trace",
         "command": "python3 -I tools/sdd/sdd.py trace --check",
         "timeout": 60
+      },
+      {
+        "name": "size",
+        "command": "python3 -I tools/sdd/sdd.py check size",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "arch",
+        "command": "python3 -I tools/sdd/sdd.py check arch",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "baseline",
+        "command": "python3 -I tools/sdd/sdd.py check baseline",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "commits",
+        "command": "python3 -I tools/sdd/sdd.py check commits",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "secrets",
+        "command": "python3 -I tools/sdd/sdd.py check secrets",
+        "timeout": 600,
+        "skip_exit": 3
       }
     ],
     "full": [
@@ -152,8 +182,258 @@
         "command": "scripts/bench-compare.sh benches/baseline.txt 5",
         "timeout": 1800,
         "optional": true
+      },
+      {
+        "name": "size",
+        "command": "python3 -I tools/sdd/sdd.py check size",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "arch",
+        "command": "python3 -I tools/sdd/sdd.py check arch",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "baseline",
+        "command": "python3 -I tools/sdd/sdd.py check baseline",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "commits",
+        "command": "python3 -I tools/sdd/sdd.py check commits",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "secrets",
+        "command": "python3 -I tools/sdd/sdd.py check secrets",
+        "timeout": 600,
+        "skip_exit": 3
+      },
+      {
+        "name": "coverage",
+        "command": "python3 -I tools/sdd/sdd.py check coverage",
+        "timeout": 3600,
+        "skip_exit": 3
+      },
+      {
+        "name": "mutation",
+        "command": "python3 -I tools/sdd/sdd.py check mutation",
+        "timeout": 3600,
+        "skip_exit": 3
+      },
+      {
+        "name": "docs",
+        "command": "python3 -I tools/sdd/sdd.py check docs",
+        "timeout": 1800,
+        "skip_exit": 3
+      },
+      {
+        "name": "unused-deps",
+        "command": "python3 -I tools/sdd/sdd.py check unused-deps",
+        "timeout": 1800,
+        "skip_exit": 3
+      },
+      {
+        "name": "flaky",
+        "command": "python3 -I tools/sdd/sdd.py check flaky",
+        "timeout": 1800,
+        "skip_exit": 3
+      }
+    ],
+    "nightly": [
+      {
+        "name": "coverage-full",
+        "command": "go test -cover ./...",
+        "timeout": 7200
+      },
+      {
+        "name": "mutation-full",
+        "command": "gremlins unleash ./...",
+        "timeout": 21600,
+        "skip_if_missing": "gremlins"
       }
     ]
+  },
+  "quality": {
+    "baseline_file": "sdd.baseline.json",
+    "base_ref": "",
+    "generated": [
+      "**/*.pb.go",
+      "**/zz_generated*.go"
+    ],
+    "test_globs": [],
+    "languages": {},
+    "size": {
+      "globs": [],
+      "exclude": [],
+      "function_warn": 0,
+      "function_fail": 80,
+      "file_warn": 600,
+      "file_fail": 1000
+    },
+    "arch": {
+      "modules": [
+        {
+          "name": "domain",
+          "paths": [
+            "internal/domain/**"
+          ],
+          "imports": [
+            "^example\\.com/app/internal/domain\\b"
+          ],
+          "may_depend_on": [],
+          "forbid": [
+            {
+              "pattern": "\\btime\\.Now\\(",
+              "reason": "domain logic takes time as input"
+            },
+            {
+              "pattern": "\"net/http\"",
+              "reason": "the domain does no I/O"
+            }
+          ]
+        },
+        {
+          "name": "infra",
+          "paths": [
+            "internal/infra/**"
+          ],
+          "imports": [
+            "^example\\.com/app/internal/infra\\b"
+          ],
+          "may_depend_on": [
+            "domain"
+          ],
+          "forbid": []
+        }
+      ],
+      "exclude": [
+        "tests/**",
+        "**/tests/**",
+        "test/**",
+        "**/test/**"
+      ]
+    },
+    "coverage": {
+      "command": "go test -coverprofile=cover.out ./... && gocover-cobertura < cover.out > coverage.xml",
+      "report": "coverage.xml",
+      "format": "cobertura",
+      "globs": [],
+      "unmeasured_ok": [],
+      "ok_exits": [
+        0
+      ],
+      "requires": [
+        "go",
+        "gocover-cobertura"
+      ],
+      "install": "go install github.com/boumenot/gocover-cobertura@latest",
+      "timeout": 3600
+    },
+    "mutation": {
+      "command": "gremlins unleash ./...",
+      "report": "",
+      "format": "regex",
+      "survivor_regex": "(?m)^\\s*LIVED\\s+(?P<mutation>\\S+)\\s+at\\s+(?P<file>[^:\\s]+):(?P<line>\\d+):\\d+",
+      "ok_exits": [
+        0
+      ],
+      "globs": [],
+      "requires": [
+        "gremlins"
+      ],
+      "install": "go install github.com/go-gremlins/gremlins/cmd/gremlins@latest",
+      "timeout": 3600
+    },
+    "checks": [
+      {
+        "name": "docs",
+        "command": "revive -formatter default ./...",
+        "violation_regex": "(?m)^(?P<file>[^:\\n]+\\.go):(?P<line>\\d+):\\d+: (?P<message>exported .+)$",
+        "baseline": true,
+        "requires": [
+          "revive"
+        ],
+        "install": "go install github.com/mgechev/revive@latest",
+        "timeout": 600,
+        "ok_exits": [
+          0
+        ]
+      },
+      {
+        "name": "unused-deps",
+        "command": "go mod tidy -diff",
+        "violation_regex": "(?m)^--- (?:current/)?(?P<file>go\\.mod)$|^-\\t(?P<message>\\S+ v\\S+)",
+        "baseline": true,
+        "requires": [
+          "go"
+        ],
+        "install": "Go 1.23 or later",
+        "timeout": 600,
+        "ok_exits": [
+          0,
+          1
+        ]
+      },
+      {
+        "name": "flaky",
+        "command": "gotestsum --rerun-fails=2 --packages=./... --format testname",
+        "violation_regex": "(?m)^PASS (?P<file>\\S+)\\.(?P<message>Test\\w*) \\(re-run \\d+\\)",
+        "baseline": false,
+        "requires": [
+          "gotestsum"
+        ],
+        "install": "go install gotest.tools/gotestsum@latest",
+        "timeout": 3600,
+        "ok_exits": [
+          0,
+          1
+        ]
+      }
+    ],
+    "secrets": {
+      "gitleaks": true,
+      "patterns": [],
+      "allow_globs": []
+    },
+    "hooks": {
+      "types": [
+        "build",
+        "chore",
+        "ci",
+        "docs",
+        "feat",
+        "fix",
+        "perf",
+        "refactor",
+        "revert",
+        "style",
+        "test"
+      ],
+      "scope_regex": "",
+      "required_trailers": [
+        "^Co-Authored-By: .+ <.+>$"
+      ],
+      "required_trailers_env": "CLAUDECODE",
+      "pre_commit": [
+        {
+          "name": "gofmt",
+          "command": "test -z \"$(gofmt -l {files})\"",
+          "glob": "*.go",
+          "timeout": 60
+        }
+      ],
+      "commit_tests": true,
+      "skip_tests_for_types": [
+        "test"
+      ],
+      "test_timeout": 300,
+      "budget_seconds": 60
+    }
   },
   "tests": {
     "run": "go test ./...",
@@ -213,7 +493,15 @@
   "role_denied_paths": {
     "implementer": [
       "**/*_test.go",
-      "**/testdata/**"
+      "**/testdata/**",
+      "tools/sdd/githooks/**",
+      "tools/sdd/sddkit/**",
+      "tools/sdd/sdd.py"
+    ],
+    "test-author": [
+      "tools/sdd/githooks/**",
+      "tools/sdd/sddkit/**",
+      "tools/sdd/sdd.py"
     ]
   },
   "formatters": [
