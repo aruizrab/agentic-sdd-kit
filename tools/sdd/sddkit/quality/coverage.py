@@ -6,7 +6,8 @@ in files of ``coverage.globs`` (``[]`` = the effective size globs), minus test c
 test directories, registry test patterns, ``quality.test_globs``, test regions such as Rust
 ``#[cfg(test)]`` items), ``quality.generated`` and the installed kit (``<paths.tools_dir>/**``). A considered line with 0 hits fails unless a
 ``cov:unreachable: <reason>`` comment marks it (at the end of the line, or on a comment-only
-line directly above). A changed considered file absent from the report fails as
+line directly above; closing-brace-only lines right after a marked line count as marked). A
+changed considered file absent from the report fails as
 ``coverage-unmeasured`` unless it cannot hold executable code.
 """
 
@@ -23,6 +24,7 @@ from ..util import any_match
 from .size import effective_globs
 
 MARKER = re.compile(r"cov:unreachable\b:?(.*)")
+CLOSING = re.compile(r"^\s*[})\]]+[;,]?\s*$")
 
 
 def considered_files(root: Path, cfg: Dict[str, Any], changed: Dict[str, Set[int]], tool: str) -> Dict[str, Tuple[Set[int], langs.Source]]:
@@ -101,6 +103,13 @@ def markers(src: langs.Source) -> Dict[int, str]:
             out[idx + 1] = reason
         elif idx + 1 < len(src.lines):
             out[idx + 2] = reason
+    # Brace languages' coverage tools also instrument the closing brace of an unreachable block:
+    # a closing-only line (`}`, `})`, `};`) right after a marked line inherits its marker.
+    for ln in sorted(out):
+        nxt = ln  # 0-based index of the following line
+        while nxt < len(src.struct) and nxt + 1 not in out and CLOSING.match(src.struct[nxt]):
+            out[nxt + 1] = out[ln]
+            nxt += 1
     return out
 
 

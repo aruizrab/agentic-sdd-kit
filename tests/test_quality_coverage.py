@@ -124,6 +124,20 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(unmeasured, ["src/app/new.py", "src/lib/core.rs", "src/web/new.ts"])
         self.assertEqual(code, 1)
 
+    def test_marker_covers_the_closing_brace(self) -> None:
+        """C7: Go/Rust coverage tools instrument the `}` of an unreachable block; the marker covers it."""
+        go = ("package lib\n\nfunc Never() int {\n\treturn 42 // cov:unreachable: kept for API symmetry\n}\n\n"
+              "func Abs(a int) int {\n\tif a < 0 {\n\t\treturn 0 // cov:unreachable: callers pass a >= 0\n\t}\n\treturn a\n}\n")
+        write(self.root, "src/lib/never.go", go)
+        hits = {3: 0, 4: 0, 5: 0, 7: 1, 8: 1, 9: 0, 10: 0, 11: 1, 12: 1}
+        write(self.root, "cov/lcov.fixture", "SF:src/lib/never.go\n" + "".join(f"DA:{k},{v}\n" for k, v in hits.items()) + "end_of_record\n"
+              + LCOV.format(root=self.root))
+        self.repo.git("add", "-A")
+        code, out = self.check()
+        self.assertEqual([v for v in out["violations"] if v["file"] == "src/lib/never.go"],
+                         [{"kind": "coverage", "file": "src/lib/never.go", "line": 3, "key": {"file": "src/lib/never.go", "message": "uncovered"},
+                           "value": 1, "state": "new", "message": "changed line not covered"}])
+
     def test_kit_upgrade_is_not_project_code(self) -> None:
         """C2: a changed file of the installed kit (<paths.tools_dir>/**) is neither measured nor unmeasured."""
         write(self.root, "cov/lcov.fixture", LCOV.format(root=self.root))

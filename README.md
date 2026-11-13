@@ -111,7 +111,7 @@ ships language-agnostic quality checks that every plan can run (`sdd check <name
 |---|---|
 | `size` | code lines per function (fail above 80) and per file (warn above 600, fail above 1000); blank, comment and doc lines do not count; functions found by documented heuristics for Rust, Python, TypeScript/JavaScript and Go (`quality.languages` maps more extensions) |
 | `arch` | declarative layers: module globs -> allowed dependencies, forbidden APIs per layer as regexes; dependencies extracted from imports and qualified usages per language |
-| `coverage` | 100 % of the hand-written lines changed since the merge-base with the main branch, from any lcov or Cobertura producer; generated code excluded; `cov:unreachable: <reason>` excludes a line and is listed; a marker without a reason fails; a changed file no test loads fails |
+| `coverage` | 100 % of the hand-written lines changed since the merge-base with the main branch, from any lcov or Cobertura producer; generated code excluded; `cov:unreachable: <reason>` excludes a line (and closing-brace-only lines right after it) and is listed; a marker without a reason fails; a changed file no test loads fails |
 | `mutation` | zero surviving mutants in changed code from any diff-mutation tool (cargo-mutants, mutmut, Stryker, ...) unless review.md §6 justifies one |
 | command checks | `quality.checks`: docs/warnings, unused dependencies, flaky tests, ... as commands whose output a regex turns into violations |
 | `commits`, `secrets` | the git-hook rules re-checked over the whole branch (CI backstop) |
