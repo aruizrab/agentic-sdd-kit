@@ -28,10 +28,32 @@ one wins, then update the file.
 | Decision | Who decides | Note |
 |---|---|---|
 | Spec approval | orchestrator as product owner | escalate per docs/DEVELOPMENT.md §11; the approval commit quotes the critic's final verdict and its open issues |
-| Security sign-off | **owner** | the pipeline ends with `securitySignoff: "pending-owner"`; the orchestrator writes a one-page summary (what is security-relevant, the reviewers' findings and outcomes, open risks) and waits. The orchestrator never signs off |
+| Security sign-off | orchestrator as product owner (`pipeline.security_signoff: "po"`, the default) | the pipeline records `securitySignoff: "pending-po"` after two independent security reviews; the orchestrator demands cheap hardening fixes, has a fresh verifier re-check every fix, and signs in review.md §4 with the reasoning (what is security-relevant, each finding and how it was closed, accepted limitations and why they fit the threat model). Escalate only per the list below. With `pipeline.security_signoff: "owner"` the **owner** signs instead (`securitySignoff: "pending-owner"`): the orchestrator writes a one-page summary (what is security-relevant, the reviewers' findings and outcomes, open risks) and waits, and never signs off |
 | Protected paths (`.claude/**`, the constitution, `sdd.config.json`, CI configuration, the installed kit) | **owner** | the orchestrator or an agent drafts a patch file (e.g. `tools/patches/<name>.patch`) and asks; the owner applies it and the commit body carries `Owner-approved: <date> <scope>` |
-| Merge to `main` | orchestrator | only when the definition of done holds (CLAUDE.md), `specs/MERGE-OBLIGATIONS.md` has no open row due before this merge, the owner signed security if needed, and `main` stays green (§5) |
+| Merge to `main` | orchestrator | only when the definition of done holds (CLAUDE.md), `specs/MERGE-OBLIGATIONS.md` has no open row due before this merge, the security sign-off is recorded if needed, and `main` stays green (§5) |
 | Push | orchestrator | push `main` after every merge; push feature branches after approval or after any commit worth keeping; never force-push |
+
+**What goes to the owner.** The owner says what to build, which quality checks must pass and
+the direction; the orchestrator decides everything else as product owner and reports
+afterwards. Bring something to the owner only when it needs a human eye:
+1. **Protected configuration**: changes to `.claude/**`, the constitution, `sdd.config.json`,
+   CI configuration or the installed kit. The orchestrator drafts the patch; the owner applies
+   it. An agent must not be able to change its own gates.
+2. **Risk acceptance beyond the threat model**: accepting, unfixed, a confirmed vulnerability
+   whose harm reaches outside what the project's threat model covers (`<e.g. secrets leaving
+   the machine or entering published data, a network-exposed service unauthenticated by
+   default>`).
+3. **Outward-facing or irreversible actions outside the routine**: making the repository or
+   its data public, new external services or accounts, spending money, licence changes,
+   deleting remote branches or history.
+4. **The owner's own systems outside the project**: personal accounts, bots, tokens, machine
+   configuration that needs elevated rights.
+5. **Stuck**: the same blocker after the orchestrator has re-planned and escalated the model
+   and effort; report it with the options and a recommendation.
+
+Everything else (spec decisions, merge order, security sign-off within the threat model when
+`pipeline.security_signoff` is `po`, re-measurements, routine progress reports) the
+orchestrator does itself.
 
 ## 3. Launching pipelines
 
@@ -71,7 +93,7 @@ one wins, then update the file.
   touches a claimed component waits until that branch is merged.
 - **Merge obligations**: every cross-feature obligation (supersession marks, edits to other
   specs or documents, tests of other features, required merge order, open product-owner
-  items, pending owner sign-offs) is a row in `specs/MERGE-OBLIGATIONS.md`. Check the register
+  items, pending security sign-offs) is a row in `specs/MERGE-OBLIGATIONS.md`. Check the register
   before every merge and close each row with the merge commit's sha.
 - **Requirement text is never written at merge time**: successor wording goes through a spec
   change with a critic round before either feature merges.

@@ -263,15 +263,27 @@ diff says so: the script lists the diff and checks it against `pipeline.security
 (`pipeline.security_sensitive_hint` tells the planner and the reviewers what counts). The
 reasons are in `summary.securityReasons`. Then:
 1. A second, independent security review runs; `needsSecuritySignoff` is set and the run ends
-   with `securitySignoff: "pending-owner"`. **The owner signs off, never the orchestrator**:
-   the orchestrator prepares a one-page summary (what is security-relevant, the reviewers'
-   findings and their outcomes, the open risks) and waits.
+   with a pending sign-off. Who signs is `pipeline.security_signoff` (configuration only, set
+   by the owner in the protected `sdd.config.json`, never by a pipeline arg):
+   - `po` (default, `securitySignoff: "pending-po"`): **the orchestrator signs as product
+     owner**, only after both independent security reviews, the fix-checks and the re-checks
+     below, and records the reasoning in review.md §4 (what is security-relevant, every finding
+     and how it was closed, accepted limitations and why they fit the threat model). It
+     escalates to the human owner only for what needs a human eye (templates/docs/ORCHESTRATOR.md
+     §2): protected configuration, accepting unfixed a confirmed vulnerability whose harm reaches
+     beyond the project's threat model, outward-facing or irreversible actions.
+   - `owner` (`securitySignoff: "pending-owner"`): **the human owner signs, never the
+     orchestrator**: the orchestrator prepares a one-page summary (what is security-relevant,
+     the reviewers' findings and their outcomes, the open risks) and waits.
 2. Confirmed findings are fixed; each fix gets **two** independent fix-checks.
 3. Before merging, you read review.md §4, demand any cheap hardening fix that is still
    missing (bounds, caps, redaction), have a fresh `verifier` re-check each fix, and record
-   the owner's sign-off (name or role, date) in review.md. Incomplete fixes were found twice
-   in practice; re-verify. A sign-off the orchestrator gave on its own is not one (lesson 46).
-4. Escalate to a human on any confirmed crypto/integrity finding or new key-handling design.
+   the sign-off (name or role, date) in review.md. Incomplete fixes were found twice in
+   practice; re-verify. What makes a sign-off valid is the process, not the signer: two
+   independent reviews and re-verified fixes. An orchestrator that skips them, or signs under
+   `owner`, has not signed off (lessons 46 and 52).
+4. Under either setting, a confirmed crypto/integrity finding that would be accepted unfixed,
+   or a new key-handling design beyond the threat model, goes to a human.
 
 ## 9. Performance regressions
 
@@ -641,7 +653,7 @@ is trusted where a fact can be checked.
 | **Two votes**: a blocking finding is dismissed only by at least two valid refuting votes and no confirming one; a dead or unparsable skeptic is not a refutation (`pipeline.skeptics` >= 2) | on | `legacy` |
 | **Persisted findings** are returned verbatim and parsed by the script; malformed, duplicate ids or bad severities end `blocked-evidence` | on | `legacy` |
 | **Finalize evidence**: `Status: Implemented` only when this run's last full gates passed, all four reviewers (and the second security review when sensitive) returned, and every blocking finding was refuted by two votes or fixed and fix-checked. A part this run did not do comes only from `evidence: {gateLog: "<logs_dir>/gates/<log>"}`: the script checks the log's `GATES_HEAD` against HEAD (later commits may change only review.md), `GATES_EXIT=0`, a clean tree, and the persisted record's reviewers and outcomes. Otherwise `blocked-evidence` | on | `legacy` |
-| **Security rule**: arg, plan line, reviewer, or a diff touching `pipeline.security_paths`; then two security reviews and `securitySignoff: "pending-owner"` (§8). The diff agent failing counts as sensitive (fail closed) | on | none |
+| **Security rule**: arg, plan line, reviewer, or a diff touching `pipeline.security_paths`; then two security reviews and `securitySignoff: "pending-po"` (or `"pending-owner"` with `pipeline.security_signoff: "owner"`, §8). The diff agent failing counts as sensitive (fail closed) | on | none |
 | **testsSha**: a run that starts after Tests must pass the red tests commit(s); each must be a commit, an ancestor of HEAD, have a `test(...)` subject and change at least one test path (`test_globs` of `sdd config --pipeline`: the generic test directories, the language patterns and `quality.test_globs`). Compile skeletons in the same commit are allowed | on | `legacy` |
 | **Red check passes**: a new test that already passes before implementation blocks the Tests stage unless every requirement id it verifies is in `allowPassing: {"<id>": "<reason>"}` (recorded in `summary.allowedPassing`) | on | `allowPassing` |
 | **Heavy-job lock rule**: every prompt of a role that may build or run tests (implementer, test author, reviewers, verifiers, the red check) says to prefix those commands with `<tools_dir>/scripts/heavy.sh` (§14) | on when `quality.heavy_lock` is set | `heavyLock: false` |
@@ -660,7 +672,8 @@ the owner's standing rules) drifts or vanishes. Keep it in tracked files:
 
 - **`docs/ORCHESTRATOR.md`** (template installed by the kit): start-up checklist (start at the
   repository root, read this file and the register, check the host and that `main` is green),
-  roles and authority (the owner signs security and applies protected-path patches), launch
+  roles and authority (who signs security per `pipeline.security_signoff`, the escalation list,
+  the owner applies protected-path patches), launch
   rules, the WIP limit, component claims, reporting rules and the owner's standing rules. When
   the owner sets a rule, edit the file in the same turn and commit it.
 - **`specs/MERGE-OBLIGATIONS.md`** (template installed by the kit): one row per cross-feature

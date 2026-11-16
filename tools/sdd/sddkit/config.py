@@ -202,6 +202,7 @@ DEFAULTS: Dict[str, Any] = {
         "persist_findings": True,
         "cap_fallback": "strongest",
         "security_paths": [],
+        "security_signoff": "po",
         "hook_probe": {"enabled": True, "path": ".claude/.hook-probe", "blocked_marker": "BLOCKED by SDD hook"},
     },
     "merge": {
@@ -384,6 +385,8 @@ def _validate_pipeline(cfg: Dict[str, Any]) -> List[str]:
         problems.append("pipeline.cap_fallback must be 'equal' or 'strongest'")
     if not isinstance(p.get("skeptics"), int) or p["skeptics"] < 2:
         problems.append("pipeline.skeptics must be at least 2 (a blocking finding is dismissed only by two refuting votes)")
+    if p.get("security_signoff") not in ("po", "owner"):
+        problems.append("pipeline.security_signoff must be 'po' (the orchestrator signs as product owner) or 'owner' (the human owner signs)")
     paths = p.get("security_paths")
     if not isinstance(paths, list) or not all(isinstance(g, str) and g for g in paths):
         problems.append("pipeline.security_paths must be a list of path globs")

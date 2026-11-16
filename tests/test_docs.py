@@ -82,6 +82,7 @@ class LessonsTest(unittest.TestCase):
         49: ("compactions", "MERGE-OBLIGATIONS"),
         50: ("green", "Owner-approved"),
         51: ("every test directory", "stop_check.nice"),
+        52: ("pending-po", "security_signoff"),
     }
 
     def test_entries_16_to_28(self) -> None:

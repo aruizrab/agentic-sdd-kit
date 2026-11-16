@@ -164,10 +164,12 @@ implementation and test coverage of `must` requirements only for the statuses li
   `perf-reviewer`, in parallel, each read-only with a fresh context; a reviewer that returns
   nothing is retried once, a persistent gap blocks finalisation.
 - **Security-sensitive changes** (plan or any reviewer) get a **second, independent
-  `security-reviewer`** and need the **owner's** sign-off before merge (human-in-the-loop
-  point #2; the pipeline ends with `securitySignoff: "pending-owner"`, the orchestrator never
-  signs). The script decides sensitivity from the arg, the plan, the reviewers and
-  `pipeline.security_paths`.
+  `security-reviewer`** and a security sign-off before merge (§11). Who signs is
+  `pipeline.security_signoff`: `po` (default) the orchestrator as product owner, after both
+  reviews and re-verified fixes (`securitySignoff: "pending-po"`), escalating to the owner
+  only per docs/ORCHESTRATOR.md §2; `owner` the human owner, never the orchestrator
+  (`securitySignoff: "pending-owner"`). The script decides sensitivity from the arg, the plan,
+  the reviewers and `pipeline.security_paths`.
 - Only `blocking` findings gate the merge; the rest are recorded in review.md.
 
 ### 5.9 Adversarial verify
@@ -187,7 +189,7 @@ implementation and test coverage of `must` requirements only for the statuses li
   four reviewers returned and every blocking finding is settled, or with an `evidence` arg the
   script checks (an earlier gate log on the current HEAD, the persisted findings record).
 - **Merge (orchestrator):** check `specs/MERGE-OBLIGATIONS.md` (rows due before this merge
-  closed, §13); record the owner's security sign-off if required; merge `main` **into**
+  closed, §13); record the security sign-off if required; merge `main` **into**
   the feature branch in its worktree, resolve conflicts (manifests by union, sources
   semantically), run full `sdd gates` there; then `git merge --no-ff feat/FNNN-slug` into
   `main` (conflict-free by construction); run `sdd trace --check` on main; delete the
@@ -309,7 +311,7 @@ restates the part that still holds.
 | Point | Default actor (autonomous mode) | Escalate to a human when |
 |---|---|---|
 | Spec approval (5.3) | orchestrator or product-owner agent | scope conflicts with the roadmap; a source ambiguity needs a deviation with product impact |
-| Security sign-off (5.8) | **owner**, after the independent second security review and re-verified fixes; the orchestrator prepares a one-page summary | always for security-sensitive features (`securitySignoff: "pending-owner"`) |
+| Security sign-off (5.8) | per `pipeline.security_signoff`: `po` (default) the orchestrator as product owner, after the independent second security review and re-verified fixes, reasoning recorded in review.md (`securitySignoff: "pending-po"`); `owner` the human owner, the orchestrator prepares a one-page summary (`securitySignoff: "pending-owner"`) | with `po`: accepting, unfixed, a confirmed vulnerability whose harm reaches beyond the threat model, or the other items of docs/ORCHESTRATOR.md §2; with `owner`: always for security-sensitive features |
 | Performance exception (5.7) | product owner, recorded in review.md | the budget itself needs to change (ADR) |
 | Constitution, `.claude/`, `sdd.config.json`, CI changes | none (agents are blocked) | always: the owner applies a drafted patch (`Owner-approved:` in the commit body) or works with `SDD_ALLOW_PROTECTED=1`; an ADR for policy changes |
 | Merge to `main` | orchestrator | an open row of `specs/MERGE-OBLIGATIONS.md` is due and cannot be closed; `main` would not pass `sdd gates --fast` |
@@ -332,7 +334,7 @@ restates the part that still holds.
   held patches, pending owner items) to `.wt/handoff/STATE.md`.
 - **Cross-feature obligations** live in `specs/MERGE-OBLIGATIONS.md`: supersession marks to
   apply in other specs, edits to other features' documents, tests of other features, merge
-  order, open product-owner items and pending owner sign-offs (row types MARK, EDIT, DOCS,
+  order, open product-owner items and pending security sign-offs (row types MARK, EDIT, DOCS,
   TEST, ORDER, SPEC, SEC, PO). A spec that creates such an obligation adds a row when it is
   approved; the merge that discharges a row closes it with the merge commit's sha.
   Requirement text is never written at merge time: successor wording goes through a spec

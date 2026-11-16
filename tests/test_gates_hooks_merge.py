@@ -313,6 +313,7 @@ class PipelineSafetyConfigTest(unittest.TestCase):
         self.assertEqual(view["pipeline"]["hook_probe"], {"enabled": True, "path": ".claude/.hook-probe", "blocked_marker": "BLOCKED by SDD hook"})
         self.assertTrue(view["pipeline"]["persist_findings"] and view["pipeline"]["red_check_tags"])
         self.assertEqual(view["pipeline"]["cap_fallback"], "strongest")
+        self.assertEqual(view["pipeline"]["security_signoff"], "po", "the orchestrator signs as product owner by default")
         self.assertIn("**/tests/**", view["test_globs"])
         self.assertIn("**/*_test.go", view["test_globs"])
         self.assertTrue(view["heavy_lock"])
@@ -322,6 +323,8 @@ class PipelineSafetyConfigTest(unittest.TestCase):
             ({"skeptics": 1}, "skeptics must be at least 2"),
             ({"security_paths": "src/auth/**"}, "security_paths must be a list"),
             ({"cap_fallback": "max"}, "cap_fallback must be"),
+            ({"security_signoff": "orchestrator"}, "security_signoff must be 'po'"),
+            ({"security_signoff": None}, "security_signoff must be 'po'"),
             ({"persist_findings": "yes"}, "persist_findings must be true or false"),
             ({"hook_probe": {"enabled": True, "path": "src/probe.txt", "blocked_marker": "x"}}, "is not under protected_paths"),
             ({"hook_probe": {"enabled": True, "path": "../x", "blocked_marker": "x"}}, "plain repository-relative"),
@@ -335,6 +338,10 @@ class PipelineSafetyConfigTest(unittest.TestCase):
         cfg = cfgmod._merge(cfgmod.DEFAULTS, test_config())
         cfg["pipeline"]["hook_probe"] = {"enabled": False, "path": "src/probe.txt", "blocked_marker": "x"}
         self.assertFalse([p for p in cfgmod.validate(cfg) if "hook_probe" in p], "a disabled probe needs no protected path")
+        for actor in ("po", "owner"):
+            cfg = cfgmod._merge(cfgmod.DEFAULTS, test_config())
+            cfg["pipeline"]["security_signoff"] = actor
+            self.assertFalse([p for p in cfgmod.validate(cfg) if "security_signoff" in p], actor)
 
 
 class UnionMergeTest(unittest.TestCase):

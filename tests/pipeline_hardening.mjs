@@ -241,16 +241,35 @@ const ok = (m) => { checks++; console.log(`ok - ${m}`) }
   ok('finalize: without same-run gates/review it needs args.evidence; the script checks gate HEAD, exit, dirty flag, reviewers and two-vote refutations')
 }
 
-// 8. Security rule: configured paths, the plan line, a reviewer or the arg; second security review; owner sign-off pending.
+// 8. Security rule: configured paths, the plan line, a reviewer or the arg; second security review; sign-off pending by the
+// product owner (pipeline.security_signoff 'po', the default) or the human owner ('owner').
 {
   const touch = await run(AFTER(['review', 'verify', 'finalize']), (l) => (l === 'security facts' ? { files: ['src/auth/login.ts', 'pkg/crypto/aes.ts', 'README.md'], tasksSecurityLine: '' } : /^verify R1/.test(l) ? vote(true) : undefined))
   assert.equal(touch.summary.securitySensitive, true)
   assert.deepEqual(touch.summary.securityReasons, ['diff touches pkg/crypto/aes.ts, src/auth/login.ts'])
   assert.ok(touch.labels.includes('security-reviewer (independent #2)'))
-  assert.equal(touch.summary.securitySignoff, 'pending-owner')
+  assert.equal(touch.summary.securitySignoff, 'pending-po')
   assert.equal(touch.summary.status, 'ready-to-merge')
-  assert.match(touch.summary.nextAction, /The OWNER reviews the security findings/)
-  assert.match(touch.find('finalize F011').prompt, /PENDING - the owner signs off before merge \(the orchestrator never does\)/)
+  assert.match(touch.summary.nextAction, /pending-po\. The orchestrator \(product owner\) reviews the security findings of both independent security reviews .* records the sign-off in review\.md/)
+  assert.match(touch.summary.nextAction, /Escalate to the human owner only per the escalation list \(docs\/ORCHESTRATOR\.md §2, docs\/DEVELOPMENT\.md §11\)/)
+  assert.doesNotMatch(touch.summary.nextAction, /The OWNER reviews/)
+  assert.ok(touch.find('finalize F011').prompt.includes('"PENDING - the orchestrator (product owner) signs off before merge, after both independent security reviews"'))
+  const sensitive = (l) => (l === 'security facts' ? { files: ['src/auth/login.ts'], tasksSecurityLine: '' } : /^verify R1/.test(l) ? vote(true) : undefined)
+  const withSignoff = (v) => ({ config: Object.assign({}, CONFIG, { pipeline: Object.assign({}, CONFIG.pipeline, { security_signoff: v }) }) })
+  const po = await run(AFTER(['review', 'verify', 'finalize'], withSignoff('po')), sensitive)
+  assert.equal(po.summary.securitySignoff, 'pending-po')
+  assert.equal(po.summary.nextAction, (await run(AFTER(['review', 'verify', 'finalize']), sensitive)).summary.nextAction, "'po' is the default")
+  const owner = await run(AFTER(['review', 'verify', 'finalize'], withSignoff('owner')), sensitive)
+  assert.equal(owner.summary.securitySignoff, 'pending-owner')
+  assert.ok(owner.labels.includes('security-reviewer (independent #2)'))
+  assert.equal(owner.summary.status, 'ready-to-merge')
+  assert.match(owner.summary.nextAction, /pending-owner\. The OWNER reviews the security findings .* does not merge before the sign-off/)
+  assert.ok(owner.find('finalize F011').prompt.includes('"PENDING - the owner signs off before merge (the orchestrator never does)"'))
+  await assert.rejects(run(AFTER(['review', 'verify', 'finalize'], withSignoff('orchestrator'))), /pipeline\.security_signoff must be 'po' or 'owner'/)
+  const ownerPlain = await run(AFTER(['review', 'verify', 'finalize'], withSignoff('owner')), (l) => (/^verify R1/.test(l) ? vote(true) : undefined))
+  assert.equal(ownerPlain.summary.securitySignoff, 'not-required')
+  const legacyBad = await run({ legacy: true, stages: ['plan'], config: withSignoff('orchestrator').config })
+  assert.equal(legacyBad.summary.securitySignoff, undefined, 'legacy ignores pipeline.security_signoff')
   const planLine = await run(AFTER(['review', 'verify', 'finalize']), (l) => (l === 'security facts' ? { files: ['a/x.ts'], tasksSecurityLine: '**Security-sensitive:** yes' } : /^verify R1/.test(l) ? vote(true) : undefined))
   assert.deepEqual(planLine.summary.securityReasons, ['plan: Security-sensitive'])
   const arg = await run(AFTER(['review', 'verify', 'finalize'], { security: true }), (l) => (/^verify R1/.test(l) ? vote(true) : undefined))
@@ -260,7 +279,7 @@ const ok = (m) => { checks++; console.log(`ok - ${m}`) }
   const plain = await run(AFTER(['review', 'verify', 'finalize']), (l) => (/^verify R1/.test(l) ? vote(true) : undefined))
   assert.equal(plain.summary.securitySignoff, 'not-required')
   assert.ok(!plain.labels.includes('security-reviewer (independent #2)'))
-  ok('security rule: pipeline.security_paths, the plan line, args.security or an unavailable diff make the feature sensitive; owner sign-off pending')
+  ok("security rule: pipeline.security_paths, the plan line, args.security or an unavailable diff make the feature sensitive; sign-off pending-po by default, pending-owner with pipeline.security_signoff 'owner'")
 }
 
 // 9. testsSha: required after Tests; a commit, an ancestor of HEAD, a test(...) subject, at least one test path.

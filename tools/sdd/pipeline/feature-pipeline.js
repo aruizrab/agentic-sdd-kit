@@ -225,6 +225,15 @@ const anyGlob = (path, globs) => globs.some((g) => globMatch(path, g))
 const TEST_GLOBS = Array.isArray(C.test_globs) && C.test_globs.length ? C.test_globs : ['tests/**', '**/tests/**', 'test/**', '**/test/**']
 // Security-relevant paths (pipeline.security_paths): a feature diff touching one makes the feature security-sensitive.
 const SECURITY_PATHS = Array.isArray(P.security_paths) ? P.security_paths.filter((g) => typeof g === 'string' && g) : []
+// Security sign-off actor (pipeline.security_signoff; config only, no arg: the actor is set by the owner in the protected
+// configuration, never by the orchestrator that launches the run). 'po' (default): the orchestrator signs as product owner after
+// both independent security reviews and escalates to the human owner only per the escalation list in docs/ORCHESTRATOR.md §2
+// (securitySignoff 'pending-po').
+// 'owner': the human owner signs, never the orchestrator (securitySignoff 'pending-owner'). Not used under legacy.
+if (!LEGACY && P.security_signoff !== undefined && !['po', 'owner'].includes(P.security_signoff)) {
+  throw new Error(`feature-pipeline: pipeline.security_signoff must be 'po' or 'owner'; got ${JSON.stringify(P.security_signoff)}`)
+}
+const SIGNOFF_OWNER = P.security_signoff === 'owner'
 // Heavy-job lock (default on when quality.heavy_lock is set; args.heavyLock: false turns it off): every role that may build or run
 // tests gets the rule to prefix those commands with the project's lock wrapper, which queues them on one lock shared by every
 // worktree. The gate run itself is `sdd gates`, whose heavy gates the configuration wraps.
@@ -537,8 +546,9 @@ if (!LEGACY) Object.assign(summary, { securityReasons: A.security === true ? ['a
 if (!STRICT_SCOPE) log('WARNING: strictScope: false: the SCOPE RULE is NOT in the agent prompts (agents may act on relayed chat messages); summary.strictScope records it')
 
 function finish(status, reason, nextAction) {
-  // Security-sensitive features need the owner's sign-off; the orchestrator never gives it.
-  if (!LEGACY) summary.securitySignoff = summary.securitySensitive ? 'pending-owner' : 'not-required'
+  // Security-sensitive features need a sign-off: by the orchestrator as product owner (pipeline.security_signoff 'po', after both
+  // independent security reviews; it escalates to the human owner only per docs/ORCHESTRATOR.md §2) or by the human owner ('owner').
+  if (!LEGACY) summary.securitySignoff = summary.securitySensitive ? (SIGNOFF_OWNER ? 'pending-owner' : 'pending-po') : 'not-required'
   if (PAUSED.value) {
     reason = `agents stopped failing-fast after a usage limit or outage (was: ${status}${reason ? ' - ' + reason : ''})`
     status = 'paused'
@@ -1589,7 +1599,8 @@ let verdicts = []
 const RANGE = `${summary.baseSha}..HEAD`
 // Security rule (outside legacy): Review, Verify and Finalize treat the feature as security-sensitive if args.security, the plan
 // (tasks.md "Security-sensitive:") or a reviewer says so, or the feature diff touches pipeline.security_paths. A mechanical agent
-// lists the diff; the script decides. Security-sensitive means two independent security reviews and securitySignoff 'pending-owner'.
+// lists the diff; the script decides. Security-sensitive means two independent security reviews and securitySignoff 'pending-po'
+// (or 'pending-owner' with pipeline.security_signoff 'owner').
 const markSensitive = (reason) => {
   summary.securitySensitive = true
   if (!LEGACY && !summary.securityReasons.includes(reason)) summary.securityReasons.push(reason)
@@ -1948,7 +1959,7 @@ if (want('finalize')) {
       `1. Complete ${DIR}/review.md (from ${C.paths.templates_dir}/review.md if missing) using the pipeline record below: keep the existing §3 rows and §6 justifications ` +
       '(update their verifier and outcome columns)' + (PERSIST_FINDINGS ? ' and the "<!-- pipeline-findings" block (outcomes as in the record below; drop no finding)' : '') +
       ', and fill the gates, security and final sections (' +
-      `"Product-owner security sign-off" = ${summary.securitySensitive ? (LEGACY ? '"PENDING - orchestrator must sign off before merge"' : '"PENDING - the owner signs off before merge (the orchestrator never does)"') : '"not required"'}${summary.perfException ? '; record the requested performance exception as PENDING product-owner decision' : ''}).\n` +
+      `"Product-owner security sign-off" = ${summary.securitySensitive ? (LEGACY ? '"PENDING - orchestrator must sign off before merge"' : SIGNOFF_OWNER ? '"PENDING - the owner signs off before merge (the orchestrator never does)"' : '"PENDING - the orchestrator (product owner) signs off before merge, after both independent security reviews"') : '"not required"'}${summary.perfException ? '; record the requested performance exception as PENDING product-owner decision' : ''}).\n` +
       (canImplement
         ? `2. Set the spec header line to "Status: Implemented" in ${DIR}/spec.md.\n3. With that change in the working tree run \`${SDD} trace --check --feature ${NUM}\` then \`${SDD} trace --check\` ` +
           '(exactly these commands: no extra scan options). If either fails, set the Status line back to "Approved" (never commit Implemented with a failing trace check), ' +
@@ -1981,9 +1992,14 @@ if (want('finalize')) {
   return finish(
     'ready-to-merge',
     null,
-    !LEGACY && summary.securitySensitive
+    !LEGACY && summary.securitySensitive && SIGNOFF_OWNER
       ? `Security-sensitive (${summary.securityReasons.join('; ')}): securitySignoff is pending-owner. The OWNER reviews the security findings in ${DIR}/review.md ` +
         `and signs off; the orchestrator prepares a one-page summary, demands any cheap hardening fix, has an independent verifier re-check every fix, and does not merge before the sign-off. Then: ${mergeSteps}`
+      : !LEGACY && summary.securitySensitive
+      ? `Security-sensitive (${summary.securityReasons.join('; ')}): securitySignoff is pending-po. The orchestrator (product owner) reviews the security findings of both ` +
+        `independent security reviews in ${DIR}/review.md, demands any cheap hardening fix, has an independent verifier re-check every fix, records the sign-off in review.md ` +
+        `(reasoning: what is security-relevant, how each finding was closed, accepted limitations against the threat model), and only then merges. Escalate to the human owner ` +
+        `only per the escalation list (docs/ORCHESTRATOR.md §2, ${C.paths.development || 'docs/DEVELOPMENT.md'} §11), e.g. for accepting, unfixed, a confirmed vulnerability whose harm reaches beyond the project's threat model. Then: ${mergeSteps}`
       : summary.needsSecuritySignoff
       ? `Security-sensitive: orchestrator must review the security findings in ${DIR}/review.md, demand any cheap hardening fix, have an independent verifier re-check every fix, and record the sign-off before merging. Then: ${mergeSteps}`
       : `Orchestrator: ${mergeSteps}${summary.perfException ? ' Decide the requested performance exception explicitly in review.md first.' : ''}`,

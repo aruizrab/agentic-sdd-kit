@@ -2,7 +2,7 @@
 
 The single tracked register of cross-feature obligations that approved specs create:
 supersession marks in other specs, edits of other specs and documents, tests of other features
-to update, merge order, open product-owner items and pending owner security sign-offs. It
+to update, merge order, open product-owner items and pending security sign-offs. It
 replaces the orchestrator's memory for these (docs/ORCHESTRATOR.md §5). It is not parsed by
 `sdd trace`, which reads only the feature specs.
 
@@ -30,7 +30,7 @@ replaces the orchestrator's memory for these (docs/ORCHESTRATOR.md §5). It is n
 Row types: **MARK** supersession mark on another spec's line · **EDIT** prose or table edit
 in another spec · **DOCS** documentation or ADR edit · **TEST** tests of another feature ·
 **ORDER** merge order · **SPEC** spec amendment through the critic before merge or
-implementation · **SEC** owner security sign-off · **PO** open product-owner item.
+implementation · **SEC** security sign-off · **PO** open product-owner item.
 
 Source notation: `F012:893` = line 893 of that feature's spec.md on its branch; `F012 tasks:162`
 and `F012 design:542` likewise for tasks.md and design.md; `main F009:164` = that spec on

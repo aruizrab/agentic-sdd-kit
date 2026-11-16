@@ -55,10 +55,15 @@ allowed-tools: Read Grep Bash(git status *) Bash(git log *) Bash(git branch *) B
      `resumeFromRunId` and the same args (completed agents replay from the journal); to change
      routing for the remaining phases pass `modelsFromPhase` plus `models` + `modelsBefore`
      (tiers) or `routingBefore: <summary.routing>` after editing the models table (formula).
-   - `ready-to-merge`: if `securitySignoff` is `pending-owner`, review the security sections
-     of review.md, demand cheap hardening fixes, have a fresh `verifier` re-check each fix
-     (with the scope rule below in its prompt), write the owner a one-page summary and wait:
-     **the owner signs off, you never do**; record the owner's sign-off in review.md. Then merge `main` into the feature branch (in the worktree),
+   - `ready-to-merge`: if `securitySignoff` is `pending-po` or `pending-owner`, review the
+     security sections of review.md (both independent security reviews), demand cheap
+     hardening fixes and have a fresh `verifier` re-check each fix (with the scope rule below
+     in its prompt). `pending-po`: you sign as product owner in review.md with the reasoning
+     (what is security-relevant, how each finding was closed, accepted limitations against the
+     threat model); escalate to the owner only per docs/ORCHESTRATOR.md §2 (e.g. accepting,
+     unfixed, a vulnerability whose harm reaches beyond the threat model). `pending-owner`:
+     write the owner a one-page summary and wait: **the owner signs off, you never do**;
+     record the owner's sign-off in review.md. Then merge `main` into the feature branch (in the worktree),
      resolve conflicts (`sdd union-merge` for manifests, an implementer for sources), run full
      `sdd gates` there, merge the branch into `main` with `--no-ff`, run `sdd trace --check`
      on main, delete the worktree's build output and remove the worktree.

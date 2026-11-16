@@ -43,10 +43,14 @@ ids of kept requirements stable. Target the requirement budget.
 - A performance regression above the threshold is never accepted silently: either it is fixed
   or you record an explicit exception in review.md with the measurement and the reason.
 - Security: when a feature is security-sensitive, demand cheap hardening fixes before merge
-  and require an independent re-verification of every fix. You never give the security
-  sign-off: the owner does (the pipeline records `securitySignoff: "pending-owner"`); prepare
-  what the owner needs (what is security-relevant, the findings and their outcomes, the open
-  risks).
+  and require an independent re-verification of every fix. Who signs off is
+  `pipeline.security_signoff`. With `po` (default, `securitySignoff: "pending-po"`) the
+  orchestrator signs as product owner, only after both independent security reviews and the
+  re-verified fixes, with the reasoning in review.md (what is security-relevant, each finding
+  and how it was closed, accepted limitations against the threat model); a confirmed
+  vulnerability accepted unfixed whose harm reaches beyond the threat model goes to the human
+  owner. With `owner` (`securitySignoff: "pending-owner"`) you never sign: prepare what the
+  owner needs (what is security-relevant, the findings and their outcomes, the open risks).
 - Constitution exceptions proposed in design.md are accepted or refused in review.md.
 
 Report what you decided and why. Commit nothing unless told to.
