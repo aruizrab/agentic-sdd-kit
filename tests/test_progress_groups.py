@@ -206,6 +206,15 @@ class PartlyMergedFeatureTest(unittest.TestCase):
         write(self.src, f"{self.dir}/tasks.md", self.tasks(2))
         r.commit("feat(F005): T02")
         self.assertEqual(self.stages()["F005"], ("implementing", 60.0))
+        # A started feature with an unmerged branch carries its last commit and is idle after 24 h without one.
+        last = dt.datetime.fromtimestamp(int(r.git("log", "-1", "--format=%ct", "feat/F005-wi02").strip()), tz=dt.timezone.utc)
+        soon = progress.build_report(self.src, self.cfg, now=last + dt.timedelta(hours=1))
+        f5 = {f["id"]: f for f in soon["features"]}["F005"]
+        self.assertEqual((f5["lastCommit"], f5["idle"]), (last.strftime("%Y-%m-%dT%H:%M:%SZ"), False))
+        late = progress.build_report(self.src, self.cfg, now=last + dt.timedelta(hours=25))
+        self.assertTrue({f["id"]: f for f in late["features"]}["F005"]["idle"])
+        self.assertIn(f"(idle since {last.strftime('%Y-%m-%d')})", progress.render_table(late))
+        self.assertNotIn("idle", {f["id"]: f for f in late["features"]}["F006"], "a merged feature has no idle flag")
         # Finished only when the spec on main says Implemented.
         r.git("checkout", "-q", "main")
         r.git("merge", "-q", "--no-ff", "-m", "merge F005 WI-02", "feat/F005-wi02")

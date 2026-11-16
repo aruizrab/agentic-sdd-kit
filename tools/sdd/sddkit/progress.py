@@ -33,6 +33,11 @@ newest feature branch, else main), else the roadmap heading title after the slug
 placeholder note such as ``(placeholder, specs later)`` or ``(TBD)`` is dropped from feature
 titles and group names.
 
+Idle features: a feature in a started stage (planned, tests, implementing, implemented) with an
+unmerged branch also gets ``lastCommit`` (the newest commit on its unmerged branches, UTC) and
+``idle`` (no such commit for 24 hours before ``generatedAt``), so a paused feature is never shown
+as moving; the table marks it ``(idle since <date>)``.
+
 The evidence ref for an unfinished feature is its newest unmerged ``<branch_prefix>F<NNN>-*``
 branch (remote first, then local), else main. A feature that merges in parts (the plan first,
 then one branch per work item) therefore shows its real stage until its spec on main says
@@ -63,6 +68,9 @@ STAGES = {
 }
 IMPLEMENTING_BASE = 30.0
 IMPLEMENTING_SPAN = 60.0
+# A started feature whose unmerged branches saw no commit for this long before generatedAt is idle.
+IDLE_AFTER_SECONDS = 24 * 3600
+ACTIVE_STAGES = ("planned", "tests", "implementing", "implemented")
 _TASK_LINE = re.compile(r"^- \[([ xX])\] T\d{2,3}\b")
 KIND_MILESTONE = "milestone"
 KIND_CROSS_CUTTING = "cross-cutting"
@@ -266,6 +274,10 @@ def build_report(root: Path, cfg: Dict[str, Any], main_ref: Optional[str] = None
     branches = repo.feature_branches()
     done_set = set(cfg["features"].get("done_without_spec") or [])
     prefix = cfg["features"]["id_prefix"]
+    if now is None:
+        epoch = os.environ.get("SOURCE_DATE_EPOCH")
+        now = _dt.datetime.fromtimestamp(int(epoch), tz=_dt.timezone.utc) if epoch else _dt.datetime.now(tz=_dt.timezone.utc)
+    now_ts = int(now.timestamp())
     rows, raw = [], {}
     for f in features:
         num = f["id"][len(prefix):]
@@ -274,13 +286,16 @@ def build_report(root: Path, cfg: Dict[str, Any], main_ref: Optional[str] = None
         raw[f["id"]] = pct
         name = feature_name(repo, f["id"], f["name"], resolved, main_dirs, fbranches)
         rows.append({"id": f["id"], "name": name, "slug": f["slug"], "milestone": f["milestone"], "stage": stage, "percent": round(pct, 1)})
+        if stage in ACTIVE_STAGES:
+            unmerged = [ref for ref in fbranches if not repo.git.is_ancestor(ref, resolved)]
+            last = max((repo.git.commit_time(ref) for ref in unmerged), default=0)
+            if last:
+                rows[-1]["lastCommit"] = _dt.datetime.fromtimestamp(last, tz=_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                rows[-1]["idle"] = now_ts - last > IDLE_AFTER_SECONDS
     ms = []
     for m in milestones:
         ids = [f["id"] for f in features if f["milestone"] == m["id"]]
         ms.append({"id": m["id"], "name": m["name"], "kind": m["kind"], "percent": round(_mean([raw[i] for i in ids]), 1), "features": ids})
-    if now is None:
-        epoch = os.environ.get("SOURCE_DATE_EPOCH")
-        now = _dt.datetime.fromtimestamp(int(epoch), tz=_dt.timezone.utc) if epoch else _dt.datetime.now(tz=_dt.timezone.utc)
     return {
         "schema": SCHEMA,
         "generatedAt": now.astimezone(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -299,7 +314,8 @@ def render_table(report: Dict[str, Any]) -> str:
         lines.append(f"  {m['id']:<4} {m['percent']:5.1f}%  {m['name']}{kind} ({len(m['features'])} features)")
     lines.append("")
     for f in report["features"]:
-        lines.append(f"  {f['id']:<6} {f['percent']:5.1f}%  {f['stage']:<14} {f['name']}")
+        idle = f" (idle since {f['lastCommit'][:10]})" if f.get("idle") else ""
+        lines.append(f"  {f['id']:<6} {f['percent']:5.1f}%  {f['stage']:<14} {f['name']}{idle}")
     return "\n".join(lines) + "\n"
 
 
