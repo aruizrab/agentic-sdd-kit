@@ -79,6 +79,16 @@
             "timeout": 15
           }
         ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/main-only-skills.sh",
+            "timeout": 15
+          }
+        ]
       }
     ],
     "PostToolUse": [

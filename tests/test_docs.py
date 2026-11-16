@@ -83,6 +83,7 @@ class LessonsTest(unittest.TestCase):
         50: ("green", "Owner-approved"),
         51: ("every test directory", "stop_check.nice"),
         52: ("pending-po", "security_signoff"),
+        53: ("main_only_skills", "agent_id"),
     }
 
     def test_entries_16_to_28(self) -> None:

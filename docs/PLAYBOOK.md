@@ -675,14 +675,29 @@ the owner's standing rules) drifts or vanishes. Keep it in tracked files:
   roles and authority (who signs security per `pipeline.security_signoff`, the escalation list,
   the owner applies protected-path patches), launch
   rules, the WIP limit, component claims, reporting rules and the owner's standing rules. When
-  the owner sets a rule, edit the file in the same turn and commit it.
+  the owner sets a rule, record it in the same turn with the **`owner-rule`** skill: it puts the
+  rule in the section that owns its topic (else the owner-rules table), replaces a line it
+  contradicts or asks which wins, commits (`docs(orchestrator): <rule>`), confirms in one line
+  and acts on the rule.
 - **`specs/MERGE-OBLIGATIONS.md`** (template installed by the kit): one row per cross-feature
   obligation (MARK, EDIT, DOCS, TEST, ORDER, SPEC, SEC, PO), added when the spec that creates
   it is approved, checked before every merge, closed with the merge commit's sha, never
   deleted. Requirement text is never written at merge time: successor wording goes through a
   spec change with a critic round first.
-- **`.wt/handoff/STATE.md`** (untracked): before a compaction, the live state (run ids and
-  their args, the queue, held patches, pending owner items), read back first afterwards.
+- **`.wt/handoff/STATE.md`** (untracked, `paths.handoff`): before any `/compact` the
+  orchestrator runs the **`compact-handoff`** skill, which writes the live state (run ids and
+  their args, the queue, in-flight branches, held patches, pending owner items, scheduled
+  wake-ups) after saving the previous file, checks that every owner instruction of the
+  session is already in the rules file, and suggests the `/compact` instruction; the file is
+  read back first afterwards.
+- **Main-session-only skills**: `owner-rule` and `compact-handoff` are listed in
+  `orchestrator.main_only_skills`; the `main-only-skills` hook (PreToolUse `Skill`) blocks
+  them whenever the hook input carries `agent_id` or `agent_type`, which every subagent has
+  (custom agents, built-in agents such as general-purpose, forks, workflow agents). A
+  subagent reports an owner rule or state to the orchestrator in its final message instead.
+  This is the only restriction on skills: the agent definitions do not disallow the `Skill`
+  tool, and every other skill stays available to subagents. Add a project's own
+  orchestrator-only skills to the list (it is protected configuration).
 - **WIP limit**: no new spec run while more than the limit of approved specs are
   unimplemented; implementation first.
 - **Component claims**: one in-flight branch per component (`components.path_regex` unit);

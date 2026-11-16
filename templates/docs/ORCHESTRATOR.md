@@ -4,9 +4,9 @@ The standing rules for the session that orchestrates this project's pipelines. T
 this file, not in the session's memory: a long session compacts its context many times, and
 rules kept only in memory drift or vanish (the kit's docs/LESSONS.md 49). This file is the
 source of truth; session memory may point here but never overrides it. **When the owner sets
-a new standing rule, edit this file in the same turn and commit it**
-(`docs(orchestrator): <rule>`). When a new rule conflicts with this file, ask the owner which
-one wins, then update the file.
+a new standing rule, record it in this file in the same turn with the `owner-rule` skill**
+(it edits and commits, `docs(orchestrator): <rule>`). When a new rule conflicts with this
+file, the skill replaces the old line or asks the owner which one wins.
 
 ## 1. Start-up checklist (every new session, and after every compaction)
 
@@ -117,9 +117,20 @@ orchestrator does itself.
 - Say when work is paused or blocked, and why; never let a summary show a paused feature as
   moving (`sdd progress` marks it idle).
 - Separate verified from believed: a diagnosis is a hypothesis until it is checked.
-- **Compaction**: before compacting, write the live state (running run ids and their args, the
-  queue, held patches, pending owner items) to `.wt/handoff/STATE.md`, so the summary does not
-  have to carry it; read it back first after the compaction.
+- **Keep standing rules in this file, with the `owner-rule` skill.** Whenever the owner states
+  a standing rule or direction, invoke `owner-rule` in that same turn. It records the rule here
+  (in the section that owns the topic, else in §8), replaces any line it contradicts (or asks
+  which wins), commits, and confirms in one line; then act on the rule.
+- **Compaction, with the `compact-handoff` skill.** The owner triggers compaction. Before any
+  `/compact`, or when the owner says the context is long, invoke `compact-handoff`. It writes
+  the live state (running run ids and their args, the queue, in-flight work, held patches,
+  pending owner items and decisions) to the handoff file (`paths.handoff`, default
+  `.wt/handoff/STATE.md`), so the summary only needs to point there; read it back first after
+  the compaction.
+- Both skills are for the main session only (`orchestrator.main_only_skills`): the
+  `main-only-skills` hook blocks them for any subagent, built-in agents, forks and workflow
+  agents included. A subagent reports such things to the orchestrator in its final message.
+  That is the only restriction on skills; every other skill stays available to subagents.
 
 ## 8. Owner rules (append here, newest last)
 

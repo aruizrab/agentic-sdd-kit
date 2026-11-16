@@ -31,7 +31,7 @@ agentic-sdd-kit/
                              memory budget), memcap-runner.sh (per-test memory cap), memguard.py
                              (memory guard for unattended runs)
     pipeline/feature-pipeline.js   the per-feature Workflow script (Claude Code Workflow tool)
-  claude/                    -> .claude/: 12 agents, 6 skills, 4 hooks, settings.json
+  claude/                    -> .claude/: 12 agents, 8 skills, 5 hooks, settings.json
   templates/                 CLAUDE.md, docs/{CONSTITUTION,DEVELOPMENT,ROADMAP,ORCHESTRATOR}.md,
                              specs/templates/{spec,design,tasks,review}.md,
                              specs/MERGE-OBLIGATIONS.md, sdd.config.json
@@ -107,7 +107,7 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 | `sdd tasks DIR [--lanes] [--validate]` | tasks.md as JSON: waves, tasks, components, lanes, the planner's `complexity` and `risk` ratings; plan exit criteria |
 | `sdd routing table [--json]`, `sdd routing log --output-file F`, `sdd routing refit` | model routing: the models table's candidates per level with their expected cost; append a run's telemetry to `<logs_dir>/routing.jsonl`; per-level failure rates and floor suggestions (report only) from the telemetry or from Workflow journals (`--input journal --journal <glob>`) |
 | `sdd source clause DOC SECTION`, `sdd source find DOC REGEX` | normative source lookup (configured command or built-in Markdown reader) |
-| `sdd hook NAME` | the hook logic behind `.claude/hooks/*.sh` (protect-paths, bash-guard, format, stop-check) |
+| `sdd hook NAME` | the hook logic behind `.claude/hooks/*.sh` (protect-paths, bash-guard, main-only-skills, format, stop-check) |
 | `sdd doctor` | checks the installation and the configuration |
 
 ## Quality gates

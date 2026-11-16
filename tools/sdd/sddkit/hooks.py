@@ -20,6 +20,11 @@ Hooks:
   ``core.hooksPath`` (``git config``, ``git -c``/``--config-env`` after any global options,
   ``GIT_CONFIG_*`` variables), removing git's ``core`` config section; reading it stays allowed.
   Best effort: CI re-runs ``sdd check commits`` and ``sdd check secrets``.
+* ``main-only-skills`` (PreToolUse Skill): exit 2 when a subagent (the hook input carries
+  ``agent_id`` or ``agent_type``: custom agents, built-in agents, forks and workflow agents alike)
+  calls one of ``orchestrator.main_only_skills`` (default ``owner-rule``, ``compact-handoff``);
+  the name is matched after stripping a leading ``/``, arguments and a ``plugin:`` namespace.
+  The main session is never blocked, and every other skill stays available to subagents.
 * ``format`` (PostToolUse Edit|Write): runs the ``formatters`` entry whose glob
   matches the edited file; exit 2 with the output when it fails (a syntax
   error from the last edit).
@@ -372,6 +377,39 @@ def bash_guard(data: Optional[Dict[str, Any]] = None) -> int:
 
 
 # ----------------------------------------------------------------------------
+# main-only-skills
+# ----------------------------------------------------------------------------
+
+
+def skill_name(tool_input: Dict[str, Any]) -> str:
+    """The bare skill name of a Skill call: no leading ``/``, no arguments, no ``plugin:`` namespace."""
+    raw = tool_input.get("skill") or tool_input.get("name") or ""
+    words = str(raw).strip().lstrip("/").split()
+    return words[0].rsplit(":", 1)[-1] if words else ""
+
+
+def main_only_skills(data: Optional[Dict[str, Any]] = None) -> int:
+    data = _read_input() if data is None else data
+    if data.get("_invalid"):
+        sys.stderr.write("main-only-skills: could not parse hook input JSON; refusing the Skill call.\n")
+        return 2
+    skill = skill_name(data.get("tool_input") or {})
+    if not skill:
+        return 0
+    cfg = config_for(project_root(data.get("cwd") or os.getcwd()))
+    if skill not in ((cfg.get("orchestrator") or {}).get("main_only_skills") or []):
+        return 0
+    caller = data.get("agent_type") or data.get("agent_id") or ""
+    if not caller:
+        return 0  # the main session (the orchestrator)
+    sys.stderr.write(
+        f"BLOCKED by SDD hook: the {skill} skill is for the main session (the orchestrator) only, not for subagents ({caller}).\n"
+        "Report what you would have recorded to the orchestrator in your final message instead.\n"
+    )
+    return 2
+
+
+# ----------------------------------------------------------------------------
 # format and stop-check
 # ----------------------------------------------------------------------------
 
@@ -453,6 +491,7 @@ def stop_check(data: Optional[Dict[str, Any]] = None) -> int:
 HOOKS = {
     "protect-paths": protect_paths,
     "bash-guard": bash_guard,
+    "main-only-skills": main_only_skills,
     "format": format_file,
     "stop-check": stop_check,
 }

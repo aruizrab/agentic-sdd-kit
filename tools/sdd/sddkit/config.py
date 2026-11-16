@@ -36,6 +36,8 @@ DEFAULTS: Dict[str, Any] = {
         "roadmap": "docs/ROADMAP.md",
         "constitution": "docs/CONSTITUTION.md",
         "development": "docs/DEVELOPMENT.md",
+        "orchestrator": "docs/ORCHESTRATOR.md",
+        "handoff": ".wt/handoff/STATE.md",
         "logs_dir": ".sdd/logs",
         "worktree_root": ".wt",
         "build_dirs": [],
@@ -205,6 +207,9 @@ DEFAULTS: Dict[str, Any] = {
         "security_signoff": "po",
         "hook_probe": {"enabled": True, "path": ".claude/.hook-probe", "blocked_marker": "BLOCKED by SDD hook"},
     },
+    # Skills only the main session (the orchestrator) may run: the main-only-skills hook blocks them
+    # for every subagent. Every other skill stays available to subagents.
+    "orchestrator": {"main_only_skills": ["owner-rule", "compact-handoff"]},
     "merge": {
         "union_manifests": [],
         "after_union": "",
@@ -362,6 +367,7 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
         problems.append("stop_check.nice must be an integer from 0 (off) to 19")
     if not isinstance(sc.get("env"), dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in sc["env"].items()):
         problems.append("stop_check.env must map variable names to strings")
+    problems.extend(_validate_orchestrator(cfg))
     if not cfg["commit"]["trailers"]:
         problems.append("commit.trailers is empty: add at least the attribution trailer line the project uses")
     for i, trailer in enumerate(cfg["commit"]["trailers"]):
@@ -369,6 +375,22 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
             problems.append(f"commit.trailers[{i}] must be a non-empty string")
         elif re.search(r"<[^<>@]*>", trailer.split("<noreply@", 1)[0]) or re.search(r"<[^<>]*\s[^<>]*>", trailer):
             problems.append(f"commit.trailers[{i}]: still the template placeholder ({trailer!r}); set the real attribution line")
+    return problems
+
+
+_PLAIN_PATH = re.compile(r"[A-Za-z0-9_.@+-]+(?:/[A-Za-z0-9_.@+-]+)*")
+
+
+def _validate_orchestrator(cfg: Dict[str, Any]) -> List[str]:
+    """Main-only skills are plain skill names; the orchestrator's files are plain relative paths."""
+    problems: List[str] = []
+    skills = (cfg.get("orchestrator") or {}).get("main_only_skills")
+    if not isinstance(skills, list) or not all(isinstance(s, str) and re.fullmatch(r"[a-z0-9][a-z0-9-]*", s) for s in skills):
+        problems.append("orchestrator.main_only_skills must be a list of skill names (lowercase letters, digits, hyphens; no plugin prefix)")
+    for key in ("orchestrator", "handoff"):
+        value = cfg["paths"].get(key)
+        if not isinstance(value, str) or not _PLAIN_PATH.fullmatch(value) or ".." in value.split("/"):
+            problems.append(f"paths.{key} must be a plain repository-relative file path")
     return problems
 
 
