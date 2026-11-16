@@ -8,7 +8,8 @@ Sources of truth (all configurable in ``sdd.config.json``):
 
   ``<ID>`` matches ``requirements.id_regex``. A requirement line may carry
   ``[behaviour-only]`` (no implementation site needed, e.g. a "SHALL NOT log"
-  property verified only by tests) or ``(superseded by <ID>)``.
+  property verified only by tests) or ``(superseded by <ID>)``. A marker inside a
+  backtick code span is a quote of the phrase, not a marker.
 * **Feature status** is the header line ``Status: Draft|Approved|Implemented``.
 * **Implementation sites** are tags in source files matched by
   ``trace.scan_globs``: a comment line ``Implements: ID, ID`` (any comment
@@ -108,6 +109,29 @@ def spec_status(text: str) -> str:
     return m.group("status") if m else "Draft"
 
 
+def code_spans(text: str) -> List[Tuple[int, int]]:
+    """``[start, end)`` offsets of the Markdown code spans of one line: a run of N backticks opens
+    a span that the next run of exactly N backticks closes; an unclosed run is literal text."""
+    spans: List[Tuple[int, int]] = []
+    runs = [(m.start(), len(m.group(0))) for m in re.finditer(r"`+", text)]
+    i = 0
+    while i < len(runs):
+        start, n = runs[i]
+        close = next((j for j in range(i + 1, len(runs)) if runs[j][1] == n), None)
+        if close is None:
+            i += 1
+            continue
+        spans.append((start, runs[close][0] + n))
+        i = close + 1
+    return spans
+
+
+def unquoted_match(rx: "re.Pattern[str]", text: str) -> "Optional[re.Match[str]]":
+    """The first match of ``rx`` that does not start inside a code span (a quoted marker is not a marker)."""
+    spans = code_spans(text)
+    return next((m for m in rx.finditer(text) if not any(a <= m.start() < b for a, b in spans)), None)
+
+
 def parse_spec(text: str, id_regex: str, priorities: Iterable[str], feature: str, file: str, status: str) -> Tuple[List[Requirement], List[str]]:
     """Requirement lines of one spec.md (HTML comments are ignored)."""
     prio = "|".join(re.escape(p) for p in priorities)
@@ -130,7 +154,7 @@ def parse_spec(text: str, id_regex: str, priorities: Iterable[str], feature: str
             line = re.sub(r"<!--.*?-->", "", line)
         m = req_line.match(line)
         if m:
-            sup = superseded.search(m.group("text"))
+            sup = unquoted_match(superseded, m.group("text"))
             reqs.append(
                 Requirement(
                     id=m.group("id"),

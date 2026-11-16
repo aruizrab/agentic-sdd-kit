@@ -16,7 +16,8 @@ Status lifecycle (single header line, parsed by `sdd trace` and `sdd spec-info`)
                        issues and no open clarification marker remains
   Status: Implemented  set by the pipeline's Finalize stage after gates + review + trace pass
 Requirement ids never change once Approved. Changing an approved requirement means adding a
-new id and marking the old one "(superseded by <ID>)".
+new id and marking the old one "(superseded by <ID>)" (outside backticks: inside a code span
+the phrase is a quote, not a marker).
 Budget: about 15-45 requirements (requirements.budget). Decide project-internal choices under
 "Decisions"; use the clarification marker only for genuine ambiguity in the normative source.
 -->
