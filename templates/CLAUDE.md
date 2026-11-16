@@ -51,8 +51,12 @@ take the quick path in `docs/DEVELOPMENT.md`.
 - Requirement line in spec.md: `- **<ID>** [must] WHEN <trigger> THE <component> SHALL <response>. <citation>`
 - Requirement ids are global across features (`sdd trace --check` fails on duplicates).
   Feature F<NNN> numbers the requirements it defines within a clause/area key in its own
-  block R<NNN*10>..R<NNN*10+9> (printed by `sdd new-feature`); reuse an existing id instead
+  block R<NNN*10>..R<NNN*10+9> (printed by `sdd new-feature`); when it is full, the lowest
+  free block of the key, never "the next id above the highest"; reuse an existing id instead
   of redefining the same rule.
+- A changed Approved requirement gets a new id; the old line gets `(superseded by <ID>)`
+  (outside backticks). Supersession drops the whole requirement from the trace check, so a
+  partial change gets a qualified successor that restates what still holds.
 - spec.md header line: `Status: Draft|Approved|Implemented`.
 - Code: `<Implements tag syntax, e.g. // Implements: <ID>, """Implements: <ID>""" as a docstring's first line, or #[trace::implements("<ID>")]>`.
 - Tests: `<Verifies tag syntax, e.g. // Verifies: <ID> or @verifies("<ID>")>`.

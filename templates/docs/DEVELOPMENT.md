@@ -270,7 +270,9 @@ failed twice: usage limit or outage; resume with `resumeFromRunId` and the same 
 5. Commit `fix(<FNNN|component>): ...`.
 
 Behaviour changes to Approved requirements always take the full path, with a new id that
-supersedes the old one.
+supersedes the old one. Supersession is all or nothing (the trace check drops the old
+requirement entirely): a change to part of a requirement gets a qualified successor that
+restates the part that still holds.
 
 ## 11. Human-in-the-loop points
 

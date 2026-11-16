@@ -17,7 +17,11 @@ Status lifecycle (single header line, parsed by `sdd trace` and `sdd spec-info`)
   Status: Implemented  set by the pipeline's Finalize stage after gates + review + trace pass
 Requirement ids never change once Approved. Changing an approved requirement means adding a
 new id and marking the old one "(superseded by <ID>)" (outside backticks: inside a code span
-the phrase is a quote, not a marker).
+the phrase is a quote, not a marker). Supersession is all or nothing: if only part of a
+requirement changes, its successor restates the part that still holds (a qualified
+successor); never "(superseded by <ID> for <case>)".
+Ids: this feature's block per clause/area key; when it is full, the lowest free block of the
+key, never "the next id above the highest".
 Budget: about 15-45 requirements (requirements.budget). Decide project-internal choices under
 "Decisions"; use the clarification marker only for genuine ambiguity in the normative source.
 -->

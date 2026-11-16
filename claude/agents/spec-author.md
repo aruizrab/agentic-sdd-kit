@@ -25,8 +25,16 @@ to the feature directory.
 2. **One normative sentence, one or more atomic requirements.** Exact line format, one per line:
    `- **<ID>** [must] WHEN <trigger> THE <component> SHALL <response>. <citation>`
    - ids follow `requirements.id_regex`; this feature numbers the requirements it defines in
-     its own block (printed by `sdd new-feature`, e.g. F013 owns R130-R139). Reuse an existing
-     id (cite it) instead of redefining the same rule. Ids never change once Approved.
+     its own block per clause/area key (printed by `sdd new-feature`, e.g. F013 owns R130-R139).
+     When that block is full, take the **lowest free block** of the key (check the ids in use
+     with a search over the feature directories), never "the next id above the highest": that
+     runs out of digits and collides with later features' blocks. Reuse an existing id (cite
+     it) instead of redefining the same rule. Ids never change once Approved.
+   - Changing an Approved requirement: add a new id and mark the old one
+     `(superseded by <ID>)` outside backticks. Supersession is all or nothing: the marked
+     requirement drops out of the trace check entirely. If only part of it changes, replace it
+     by a **qualified successor** that restates the unchanged part and the change, and mark the
+     old one superseded by that; never write "(superseded by X for ...)".
    - priority: `[must]` (normative "shall"/"must"), `[should]`, `[may]`.
    - EARS forms: ubiquitous `THE X SHALL`; event `WHEN`; state `WHILE`; optional `WHERE`;
      unwanted `IF ... THEN THE X SHALL`.

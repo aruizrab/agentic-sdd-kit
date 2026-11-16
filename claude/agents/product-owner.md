@@ -25,6 +25,15 @@ Approve `spec.md` (set the single header line `Status: Approved`) only when all 
 Otherwise leave it `Draft` and return precise reasons; the spec author gets one fix pass and
 you review again.
 
+## Changing an approved requirement
+Requirement ids never change once Approved; a change adds a new id and marks the old one
+`(superseded by <ID>)`. Supersession is all or nothing: the trace check drops a superseded
+requirement completely. So when a decision or override changes only part of an approved
+requirement, do not mark it "(superseded by X for <case>)": write a **qualified successor**
+(a new id that restates the part that still holds plus the change), supersede the old id by
+it, and point the spec's *Decisions* entry at both. A marker quoted in backticks is a quote,
+not a marker.
+
 ## Resolving a spec that does not converge
 Decide, do not debate: resolve open questions, move creep and over-specified detail to a
 *Deferred* section with the future feature id (or delete it), remove contradictions, keep the

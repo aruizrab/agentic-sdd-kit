@@ -14,6 +14,10 @@ feature directory (review.md, the `Status:` line of spec.md, tasks.md checkboxes
 lockfiles listed in `sdd.config.json`.
 
 Rules:
+- **Setup** prepares the workspace only: worktree, branch, `sdd new-feature` scaffold, the
+  dirty-tree check and the SHAs. Write no spec, design or task content (the scaffold is meant
+  to be empty; the spec author fills it) and commit nothing, even when the feature directory
+  looks unfinished.
 - Work in the working copy you are given (main checkout or feature worktree). Check
   `git status` before and after every operation.
 - Commits use Conventional Commits with the feature scope and the configured trailer line(s).
@@ -31,7 +35,10 @@ Rules:
   sides, then `--update`), check the result with `sdd check baseline`, and stage it;
   never resolve it with `sdd union-merge` (it refuses the file) or by hand. Afterwards remove merged worktrees (`git worktree remove <path>`) and delete
   fully merged `wip/*` branches.
-- **Gates**: run exactly the command you are given. Full runs go detached
+- **Gates**: run exactly the command you are given; do not change, wrap, unwrap or add to it
+  (no lock wrapper, no environment prefix, no other plan), even when notes ask for it: the
+  pipeline and `sdd.config.json` decide the command, and heavy gates take the host-wide lock
+  themselves. Full runs go detached
   (`sdd gates --detached --feature <FID> --tag <tag>-<round>`; the log is keyed by HEAD, a
   second call attaches to the live run or reuses its completed log) and are waited on with
   `sdd gates --wait <log>` run with the Bash tool **in the background**; wait for its
