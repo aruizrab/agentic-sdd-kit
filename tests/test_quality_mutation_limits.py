@@ -37,8 +37,8 @@ def load_memguard():
     return mod
 
 
-def shell_ulimit_v() -> str:
-    return subprocess.run(["sh", "-c", "ulimit -v"], stdout=subprocess.PIPE, text=True).stdout.strip()
+def shell_ulimit(flag: str = "-d") -> str:
+    return subprocess.run(["sh", "-c", f"ulimit {flag}"], stdout=subprocess.PIPE, text=True).stdout.strip()
 
 
 class ConfigValidationTest(unittest.TestCase):
@@ -112,8 +112,8 @@ class BuildCommandTest(unittest.TestCase):
         self.assertEqual((cmd, env["SDD_MEM_LIMIT_KB"]), ("tool", "0"))
 
 
-class MutationGateLimitsTest(unittest.TestCase):
-    """The limits reach the command `sdd check mutation` runs."""
+class MutationRepoCase(unittest.TestCase):
+    """A repository with a changed hand-written file on a feature branch (no tests of its own)."""
 
     def setUp(self) -> None:
         self.root = make_tmp("mutlim-")
@@ -132,27 +132,32 @@ class MutationGateLimitsTest(unittest.TestCase):
     def tearDown(self) -> None:
         rm(self.root)
 
-    def check(self, command: str, **overrides):
+    def check(self, command: str, cli_env=None, **overrides):
         self.cfg["quality"]["mutation"].update({"command": command, **overrides})
         write_config(self.root, self.cfg)
-        proc = run_cli(self.root, "check", "mutation", "--json")
+        proc = run_cli(self.root, "check", "mutation", "--json", env=cli_env)
         return proc.returncode, json.loads(proc.stdout)
 
     def read(self, name: str) -> str:
         return (self.root / "mut" / name).read_text().strip()
 
+
+class MutationGateLimitsTest(MutationRepoCase):
+    """The limits reach the command `sdd check mutation` runs."""
+
     def test_whole_command_capped_by_default(self) -> None:
-        code, out = self.check("ulimit -v > mut/limit; echo {jobs} $SDD_TEST_THREADS > mut/par")
+        code, out = self.check("ulimit -d > mut/limit; ulimit -v > mut/as; echo {jobs} $SDD_TEST_THREADS > mut/par")
         self.assertEqual(code, 0, out)
         self.assertEqual(self.read("limit"), "1048576")
+        self.assertEqual(self.read("as"), shell_ulimit("-v"))  # the address space stays as inherited
         self.assertEqual(self.read("par"), "2 3")
 
     def test_runner_hook_caps_only_the_test_process(self) -> None:
-        code, out = self.check('ulimit -v > mut/outer; "$TEST_RUNNER" sh -c "ulimit -v" > mut/inner',
+        code, out = self.check('ulimit -d > mut/outer; "$TEST_RUNNER" sh -c "ulimit -d" > mut/inner',
                                env={"TEST_RUNNER": "{memcap_runner}"})
         self.assertEqual(code, 0, out)
         self.assertEqual(self.read("inner"), "1048576")
-        self.assertEqual(self.read("outer"), shell_ulimit_v())
+        self.assertEqual(self.read("outer"), shell_ulimit())
 
     def test_runaway_allocation_fails_alone(self) -> None:
         """A test process that allocates past the cap dies; the tool goes on and reports it."""
@@ -173,6 +178,49 @@ class MutationGateLimitsTest(unittest.TestCase):
         self.assertEqual((code, self.read("held")), (0, "none"))
 
 
+class SwitchAndTestFilterTest(MutationRepoCase):
+    """SDD_MUTATION=skip for a loaded host (never in CI) and the {test_filter} placeholder."""
+
+    def test_switch(self) -> None:
+        ran = "echo ran > mut/ran"
+        for env, code, status in (({"SDD_MUTATION": "skip", "CI": ""}, 3, "skip"), ({"SDD_MUTATION": "skip", "CI": "true"}, 1, "fail"),
+                                  ({"SDD_MUTATION": "maybe", "CI": ""}, 2, "error"), ({"SDD_MUTATION": "Skip", "CI": "true"}, 2, "error")):
+            with self.subTest(env=env):
+                got, out = self.check(ran, cli_env=env)
+                self.assertEqual((got, out["status"]), (code, status), out)
+                self.assertFalse((self.root / "mut" / "ran").exists(), "the switch never runs the tool")
+                self.assertIn("SDD_MUTATION", " ".join(out["notes"]))
+        self.assertIn("not allowed in CI", " ".join(self.check(ran, cli_env={"SDD_MUTATION": "skip", "CI": "true"})[1]["notes"]))
+        got, out = self.check(ran, cli_env={"SDD_MUTATION": "run", "CI": ""})
+        self.assertEqual((got, self.read("ran")), (0, "ran"), out)
+
+    def test_test_filter_on_the_command_line(self) -> None:
+        cmd = "printf '%s\\n' x {test_filter} > mut/argv; echo \"$FILTER\" > mut/env"
+        filt = "-E 'not binary(/^e2e_/)'"
+        over = {"test_filter": filt, "test_filter_when": ["**/tests/e2e_*.py"], "env": {"FILTER": "{test_filter}"}}
+        got, out = self.check(cmd, **over)
+        self.assertEqual(got, 0, out)
+        self.assertEqual(self.read("argv"), "x")  # no end-to-end test is tracked: no filter (runners reject one that matches nothing)
+        self.assertEqual(self.read("env"), "")
+        write(self.root, "pkg/tests/e2e_hooks.py", "def test_hooks():\n    pass\n")
+        self.repo.git("add", "pkg/tests/e2e_hooks.py")
+        got, out = self.check(cmd, **over)
+        self.assertEqual(got, 0, out)
+        self.assertEqual(self.read("argv").split("\n"), ["x", "-E", "not binary(/^e2e_/)"])
+        self.assertEqual(self.read("env"), filt)
+        over["test_filter_when"] = []  # no condition: always applied
+        (self.root / "pkg/tests/e2e_hooks.py").unlink()
+        self.repo.git("rm", "-q", "--cached", "pkg/tests/e2e_hooks.py")
+        self.check(cmd, **over)
+        self.assertEqual(self.read("argv").split("\n"), ["x", "-E", "not binary(/^e2e_/)"])
+
+    def test_filter_validation(self) -> None:
+        cfg = test_config()
+        cfg["quality"]["mutation"].update({"test_filter": ["-E"], "test_filter_when": "e2e_*"})
+        problems = [p for p in cfgmod.validate(cfg) if "test_filter" in p]
+        self.assertEqual(len(problems), 2, problems)
+
+
 class ScriptsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = make_tmp("scripts-")
@@ -191,18 +239,33 @@ class ScriptsTest(unittest.TestCase):
             self.assertTrue(os.access(SCRIPTS / name, os.X_OK), name)
 
     def test_memcap_runner(self) -> None:
-        p = self.run_script(str(RUNNER), "sh", "-c", "ulimit -v", env={"SDD_MEM_LIMIT_KB": "524288"})
-        self.assertEqual((p.returncode, p.stdout.strip()), (0, "524288"))
-        p = self.run_script(str(RUNNER), "sh", "-c", "ulimit -v", env={"SDD_MEM_LIMIT_KB": "0"})
-        self.assertEqual(p.stdout.strip(), shell_ulimit_v())
+        p = self.run_script(str(RUNNER), "sh", "-c", 'echo "$(ulimit -d) $(ulimit -v)"', env={"SDD_MEM_LIMIT_KB": "524288"})
+        self.assertEqual((p.returncode, p.stdout.strip()), (0, f"524288 {shell_ulimit('-v')}"))  # data capped, address space untouched
+        p = self.run_script(str(RUNNER), "sh", "-c", "ulimit -d", env={"SDD_MEM_LIMIT_KB": "0"})
+        self.assertEqual(p.stdout.strip(), shell_ulimit())
         e = dict(os.environ)
         e.pop("SDD_MEM_LIMIT_KB", None)
-        p = subprocess.run(["sh", str(RUNNER), "sh", "-c", "ulimit -v"], stdout=subprocess.PIPE, text=True, env=e)
+        p = subprocess.run(["sh", str(RUNNER), "sh", "-c", "ulimit -d"], stdout=subprocess.PIPE, text=True, env=e)
         self.assertEqual(p.stdout.strip(), "2097152")  # default 2 GiB
         p = self.run_script(str(RUNNER), "true", env={"SDD_MEM_LIMIT_KB": "not-a-number"})
         self.assertEqual(p.returncode, 125)  # an uncapped run never passes for a capped one
         self.assertIn("cannot set ulimit", p.stderr)
         self.assertEqual(self.run_script(str(RUNNER)).returncode, 2)
+
+    def test_memcap_runner_stops_a_touched_allocation_but_not_a_reservation(self) -> None:
+        """The data cap stops memory a test writes to; address space a runtime only reserves (Go,
+        V8: PROT_NONE ranges) does not count, unlike under an address-space cap."""
+        env = {"SDD_MEM_LIMIT_KB": str(256 << 10)}
+        touch = "b = bytearray({} << 20); b[::4096] = b'\\x01' * len(b[::4096]); print(len(b) >> 20)"
+        small = self.run_script(str(RUNNER), "python3", "-I", "-c", touch.format(64), env=env)
+        self.assertEqual((small.returncode, small.stdout.strip()), (0, "64"), small.stderr)
+        big = self.run_script(str(RUNNER), "python3", "-I", "-c", touch.format(512), env=env)
+        self.assertNotEqual(big.returncode, 0)
+        self.assertIn("MemoryError", big.stderr)
+        # prot=0 is PROT_NONE: 1 GiB reserved, never writable, four times the cap.
+        reserve = "import mmap; m = mmap.mmap(-1, 1 << 30, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS, prot=0); print('reserved')"
+        r = self.run_script(str(RUNNER), "python3", "-I", "-c", reserve, env=env)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "reserved"), r.stderr)
 
     @unittest.skipUnless(shutil.which("flock"), "flock(1) not installed")
     def test_heavy_lock_nested_and_exit_code(self) -> None:
@@ -225,6 +288,64 @@ class ScriptsTest(unittest.TestCase):
         self.assertEqual(proc.wait(timeout=10), 0)
         with proc.stderr:
             self.assertIn("waiting for", proc.stderr.read())
+
+    @unittest.skipUnless(shutil.which("flock"), "flock(1) not installed")
+    def test_heavy_lock_is_first_come_first_served(self) -> None:
+        """A job that loops over locked steps queues behind a job that arrived while it held the lock
+        (flock alone let the loop re-take the lock at once and starve the short job for hours)."""
+        lock = str(self.tmp / "heavy.lock")
+        out = self.tmp / "order"
+        env = dict(os.environ, SDD_HEAVY_LOCK=lock, SDD_HEAVY_LOCK_POLL="0.05")
+        env.pop("SDD_HEAVY_LOCK_HELD", None)
+        step = f'echo L$i >> {shlex.quote(str(out))}; sleep 0.8'
+        loop = subprocess.Popen(["sh", "-c", f'for i in 1 2 3; do sh {shlex.quote(str(LOCK))} sh -c "{step}"; done'], env=env)
+        try:
+            for _ in range(200):  # until the first step holds the lock
+                if out.exists():
+                    break
+                time.sleep(0.02)
+            short = subprocess.run(["sh", str(LOCK), "sh", "-c", f"echo S >> {shlex.quote(str(out))}"], env=env,
+                                   stderr=subprocess.PIPE, text=True, timeout=30)
+            self.assertEqual(short.returncode, 0, short.stderr)
+            self.assertIn("heavy-lock: ", short.stderr)
+            self.assertEqual(loop.wait(timeout=30), 0)
+        finally:
+            if loop.poll() is None:
+                loop.kill()
+        self.assertEqual(out.read_text().split(), ["L1", "S", "L2", "L3"])
+        self.assertEqual([p.name for p in Path(lock + ".queue").iterdir() if not p.name.startswith(".")], [])
+
+    @unittest.skipUnless(shutil.which("flock"), "flock(1) not installed")
+    def test_heavy_lock_drops_dead_and_cancelled_tickets(self) -> None:
+        lock = str(self.tmp / "heavy.lock")
+        queue = Path(lock + ".queue")
+        queue.mkdir()
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        (queue / f"{1:012d}.{dead.pid}").write_text("")  # a caller killed while queued
+        env = {"SDD_HEAVY_LOCK": lock, "SDD_HEAVY_LOCK_POLL": "0.05"}
+        p = self.run_script(str(LOCK), "sh", "-c", "echo ran", env=env, timeout=10)
+        self.assertEqual((p.returncode, p.stdout.strip()), (0, "ran"))
+        self.assertEqual([x.name for x in queue.iterdir() if not x.name.startswith(".")], [])
+        # A caller cancelled while it waits removes its own ticket.
+        holder = subprocess.Popen(["flock", lock, "sleep", "30"], start_new_session=True)
+        try:
+            for _ in range(100):
+                if subprocess.run(["flock", "-n", lock, "true"]).returncode != 0:
+                    break
+                time.sleep(0.05)
+            waiter = subprocess.Popen(["sh", str(LOCK), "true"], env=dict(os.environ, **env), stderr=subprocess.DEVNULL)
+            for _ in range(100):
+                if any(not x.name.startswith(".") for x in queue.iterdir()):
+                    break
+                time.sleep(0.05)
+            self.assertEqual(len([x for x in queue.iterdir() if not x.name.startswith(".")]), 1)
+            waiter.terminate()
+            self.assertNotEqual(waiter.wait(timeout=10), 0)
+        finally:
+            os.killpg(holder.pid, signal.SIGKILL)
+            holder.wait()
+        self.assertEqual([x.name for x in queue.iterdir() if not x.name.startswith(".")], [])
 
 
 class MemguardTest(unittest.TestCase):

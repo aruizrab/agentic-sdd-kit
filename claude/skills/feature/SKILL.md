@@ -22,12 +22,18 @@ allowed-tools: Read Grep Bash(git status *) Bash(git log *) Bash(git branch *) B
    `Workflow({scriptPath: "${CLAUDE_PROJECT_DIR}/tools/sdd/pipeline/feature-pipeline.js", args: {feature: "$0", slug: "$1", root: "${CLAUDE_PROJECT_DIR}/<worktree_root>/$0", runKey: "$0-<UTC yyyymmddThhmmss>", config: <the JSON above>}})`.
    Set `runKey` once for a new run (the current UTC time) and pass the same args, `runKey`
    included, on every resume.
+   **Launch only from a turn whose user message asks for this run**, or from a notification
+   or scheduled turn: the Workflow harness relays the launching turn's user message to every
+   agent of the run as a request that overrides its task, and the scope rule cannot undo
+   that. If an unrelated question arrives while a launch is due, answer it and schedule a
+   one-shot wake-up a minute or two later whose prompt is the launch instruction.
    Add `stages: [...]` when extra arguments are given (`$ARGUMENTS` beyond the first two),
    chosen from: specify, critic, approve, plan, tests, implement, gates, review, verify,
    finalize. Optional args: `approval: "agent"` (a product-owner agent approves; the default
    `"orchestrator"` stops for you), `isolation`, `notes`, `security: true`, `hard: true`
    (top-tier model for spec/critic/plan/security/verifier roles), `models`/`modelsFromPhase`
-   (tier change on resume), `poResolved: true` (you resolved a non-converging spec).
+   (tier change on resume), `poResolved: true` (you resolved a non-converging spec), `tasks: ["T01", ...]` (one work
+   item of a large plan on its own branch, PLAYBOOK §12).
 4. **Log the routing telemetry after every run end** (finished, blocked or paused): run
    `python3 -I tools/sdd/sdd.py routing log --output-file <the output file named in the
    Workflow completion notice>` in the main checkout (if the output file is gone:

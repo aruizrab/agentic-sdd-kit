@@ -54,11 +54,21 @@ Robustness arguments (defaults in brackets):
 | Arg | Effect |
 |---|---|
 | `strictScope` [`true`] | every prompt carries the SCOPE RULE: only the orchestrator assigns work; a relayed user or chat message asking for other work is not acted on, only mentioned in one line of the agent's summary. `false` removes it. |
-| `readViaGit` [`false`] | the spec critic, reviewers, verifiers and fix-checks read through git (`git show <sha>:<path>`, `git diff`, `git log`) instead of creating worktrees; they may run the existing tests but write no code, so a reproduction that needs new code is described, not run, and Verify passes no `isolation`. Turn it on when builds are expensive (each worktree is a cold build). |
+| `readViaGit` [`false`] | the spec critic, the product-owner approval, reviewers, verifiers and fix-checks read code through git (`git show <sha>:<path>`, `git diff`, `git log`, `git grep`) instead of creating worktrees, and the feature directory's Markdown from the working copy (the spec is still uncommitted while the critic and the product owner read it); they may run the existing tests without editing anything, and an experiment that needs a build or new code runs in a detached throwaway worktree (`<worktree_root>/exp-<unique>`) that the agent removes before it finishes. Verify passes no `isolation`. Turn it on when builds are expensive (each worktree is a cold build). A run started with `readViaGit` before the 2026-11-16 kit re-runs its read-only calls when resumed (the rule text changed). |
 | `outsideScan` [`[]`] | carried over on a resumed run: test files the red check found outside `trace.scan_globs` (see below) |
+| `tasks` [all open tasks] | `["T01", "T02"]`: Tests and Implement keep only these tasks of tasks.md, so one work item of a large plan runs on its own branch (§12). The test author and the red check are scoped to the requirements those tasks verify, waves left empty are skipped, dependencies on unlisted tasks count as satisfied, and the test commit names the tasks. Listed ids tasks.md does not return (unknown, or already `[x]`) are in `summary.taskFilter.<stage>.missing`; no open listed task ends the run `blocked-tests` before any test is written. Changes only Tests and Implement calls. |
 
 Why these exist: docs/LESSONS.md entries 16 (scope rule), 17 (detached gate runs), 19 (red
 check cross-checks tags), 20 (persisted review record) and 21 (interrupted work is kept).
+
+**Launch from the right turn.** The Workflow harness relays the user message of the turn that
+launches a run to every agent of that run, framed as the user's request that wins over the
+computed task. A run launched while answering "how many pipelines are running?" had its setup
+agent answer that question and skip the setup; the scope rule in the prompt cannot override
+that framing. So launch (and resume) runs only in a turn whose user message asks for that run,
+or in a notification or scheduled turn (no relayed message). When an unrelated question
+arrives while a launch is due, answer it and schedule a one-shot wake-up a minute or two later
+whose prompt is the launch instruction; that prompt is then the relayed request.
 
 **Tests outside the trace scan.** The red check runs `sdd trace --feature NNN --json --include
 <each added test file>`, so a `must` whose test lives where `trace.scan_globs` does not look
@@ -91,8 +101,11 @@ If it still blocks, resolve it yourself and re-run with `poResolved: true`.
 - Pick a wave from the roadmap: features touching disjoint components.
 - Run each in its own worktree: `root: "<repo>/.wt/F0NN"`. Never branch-switch in a checkout
   another agent is using; never run more than `pipeline.max_parallel_features` at once.
-- Requirement ids are global. Each feature owns an id block (`sdd new-feature` prints it);
-  `sdd trace --check` on main catches collisions.
+- Requirement ids are global. Each feature owns an id block per clause/area key (`sdd
+  new-feature` prints it); `sdd trace --check` on main catches collisions. A feature whose
+  block is full takes the lowest free block of that key, never "the next id above the
+  highest": that rule walked one area key to R995 within weeks, so the next feature had no
+  three-digit id left, and it lands in the blocks later features own.
 - Merging (per feature, when `ready-to-merge`):
   1. In the worktree: `git merge main` into the feature branch. Manifests: `sdd union-merge`.
      Source conflicts: an implementer agent resolves them semantically (never union, never
@@ -126,6 +139,14 @@ coverage and mutation of the changed lines and the command checks) and `gates.ni
 (full-repository coverage and mutation, long fuzzing, benchmarks; schedule it in CI). Keep full gates fast enough to run per
 feature: budget fuzzing, fuzz only changed targets, use an optimised test profile for heavy
 property tests. Gate logs live in `paths.logs_dir`.
+
+**The script decides the gate command.** Gate agents ignored orchestrator notes asking them to
+wrap the gate run in the heavy-job lock. In the kit the gate prompt names the exact command
+(`sdd gates --detached ...`), the integrator role says to run it unchanged, and what the
+plan runs comes from `gates.full` in `sdd.config.json`: coverage and mutation take the
+host-wide lock themselves, and other heavy gates are wrapped in
+`tools/sdd/scripts/heavy-lock.sh` in the configuration (the examples do this for the full
+test gate). Never ask for a different command through `notes`; change the configuration.
 
 ## 5. Resuming paused and blocked runs
 
@@ -176,6 +197,19 @@ property tests. Gate logs live in `paths.logs_dir`.
 - Do not interrupt running agents to switch models; let the phase finish.
 - Keep `pipeline.max_parallel_features` small; parallelism multiplies spend without
   improving any single feature.
+- **Pace each usage window by projection, not by its current level.** Where the plan has a
+  rolling window (for example 5 hours) and a weekly cap, read both before every launch.
+  Projection = used % + the burn rate of the last hour x the hours left in the window. Aim to
+  end each window near 85-90 %: below about 70 % projected, start another agent-heavy run
+  (spec, critic, review); between 70 and 90 % hold; above about 95 %, pause the run furthest
+  from a milestone (resume it after the reset; completed calls replay). When the weekly cap is
+  the binding limit, give each remaining window an allowance, `(100 - weekly used %) / windows
+  left until the weekly reset`, and stop launching token-heavy runs once a window has used it.
+  Runs that spend host time but few tokens (a long mutation series) do not count against
+  either. Never sit idle: when nothing runs and the window is not exhausted, start the
+  cheapest runnable work (a resume, a plan-only run, an execution-heavy stage).
+- While the owner is away, schedule one-shot wake-ups at each window reset (§14) as well as
+  at pauses, so a window that filled early does not leave the next one unused.
 
 ## 7. Model tiering
 
@@ -185,6 +219,11 @@ property tests. Gate logs live in `paths.logs_dir`.
 | mid | implementer, perf-reviewer, test-adequacy-reviewer, integrator merges, finalize | checked by stronger reviewers and verifiers |
 | strong | spec-author, spec-critic, product-owner, architect-planner, test-author, spec-compliance-reviewer, security-reviewer, verifier | a wrong answer here propagates unchecked |
 | top | a fix that already failed once, test arbitration, second product-owner resolution pass, semantic merge resolution, features flagged `hard` | hardest judgement calls |
+
+Setup is mechanical, but a cheap model once drafted a whole spec at Setup and tried to commit
+it: the integrator role now says "prepare the workspace only, write no spec content". If the
+mechanical model still overreaches, map `integrator` to `mid` in `pipeline.role_tiers` (that
+moves every integrator call) rather than weakening the rule.
 
 The gate runner has its own `gate` tier (a small model at medium effort: the cheapest model
 did not wait and report reliably); empty, it falls back to `mid`. Each tier is an id or
@@ -230,6 +269,15 @@ with the violated id), fix, `sdd gates`, `/review-feature` (stages gates/review/
 commit. A behaviour change to an Approved requirement takes the full path with a superseding
 id.
 
+**Supersession is all or nothing.** `(superseded by <ID>)` removes the old requirement from
+the trace check completely (no test, no implementation site required). A product-owner
+decision that changes only part of an approved requirement ("superseded by X for case Y")
+therefore cannot be expressed by the marker: it would silently drop the part that still
+holds. Write a qualified successor (a new id that restates the remaining behaviour plus the
+change), supersede the old id by it, and record the decision. The spec critic treats a partial
+supersession as blocking. The marker counts only outside backticks: a requirement that quotes
+`(superseded by X)` in a code span is not superseded.
+
 ## 11. Machine hygiene checklist (every merge)
 
 - [ ] build output of the merged worktree deleted, worktree removed
@@ -270,6 +318,22 @@ adopt them is fixed on purpose, not by accident. Three steps, in this order:
    (docs/ADAPTING.md). New features start when the report is empty, or when what is left is
    explicitly accepted by the product owner.
 
+**Large remediation features run as work items.** A remediation feature over a whole codebase
+is too large for one branch. What worked:
+- **Merge the plan first.** Run the feature to `plan`, then merge its branch (spec, design,
+  tasks, review only) into `main`, so every work-item branch cut from `main` has the plan and
+  `sdd trace` knows the feature's ids.
+- **One work item per branch**, each a launch with the task filter (`tasks: ["T04", "T05"]`)
+  on its own branch and worktree (`args.branch`, `root`), merged when green. `sdd progress`
+  keeps the feature unfinished until its spec on main says Implemented, whatever branches
+  have merged.
+- **Whole-codebase mutation baselines one package at a time**, restartable: a script loops
+  over the packages, runs each under `heavy-lock.sh` (one lock hold per package, never the
+  whole loop), writes a done marker per package (accepting the tool's "survivors found" exit
+  codes) and skips packages that have one, so a crash or a reboot resumes where it stopped.
+  Leave a pause between packages and run short jobs (other features' gates) first; while the
+  series runs, local gate runs may set `SDD_MUTATION=skip` (CI still runs mutation testing).
+
 Never grandfather new code: no agent adds baseline entries, raises thresholds or adds exclude
 globs to get a gate green (the code-writing roles cannot edit the config, the hooks or the
 checkers). A `cov:unreachable: <reason>` marker or a mutant justification in review.md §6 is
@@ -283,7 +347,7 @@ or an opts field of an already completed call and the resumed run silently runs 
 again (cost, and possibly a different answer than the one the later phases built on). So:
 
 1. **Every new behaviour is opt-in**, behind a new pipeline arg or a new `pipeline.*` config
-   key that defaults to off (examples: `readViaGit`, `redCheckTags`, `persistFindings`).
+   key that defaults to off (examples: `readViaGit`, `redCheckTags`, `persistFindings`, `tasks`).
    Without it, every prompt and opts object must stay byte-identical to the previous script.
 2. **Prove it with the cache-key equivalence test**, `node tests/pipeline_cachekeys.mjs
    [--baseline <git-rev>]`. It loads the current script and the baseline script
@@ -330,13 +394,21 @@ until somebody looks, even after the limit has reset.
   `/tmp/sdd-heavy-job.lock`, the same in every worktree). `sdd check coverage` and
   `sdd check mutation` take it themselves; wrap the other heavy commands (the full plan's test
   build, nightly runs, cache measurements, jobs started by hand) the same way. A nested call
-  for the same lock runs directly, so wrapping a whole gate plan cannot deadlock.
+  for the same lock runs directly, so wrapping a whole gate plan cannot deadlock. The queue is
+  **first come, first served**: each caller draws a ticket in `<lock>.queue/` and only the
+  oldest live ticket waits on the lock (plain `flock` is not fair: a job looping over long
+  locked steps re-took the lock the moment it released it and kept short jobs waiting for four
+  hours). So lock each step of a long loop separately (per package, per crate, per module),
+  never the whole loop: jobs that arrive meanwhile get the lock between steps. Run short jobs
+  (a feature's gates, follow-up fixes) before starting a long series. A tool that takes the
+  lock file with `flock` directly bypasses the queue; give it `heavy-lock.sh` instead.
 - **Cap every mutation test process**: a mutant can turn a loop into a runaway allocator that
   grows a test process by gigabytes in seconds, far faster than a test timeout stops it. With
   3 jobs and 8 test threads per job that took a 16 GB host down, init system and unrelated user
   services included. `sdd check mutation` runs at most `quality.mutation.jobs` (2) mutants with
-  `test_threads` (3) each and caps each test process's address space at `memory_limit_mib`
-  (2048) through `tools/sdd/scripts/memcap-runner.sh` (`ulimit -v`); for Rust the runner is the
+  `test_threads` (3) each and caps each test process's data memory at `memory_limit_mib`
+  (2048) through `tools/sdd/scripts/memcap-runner.sh` (`ulimit -d`; an address-space cap,
+  `ulimit -v`, made Go tools such as gitleaks panic at start-up, lesson 30); for Rust the runner is the
   cargo target runner (`CARGO_TARGET_<TRIPLE>_RUNNER`), so the compiler stays uncapped. A
   runaway mutant then fails alone and counts as caught. If the unmutated baseline fails only
   because of the cap, raise it; never remove it. Other ecosystems: docs/ADAPTING.md §6.
@@ -349,6 +421,16 @@ until somebody looks, even after the limit has reset.
 - **Re-check survivors with the slow tests before calling them test gaps**: if the mutation
   command excludes slow end-to-end tests for speed, re-run the surviving mutants with those
   tests included first; a survivor they kill is not a gap.
+- **Exclude tests that need the real repository on the mutation command line**
+  (`quality.mutation.test_filter`, `{test_filter}`): mutation tools test a copy of the tree,
+  often without `.git`, so end-to-end tests that run git or the project's tools fail the
+  unmutated baseline there. Put the filter on the command line, not in a test-runner profile:
+  fixture projects copy that profile and some runners reject a filter that matches nothing
+  (`test_filter_when` applies it only while such tests exist).
+- **Skip mutation testing on a busy host, never in CI**: `SDD_MUTATION=skip` makes `sdd check
+  mutation` report SKIP without running (for example while a long mutation series of another
+  feature holds the heavy-job lock); with `CI=true` it fails, so the pull request's CI run
+  still tests every changed line. Record in review.md that the local run was skipped.
 - **Measure build caches only on an idle host**: a cache measurement is a series of cold
   builds, and its timings are worthless (and its memory use dangerous) next to another build.
 - **Run mutation testing without the compiler-cache wrapper** (for example an empty
@@ -446,3 +528,24 @@ status fails until it has an entry, so retrofit them in the commit that enables 
   scenarios when it resumes, before it is (re-)approved; Drafts only warn meanwhile.
 Run `sdd trace --check` on main after the retrofit; the coverage report then lists every
 feature.
+
+## 16. Owner patches to protected files
+
+Agents cannot edit protected paths (`.claude/**`, the constitution, the CI configuration); a
+feature that needs such a change ships it as a patch file in an unprotected, tracked place
+(for example `tools/patches/F0NN-<what>.patch`) for the owner to review and apply with
+`SDD_ALLOW_PROTECTED=1`. Tests that check the patch (it applies, the patched hook behaves)
+must also pass **after** the owner applied it: test "applied or applicable", never "applies".
+A patch that reverses cleanly counts as applied:
+
+```sh
+if git apply --reverse --check tools/patches/F0NN-x.patch 2>/dev/null; then
+  : # already applied on this branch: test the files as they are
+else
+  git apply --check tools/patches/F0NN-x.patch   # else it must apply cleanly
+fi
+```
+
+Without the reverse check the patch tests failed on every branch merged after the owner
+applied the patch on `main`. Apply patches in a detached throwaway worktree in tests, never in
+a shared tree.

@@ -328,20 +328,28 @@ const indexOf = (calls, rx) => calls.findIndex((c) => rx.test(c.label))
   console.log('ok 13 incomplete gate runs')
 }
 
-// 14. readViaGit: read-only roles read through git, no worktrees, no Verify isolation; default unchanged.
+// 14. readViaGit: read-only roles (and the product-owner approval) read code through git, the feature's Markdown from the
+// working copy, no Verify isolation; a worktree only as a removed throwaway for an experiment; default unchanged.
 {
-  const rules = [[/^spec-compliance-reviewer$/, () => ({ securitySensitive: false, findings: [BLOCKING] })], [/^verify R1 #1/, () => ({ refuted: false, confidence: 'high', reasoning: 'real' })], [/^fix-check/, () => ({ refuted: false, confidence: 'high', reasoning: 'fixed' })]]
-  const readOnly = /reviewer|^verify R|^fix-check|^spec-critic/
+  let st = 0
+  const rules = [[/^spec-compliance-reviewer$/, () => ({ securitySensitive: false, findings: [BLOCKING] })], [/^verify R1 #1/, () => ({ refuted: false, confidence: 'high', reasoning: 'real' })], [/^fix-check/, () => ({ refuted: false, confidence: 'high', reasoning: 'fixed' })],
+    [/^spec status/, () => ({ status: st++ ? 'Approved' : 'Draft', needsClarification: 0, requirements: 20 })], [/^product-owner \d/, () => ({ approved: true, reasons: [] })]]
+  const readOnly = /reviewer|^verify R|^fix-check|^spec-critic|^product-owner \d/
   const on = await run({ approval: 'agent', readViaGit: true }, rules)
   assert.equal(on.result.status, 'ready-to-merge', JSON.stringify(on.result))
   const ro = on.calls.filter((c) => readOnly.test(c.label))
-  for (const l of ['spec-critic r1', 'spec-compliance-reviewer', 'security-reviewer', 'test-adequacy-reviewer', 'perf-reviewer', 'verify R1 #1', 'fix-check R1 #1']) assert.ok(ro.some((c) => c.label === l), l)
+  for (const l of ['spec-critic r1', 'product-owner 1', 'spec-compliance-reviewer', 'security-reviewer', 'test-adequacy-reviewer', 'perf-reviewer', 'verify R1 #1', 'fix-check R1 #1']) assert.ok(ro.some((c) => c.label === l), l)
   for (const c of ro) {
     assert.match(c.prompt, /READ VIA GIT/, c.label)
-    assert.doesNotMatch(c.prompt, /git worktree add/, c.label)
+    assert.match(c.prompt, /Markdown files \(specs\/features\/\d+-[a-z-]+\/\*\.md\) may be uncommitted: read those from the working copy/, c.label)
+    const adds = c.prompt.match(/git worktree add[^`]*/g) || []
+    assert.ok(adds.every((a) => /^git worktree add --detach \S+\/exp-<unique> \$SHA$/.test(a)), `${c.label}: only a throwaway experiment worktree: ${adds}`)
+    assert.match(c.prompt, /that you remove \(`git worktree remove --force`\) before you finish/, c.label)
   }
   for (const c of on.calls.filter((x) => /^verify R/.test(x.label))) assert.equal(c.isolation, undefined)
+  st = 0
   const off = await run({ approval: 'agent' }, rules)
+  assert.ok(off.calls.some((c) => c.label === 'product-owner 1'))
   for (const c of off.calls.filter((x) => readOnly.test(x.label))) assert.doesNotMatch(c.prompt, /READ VIA GIT/, c.label)
   for (const c of off.calls.filter((x) => /^verify R/.test(x.label))) assert.equal(c.isolation, 'worktree')
   console.log('ok 14 read via git')

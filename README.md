@@ -94,6 +94,7 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 | `sdd callflow SPEC --procedure P --expect F --events F [--json]` | call-flow conformance: checks a recorded event trace (JSON or JSON Lines, each event with a `seq`) against the spec's step table for `P` with ordered/unordered expectations and skips; the same check as `sddkit.callflow` for Python tests |
 | `sdd gates [--fast\|--plan fast\|full\|nightly] [--only g] [--detached [--feature F --tag T] [--fresh]] [--wait LOG]` | runs the configured gate plan, prints a summary table, exit code; every log ends with `GATES_EXIT=<n>`; missing tools SKIP with an install hint, or FAIL when `CI=true`. `--detached --feature --tag` keys the log on HEAD (`<logs_dir>/gates/F-T-<sha7>[-dirty].log`), attaches to a live run or reuses a completed one (`--fresh`: never reuse); `--wait` exits 124 while still running, 125 for an incomplete run |
 | `sdd check NAME [--json] [--staged] [--no-run]` | one quality check: `size`, `arch`, `coverage`, `mutation`, `commits`, `secrets`, `baseline` or a `quality.checks` entry; exit 0 pass, 1 violations, 2 config/tool error, 3 tool missing |
+| `sdd merge-base` | the merge-base of HEAD and the base ref that every diffing check uses (`SDD_BASE_REF`, else `quality.base_ref`, else the main branch; with `CI=true` only `SDD_BASE_REF`, exit 2 without it): for project gate commands that select work by changed files, so none diffs against a hard-coded `main` |
 | `sdd baseline [--report [--json]\|--init\|--update\|--resolve\|--merge-driver O A B]` | the shrink-only violation baseline: report every violation by kind and file, record it once at adoption, shrink it, resolve merge conflicts mechanically |
 | `sdd hooks install [--force]`, `sdd hooks run NAME` | sets `core.hooksPath` to the kit's git hooks (refuses over hooks already in use); the hook logic |
 | `sdd new-feature NNN slug` | scaffolds the feature directory from the templates and prints the feature's requirement id block |
@@ -196,7 +197,7 @@ changes the table. Reference: docs/CONFIG.md ("Model routing"), docs/PLAYBOOK.md
 ## Testing the kit
 
 ```sh
-python3 -I -m unittest discover -s tests -v     # 222 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
+python3 -I -m unittest discover -s tests -v     # 232 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
 node tests/pipeline_smoke.mjs                   # drives feature-pipeline.js with a fake agent()
 node tests/pipeline_cachekeys.mjs               # cache keys: (prompt, opts) byte-identical to the baseline script without new args (PLAYBOOK §13)
 ```

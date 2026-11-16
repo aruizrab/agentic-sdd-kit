@@ -1,6 +1,6 @@
 """WI4 acceptance criteria: documentation and lessons, and the repository hygiene scan.
 
-AC 1  LESSONS.md has entries 16-26 (what happened, rule, where).
+AC 1  LESSONS.md has entries 16-41 (what happened, rule, where).
 AC 2  every key path of config.DEFAULTS appears in docs/CONFIG.md.
 AC 3  PLAYBOOK has the adoption section with its three steps in order.
 AC 4  every tracked text file: `--no-verify` only in prohibitions and guard code; e-mail
@@ -59,6 +59,19 @@ class LessonsTest(unittest.TestCase):
         26: ("wake-up", "reset"),
         27: ("none applies", "explicit entry"),
         28: ("runaway", "memcap-runner"),
+        29: ("not fair", "ticket queue"),
+        30: ("address space", "ulimit -d"),
+        31: ("relays", "notification"),
+        32: ("all or nothing", "qualified successor"),
+        33: ("backtick", "quote"),
+        34: ("lowest free block", "above the highest"),
+        35: ("setup", "no spec content"),
+        36: ("ignored", "exact command"),
+        37: ("projection", "85-90"),
+        38: ("plan first", "task filter"),
+        39: ("test_filter", "fails in CI"),
+        40: ("reverse", "already applied"),
+        41: ("comment", "gitleaks:allow"),
     }
 
     def test_entries_16_to_28(self) -> None:

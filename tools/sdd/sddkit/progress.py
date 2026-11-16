@@ -12,8 +12,9 @@ planned                20.0  ``design.md`` and ``tasks.md`` present
 tests                  30.0  a ``test(F<NNN>)`` commit on the branch (red tests)
 implementing      30 + 60r  r = checked tasks / total tasks in ``tasks.md`` (r > 0)
 implemented           95.0  ``Status: Implemented`` but not merged into main
-merged               100.0  the feature branch is an ancestor of main, the spec on
-                            main says ``Status: Implemented``, or the feature is in
+merged               100.0  the spec on main says ``Status: Implemented``, a feature
+                            branch is an ancestor of main while main holds no spec of
+                            the feature, or the feature is in
                             ``features.done_without_spec``
 =================  =======  ==========================================================
 
@@ -32,8 +33,10 @@ newest feature branch, else main), else the roadmap heading title after the slug
 placeholder note such as ``(placeholder, specs later)`` or ``(TBD)`` is dropped from feature
 titles and group names.
 
-The evidence ref for an unmerged feature is its newest ``<branch_prefix>F<NNN>-*``
-branch (remote first, then local), else main.
+The evidence ref for an unfinished feature is its newest unmerged ``<branch_prefix>F<NNN>-*``
+branch (remote first, then local), else main. A feature that merges in parts (the plan first,
+then one branch per work item) therefore shows its real stage until its spec on main says
+Implemented, not "merged" after its first partial merge.
 """
 
 from __future__ import annotations
@@ -200,10 +203,14 @@ def feature_stage(repo: Repo, fid: str, main_ref: str, main_dirs: Dict[str, str]
         spec = repo.git.show(main_ref, f"{main_dir}/spec.md")
         if spec is not None and spec_status(spec) == "Implemented":
             return "merged", STAGES["merged"]
-    for ref in branches:
-        if repo.git.is_ancestor(ref, main_ref):
-            return "merged", STAGES["merged"]
-    ref = branches[0] if branches else main_ref
+    unmerged = [ref for ref in branches if not repo.git.is_ancestor(ref, main_ref)]
+    # A merged branch means "finished" only while main holds no spec of the feature. A feature that
+    # merges in parts (the plan first, then one branch per work item) has its spec on main and is
+    # finished only when that spec says Implemented (above); until then its stage comes from the
+    # newest unmerged branch, else from main's spec and tasks.
+    if not main_dir and len(unmerged) < len(branches):
+        return "merged", STAGES["merged"]
+    ref = unmerged[0] if unmerged else main_ref
     dirs = repo.feature_dirs(ref) if ref != main_ref else main_dirs
     fdir = dirs.get(num)
     if fdir is None:

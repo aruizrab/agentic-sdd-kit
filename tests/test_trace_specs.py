@@ -134,6 +134,27 @@ class TraceTest(unittest.TestCase):
         self.assertTrue(any("unknown requirement FC-OBS-R555" in p for p in problems), problems)
         self.assertTrue(any("superseded by unknown id FC-OBS-R777" in p for p in problems), problems)
 
+    def test_a_quoted_superseded_marker_does_not_supersede(self) -> None:
+        def sup(text: str):
+            reqs, _ = trace.parse_spec(f"- **FC-OBS-R130** [must] {text}\n", self.cfg["requirements"]["id_regex"], ["must"], "013-x", "s.md", "Implemented")
+            return reqs[0].superseded_by
+        # A marker inside a code span quotes the phrase (a requirement about supersession itself).
+        self.assertIsNone(sup("SHALL keep lines, except appending `(superseded by FC-OBS-R131)` to R132. (Source: x)"))
+        self.assertIsNone(sup("x ``a `(superseded by FC-OBS-R131)` b`` y"))
+        # An appended marker outside every code span still counts, also next to a quoted one.
+        self.assertEqual(sup("old rule. (Source: x) (superseded by FC-OBS-R131)"), "FC-OBS-R131")
+        self.assertEqual(sup("quotes `(superseded by FC-OBS-R131)`. (Source: x) (superseded by FC-OBS-R132)"), "FC-OBS-R132")
+        self.assertEqual(sup("an unclosed ` opens no span (superseded by FC-OBS-R131)"), "FC-OBS-R131")
+        self.assertEqual(sup("uses `x` and ``y`` (superseded by FC-OBS-R131)"), "FC-OBS-R131")
+        # The requirement that quotes the marker stays live in --check and in the matrix.
+        write(self.root, "specs/features/013-x/spec.md", "Status: Implemented\n"
+              "- **FC-OBS-R130** [must] [behaviour-only] keeps lines, except appending `(superseded by FC-OBS-R131)` to R132. (Source: x)\n"
+              "- **FC-OBS-R131** [should] new rule. (Source: x)\n")
+        m = trace.load(self.root, self.cfg)
+        self.assertIsNone(m.requirements["FC-OBS-R130"].superseded_by)
+        self.assertIn("FC-OBS-R130 (013-x, Implemented): must requirement has no verifying test", trace.check(m, self.cfg))
+        self.assertNotIn("superseded", trace.status_of(m, m.requirements["FC-OBS-R130"]))
+
     def test_cli_json_and_feature_filter(self) -> None:
         proc = run_cli(self.root, "trace", "--feature", "011", "--json", "--check")
         self.assertEqual(proc.returncode, 1, proc.stderr)

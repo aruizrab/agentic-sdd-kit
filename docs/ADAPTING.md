@@ -185,18 +185,23 @@ process grows by gigabytes in seconds, far faster than any test timeout, and sev
 several test threads each exhausted a 16 GB host (docs/LESSONS.md 28). `sdd check mutation`
 therefore applies `quality.mutation.jobs` (default 2), `test_threads` (3) and a per-test-process
 memory cap, `memory_limit_mib` (2048), through `tools/sdd/scripts/memcap-runner.sh`
-(`ulimit -v`), and runs under the host-wide heavy-job lock (`tools/sdd/scripts/heavy-lock.sh`,
+(`ulimit -d`, the data limit: an address-space cap, `ulimit -v`, made Go tools that reserve
+large unused ranges panic at start-up; docs/LESSONS.md 30), and runs under the host-wide heavy-job lock (`tools/sdd/scripts/heavy-lock.sh`,
 `quality.heavy_lock`). Cap the test processes, not the compiler:
 
 | Ecosystem | How the cap reaches the tests |
 |---|---|
 | Rust | target runner hook: `env` `{"CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER": "{memcap_runner}", "NEXTEST_TEST_THREADS": "{test_threads}", "RUST_TEST_THREADS": "{test_threads}", "RUSTC_WRAPPER": ""}` (use your host triple: `rustc -vV`, upper-case, `-` to `_`); cargo and nextest start every test binary through the runner, rustc stays uncapped |
 | Python, Go | no `{memcap_runner}`: the whole command runs under the runner, each process (the Go compiler too) with its own cap |
-| TypeScript (Node) | `ulimit -v` breaks V8, which reserves large address space: `memory_limit_mib: 0` and `env` `{"NODE_OPTIONS": "--max-old-space-size=2048"}` (heap cap per process) |
+| TypeScript (Node) | the example keeps `memory_limit_mib: 0` and caps the heap per process: `env` `{"NODE_OPTIONS": "--max-old-space-size=2048"}`, which gives a clearer error than a killed worker. The data cap also works for plain Node (V8's reserved ranges do not count; a 1.3 GB allocation fails under a 512 MiB cap), but it is not verified with Stryker's worker pool |
 | any (systemd) | a cgroup for the whole run instead: `systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=0 <command>` (the kernel then kills the largest process inside the scope only) |
 
 A runaway mutant then fails alone and counts as caught. If the unmutated baseline fails only
-because of the cap, raise `memory_limit_mib`; never remove the cap. For unattended runs also
+because of the cap, raise `memory_limit_mib`; never remove the cap. If it fails because tests
+need the real repository (end-to-end tests that run git in the checkout; the tool tests a copy
+without `.git`), leave them out with `quality.mutation.test_filter` on the command line (Rust
+with nextest: `--test-tool nextest -- {test_filter}` and `"-E 'not binary(/^e2e_/)'"`, with
+`test_filter_when: ["**/tests/e2e_*.rs"]`; pytest: `-m 'not e2e'`; Vitest: `--exclude`). For unattended runs also
 start the memory guard (`python3 -I tools/sdd/scripts/memguard.py`, docs/PLAYBOOK.md §14).
 
 **Nightly** (`gates.nightly`, scheduled in CI): the whole repository, not only the diff, with
@@ -344,7 +349,16 @@ unset (the branch's `features.main_branch` could name the branch itself and empt
 ignores the branch's `quality.base_ref`, refuses a configured base that resolves to HEAD while
 the branch has its own commits, and `sdd check baseline` takes
 `quality.baseline_file` from the merge-base's configuration (a renamed baseline fails as
-`baseline-moved`).
+`baseline-moved`). A project gate of your own that selects work by changed files (fuzz targets,
+benchmarks, affected packages) takes its base from `sdd merge-base`, which applies the same
+rules, never from a hard-coded `main`: a pull-request checkout has no local `main`, and such a
+gate silently fuzzed nothing in CI in the reference project.
+
+Install CI tools from pinned versions **and pinned checksums** (`echo "<sha256>  <file>" |
+sha256sum -c` before extracting, or the release's signed checksum file): a version pin fixes a
+name, not the content, and the secret scanner is itself the control a replaced release asset
+would disable. The commit-message rules of `sdd check commits` include the secret scan of every
+message on the branch (git stores messages that the diff scans never see).
 **Do not let the branch grade itself.** The plan above runs the branch's own `tools/sdd` and
 `sdd.config.json`, so a branch that weakens a checker or drops a gate would pass. Two
 controls: the full plan's `protected` gate (`sdd check protected`) fails a branch that

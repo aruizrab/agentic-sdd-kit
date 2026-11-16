@@ -20,28 +20,64 @@ command and in the values of ``quality.mutation.env`` (set for the command), and
 runs under ``scripts/memcap-runner.sh`` (each process capped); with it, the tool's test-runner
 hook caps the test processes only (Rust: ``CARGO_TARGET_<TRIPLE>_RUNNER``). The command runs
 under the host-wide heavy-job lock (``quality.heavy_lock``).
+
+``{test_filter}`` is replaced by ``quality.mutation.test_filter`` (shell text, for example a
+filter that leaves out end-to-end tests that need the real repository or minutes per run; a
+mutation tool runs the tests in a copy of the tree), or by nothing while ``test_filter_when``
+names globs and no tracked file matches one (some runners reject a filter that matches no test
+binary). The filter lives on the command line, not in a test-runner profile file, because such
+files are also read by fixture projects that have no such tests.
+
+``SDD_MUTATION``: unset or ``run`` runs the check; ``skip`` reports SKIP (exit 3) without
+running anything, for a loaded host; in CI mode ``skip`` fails, so CI never skips mutation
+testing; any other value is an error (exit 2).
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 import shlex
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import QualityError, Result, Violation, normalize_path, quote_files, scratch_dir, vcs
+from . import QualityError, Result, Violation, ci_mode, normalize_path, quote_files, scratch_dir, vcs
+from ..util import any_match
 from .coverage import SCRIPTS, check_report_fresh, considered_files, run_tool
 
 JUSTIFICATION = re.compile(r"^\s*[-*]\s*mutant:\s*(?P<file>[^\s:]+)(?::(?P<line>\d+))?:\s*(?P<mutation>.+?)\s+[—]\s*(?P<reason>.*)$")
 
 
-def build_command(cfg: Dict[str, Any], diff_file: str, files: List[str]) -> Tuple[str, Dict[str, str]]:
-    """The mutation command and its extra environment, with the resource limits applied."""
+def switch(cfg: Dict[str, Any]) -> Optional[Result]:
+    """The ``SDD_MUTATION`` switch: None runs the check (unset or ``run``); otherwise the result
+    reported without running the tool (SKIP for ``skip``, a failure for ``skip`` in CI mode)."""
+    value = os.environ.get("SDD_MUTATION")
+    if value is None or value == "run":
+        return None
+    if value == "skip":
+        if ci_mode():
+            return Result("mutation", status="fail", notes=["SDD_MUTATION=skip is not allowed in CI: CI never skips mutation testing"])
+        return Result("mutation", status="skip", notes=["SDD_MUTATION=skip: mutation testing skipped on this host (CI runs it)"])
+    raise QualityError(f"SDD_MUTATION must be `run` or `skip`, got {value!r}")
+
+
+def test_filter(root: Path, cfg: Dict[str, Any]) -> str:
+    """``quality.mutation.test_filter``, or "" while ``test_filter_when`` matches no tracked file."""
+    m = cfg["quality"]["mutation"]
+    text = m.get("test_filter") or ""
+    when = m.get("test_filter_when") or []
+    if text and when and not any(any_match(f, when) for f in vcs.git(root, "ls-files", "-z").split("\0") if f):
+        return ""
+    return text
+
+
+def build_command(cfg: Dict[str, Any], diff_file: str, files: List[str], filter_text: str = "") -> Tuple[str, Dict[str, str]]:
+    """The mutation command and its extra environment, with the resource limits and the test filter applied."""
     m = cfg["quality"]["mutation"]
     runner = str(SCRIPTS / "memcap-runner.sh")
     limit_kb = int(m["memory_limit_mib"]) * 1024
-    values = {"{jobs}": str(m["jobs"]), "{test_threads}": str(m["test_threads"]), "{memory_limit_kb}": str(limit_kb)}
+    values = {"{jobs}": str(m["jobs"]), "{test_threads}": str(m["test_threads"]), "{memory_limit_kb}": str(limit_kb), "{test_filter}": filter_text}
 
     def fill(text: str, runner_text: str) -> str:
         for key, value in {**values, "{memcap_runner}": runner_text}.items():
@@ -112,6 +148,9 @@ def justifications(root: Path, cfg: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def run(root: Path, cfg: Dict[str, Any], no_run: bool = False) -> Result:
     m = cfg["quality"]["mutation"]
+    switched = switch(cfg)
+    if switched:
+        return switched
     if not m["command"] and not m["report"]:
         raise QualityError("mutation not configured: set quality.mutation.command in sdd.config.json (see docs/ADAPTING.md)")
     base = vcs.merge_base(root, cfg)
@@ -125,7 +164,7 @@ def run(root: Path, cfg: Dict[str, Any], no_run: bool = False) -> Result:
     if m["command"] and not no_run:
         diff_file = scratch_dir(root, cfg) / "diff.patch"
         diff_file.write_text(vcs.diff_text(root, base), encoding="utf-8")
-        cmd, env = build_command(cfg, str(diff_file), list(files))
+        cmd, env = build_command(cfg, str(diff_file), list(files), test_filter(root, cfg))
         failed, output = run_tool(root, cfg, "mutation", cmd, env)
         if failed:
             return failed

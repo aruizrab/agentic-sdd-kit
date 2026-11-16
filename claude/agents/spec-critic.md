@@ -23,8 +23,12 @@ Check, in this order:
 3. **Atomicity and testability.** One behaviour per requirement; a trigger and a response a
    test can observe; no "appropriate", "as needed", "etc."; the right EARS keyword; the exact
    line format.
-4. **Consistency.** Ids unique and in this feature's block; scenarios reference existing ids;
-   every `must` in a scenario; no contradictions.
+4. **Consistency.** Ids unique and in this feature's block (or the lowest free block of the key
+   when the own block is full; an id "above the highest" is major); scenarios reference
+   existing ids; every `must` in a scenario; no contradictions. A **partial supersession** is
+   blocking: a `(superseded by X)` marker on a requirement whose other parts still apply, or a
+   qualified marker such as "(superseded by X for <case>)", drops the whole requirement from
+   the trace check; demand a qualified successor id that states the remaining behaviour.
 5. **Scope and proportionality.** Requirements beyond the roadmap entry are creep (major).
    A count far above `requirements.budget` is over-specification (major). Design detail in
    spec.md is a finding.
