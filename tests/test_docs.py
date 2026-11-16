@@ -78,6 +78,7 @@ class LessonsTest(unittest.TestCase):
         45: ("evidence", "allowPassing"),
         46: ("parent directory", "pending-owner"),
         47: ("SIGKILL", "not a catch"),
+        48: ("heavy.sh", "main checkout"),
     }
 
     def test_entries_16_to_28(self) -> None:

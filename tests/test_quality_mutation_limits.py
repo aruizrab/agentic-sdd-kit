@@ -50,7 +50,8 @@ class ConfigValidationTest(unittest.TestCase):
     def test_safe_defaults(self) -> None:
         m = cfgmod.DEFAULTS["quality"]["mutation"]
         self.assertEqual((m["jobs"], m["test_threads"], m["memory_limit_mib"], m["env"]), (2, 3, 2048, {}))
-        self.assertTrue(cfgmod.DEFAULTS["quality"]["heavy_lock"].startswith("/"))
+        # Relative to the main checkout: every worktree of the project queues on one lock.
+        self.assertEqual(cfgmod.DEFAULTS["quality"]["heavy_lock"], ".wt/locks/heavy.lock")
         self.assertEqual(self.problems(), [])
         template = json.loads((KIT / "templates" / "sdd.config.json").read_text())["quality"]["mutation"]
         self.assertEqual((template["jobs"], template["test_threads"], template["memory_limit_mib"]), (2, 3, 2048))
@@ -67,9 +68,9 @@ class ConfigValidationTest(unittest.TestCase):
         self.assertEqual(self.problems(memory_limit_mib=0), [])  # 0 = no cap
         self.assertEqual(self.problems(env={"CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER": "{memcap_runner}"}), [])
 
-    def test_heavy_lock_must_be_absolute(self) -> None:
+    def test_heavy_lock_path(self) -> None:
         cfg = test_config()
-        for value, ok in (("", True), ("/var/lock/sdd.lock", True), (".sdd/heavy.lock", False), (None, False)):
+        for value, ok in (("", True), ("/var/lock/sdd.lock", True), (".sdd/heavy.lock", True), ("../up.lock", False), ("a b.lock", False), (None, False)):
             with self.subTest(value=value):
                 cfg["quality"]["heavy_lock"] = value
                 problems = [p for p in cfgmod.validate(cfg) if "heavy_lock" in p]
@@ -292,7 +293,7 @@ class ScriptsTest(unittest.TestCase):
         return subprocess.run(["sh", *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=e, timeout=timeout)
 
     def test_scripts_are_executable(self) -> None:
-        for name in ("memcap-runner.sh", "heavy-lock.sh", "memguard.py"):
+        for name in ("memcap-runner.sh", "heavy-lock.sh", "heavy.sh", "memguard.py"):
             self.assertTrue(os.access(SCRIPTS / name, os.X_OK), name)
 
     def test_memcap_runner(self) -> None:
@@ -639,6 +640,64 @@ class HeavyBudgetTest(unittest.TestCase):
         self.assertEqual(self.leftovers(), [])
 
 
+class HeavyLockPathTest(unittest.TestCase):
+    """quality.heavy_lock relative to the main checkout (one queue for the main checkout and every worktree),
+    heavy_budget_mb / heavy_job_mb, and the tools/sdd/scripts/heavy.sh wrapper."""
+
+    def setUp(self) -> None:
+        self.root = make_tmp("heavy-path-")
+        self.main = self.root / "main"
+        self.repo = GitRepo(self.main)
+        self.repo.init()
+        self.cfg = test_config()
+        self.cfg["quality"].update({"heavy_lock": ".wt/locks/heavy.lock", "heavy_budget_mb": 4096, "heavy_job_mb": 1024})
+        write_config(self.main, self.cfg)
+        write(self.main, ".gitignore", ".wt/\n")
+        self.repo.commit("base")
+        self.wt = self.main / ".wt" / "F011"
+        self.repo.git("worktree", "add", "-q", "-b", "feat/F011-x", str(self.wt))
+        self.lock = str((self.main / ".wt" / "locks" / "heavy.lock").resolve())
+
+    def tearDown(self) -> None:
+        rm(self.root)
+
+    def heavy(self, cwd: Path, *cmd: str, env=None) -> subprocess.CompletedProcess:
+        e = {k: v for k, v in os.environ.items() if not k.startswith("SDD_")}
+        e.update({"SDD_HEAVY_CAP": "0"}, **(env or {}))
+        return subprocess.run(["sh", str(SCRIPTS / "heavy.sh"), *cmd], cwd=str(cwd), env=e, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=60)
+
+    def test_wrapper_resolves_the_lock_in_the_main_checkout_from_every_worktree(self) -> None:
+        show = 'echo "$SDD_HEAVY_LOCK|$SDD_HEAVY_LOCK_HELD|$SDD_HEAVY_BUDGET_MB|$SDD_HEAVY_JOB_MB"'
+        for cwd in (self.main, self.wt):
+            with self.subTest(cwd=cwd.name):
+                p = self.heavy(cwd, "sh", "-c", show)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(p.stdout.strip(), f"{self.lock}|{self.lock}|4096|1024")
+        self.assertTrue(Path(self.lock).is_file())
+        p = self.heavy(self.wt, "sh", "-c", show, env={"SDD_HEAVY_JOB_MB": "512"})
+        self.assertEqual(p.stdout.strip(), f"{self.lock}|{self.lock}|4096|512", "a job's own declaration wins")
+
+    def test_python_and_shell_agree(self) -> None:
+        from sddkit.quality import coverage
+
+        for cwd in (self.main, self.wt):
+            self.assertEqual(coverage.heavy_env(cfgmod.load(cwd), cwd)["SDD_HEAVY_LOCK"], self.lock)
+        e = {k: v for k, v in os.environ.items() if k != "SDD_HEAVY_LOCK_HELD"}
+        e["SDD_HEAVY_LOCK"] = ".wt/locks/other.lock"
+        p = subprocess.run(["sh", str(LOCK), "sh", "-c", 'echo "$SDD_HEAVY_LOCK_HELD"'], cwd=str(self.wt), env=e, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+        self.assertEqual(p.stdout.strip(), str((self.main / ".wt" / "locks" / "other.lock").resolve()), p.stderr)
+
+    def test_no_lock_runs_directly_and_validation(self) -> None:
+        self.cfg["quality"]["heavy_lock"] = ""
+        write_config(self.main, self.cfg)
+        p = self.heavy(self.main, "sh", "-c", 'echo "[$SDD_HEAVY_LOCK_HELD]"; exit 3')
+        self.assertEqual((p.returncode, p.stdout.strip()), (3, "[]"))
+        for bad, text in (({"heavy_lock": "../x.lock"}, "quality.heavy_lock"), ({"heavy_budget_mb": -1}, "heavy_budget_mb"), ({"heavy_job_mb": "2G"}, "heavy_job_mb")):
+            cfg = test_config()
+            cfg["quality"].update(bad)
+            self.assertTrue(any(text in x for x in cfgmod.validate(cfg)), bad)
+
+
 class MemguardTest(unittest.TestCase):
     def setUp(self) -> None:
         self.mg = load_memguard()
@@ -676,6 +735,28 @@ class MemguardTest(unittest.TestCase):
         log = self.proc / "guard.log"
         self.assertEqual(self.mg.check_once(self.proc, 1536 * 1024, ["*/target/*"], str(log), dry_run=True), 12)
         self.assertIn("would kill pid 12", log.read_text())
+
+    def test_ceiling_kills_every_matching_process_above_it(self) -> None:
+        self.fake(21, "/w/proj/target/debug/deps/runaway-1", 3_000_000)
+        self.fake(22, "/w/proj/target/debug/deps/ok-2", 1_000_000)
+        self.fake(23, "/usr/bin/big-editor", 9_000_000)
+        log = self.proc / "guard.log"
+        self.assertEqual(self.mg.check_ceiling(self.proc, 2_621_440, ["*/target/*"], str(log), dry_run=True), [21])
+        self.assertIn("ceiling 2560 MiB: would kill pid 21", log.read_text())
+
+    def test_log_path_is_in_the_main_checkout(self) -> None:
+        main = self.proc / "repo"
+        repo = GitRepo(main)
+        repo.init()
+        write(main, "a.txt", "a\n")
+        repo.commit("base")
+        wt = main / ".wt" / "F011"
+        repo.git("worktree", "add", "-q", "-b", "feat/F011", str(wt))
+        expected = str((main / ".wt" / "locks" / "memguard.log").resolve())
+        self.assertEqual(self.mg.default_log(None, wt), expected)
+        self.assertEqual(self.mg.default_log(".wt/locks/memguard.log", wt), expected)
+        self.assertEqual(self.mg.default_log("/var/log/x.log", wt), "/var/log/x.log")
+        self.assertIsNone(self.mg.default_log(None, Path("/")))  # outside a repository: no default log
 
     def test_kills_a_real_process(self) -> None:
         target = self.proc / "w" / "target" / "debug"

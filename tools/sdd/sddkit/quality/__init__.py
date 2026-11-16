@@ -153,6 +153,10 @@ def tool_env(cfg: Dict[str, Any], root: Path, extra: Optional[Dict[str, str]] = 
         env["PATH"] = os.pathsep.join(dirs + ([env["PATH"]] if env.get("PATH") else []))
     env["SDD_ROOT"] = str(root)
     env.setdefault("SDD_FEATURE", "")
+    # The heavy-job lock settings, so a gate command wrapped in heavy-lock.sh queues on the configured lock.
+    from .coverage import heavy_env
+
+    env.update(heavy_env(cfg, root) if (cfg.get("quality") or {}).get("heavy_lock") is not None else {})
     for k, v in ((cfg.get("build_cache") or {}).get("env") or {}).items():
         env[str(k)] = str(v)
     if extra:

@@ -26,8 +26,10 @@ agentic-sdd-kit/
     sddkit/quality/          quality checks (size, arch, coverage, mutation, command checks,
                              commits, secrets), the shrink-only baseline, git hook logic
     githooks/                pre-commit, commit-msg, pre-push (installed by `sdd hooks install`)
-    scripts/                 memcap-runner.sh (per-test memory cap), heavy-lock.sh (host-wide
-                             heavy-job queue, optional memory budget), memguard.py (memory guard for unattended runs)
+    scripts/                 heavy.sh (run a heavy job under the project's lock: every build and
+                             test run goes through it), heavy-lock.sh (the fair queue, optional
+                             memory budget), memcap-runner.sh (per-test memory cap), memguard.py
+                             (memory guard for unattended runs)
     pipeline/feature-pipeline.js   the per-feature Workflow script (Claude Code Workflow tool)
   claude/                    -> .claude/: 12 agents, 6 skills, 4 hooks, settings.json
   templates/                 CLAUDE.md, docs/{CONSTITUTION,DEVELOPMENT,ROADMAP}.md,
@@ -89,7 +91,7 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 
 | Command | What it does |
 |---|---|
-| `sdd config [--validate\|--pipeline [--compact]\|--get key]` | show/validate `sdd.config.json`; `--pipeline` prints the subset the Workflow script takes as `args.config` (`--compact`: one line, for embedding in a prompt) |
+| `sdd config [--validate\|--pipeline [--compact]\|--get key\|--heavy-env]` | show/validate `sdd.config.json`; `--pipeline` prints the subset the Workflow script takes as `args.config` (`--compact`: one line, for embedding in a prompt); `--heavy-env` prints the heavy-job lock settings as shell assignments (used by `scripts/heavy.sh`) |
 | `sdd trace [--feature NNN] [--check] [--json] [--include PATH]` | requirement -> implementation -> test matrix; `--check` is the CI gate (orphans, duplicates, uncovered `must`); `--include` also scans a file outside `trace.scan_globs` and lists it as `outsideScan` (the pipeline's red check); with `trace.procedure_steps.enabled` also the procedure step tables and their coverage (docs/PLAYBOOK.md §15) |
 | `sdd callflow SPEC --procedure P --expect F --events F [--json]` | call-flow conformance: checks a recorded event trace (JSON or JSON Lines, each event with a `seq`) against the spec's step table for `P` with ordered/unordered expectations and skips; the same check as `sddkit.callflow` for Python tests |
 | `sdd gates [--fast\|--plan fast\|full\|nightly] [--only g] [--detached [--feature F --tag T] [--fresh]] [--wait LOG]` | runs the configured gate plan, prints a summary table, exit code; every log ends with `GATES_EXIT=<n>`; missing tools SKIP with an install hint, or FAIL when `CI=true`. `--detached --feature --tag` keys the log on HEAD (`<logs_dir>/gates/F-T-<sha7>[-dirty].log`), attaches to a live run or reuses a completed one (`--fresh`: never reuse); `--wait` exits 124 while still running, 125 for an incomplete run |

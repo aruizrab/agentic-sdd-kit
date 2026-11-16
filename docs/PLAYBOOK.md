@@ -418,11 +418,17 @@ until somebody looks, even after the limit has reset.
   session. Queue heavy jobs (or run them side by side only within a memory budget, each capped,
   below); `pipeline.max_parallel_features` and `pipeline.max_build_jobs` bound the pipeline,
   but jobs started by hand count too.
-- **Queue heavy jobs on the host-wide lock**: `tools/sdd/scripts/heavy-lock.sh <command>`
-  runs a command under `flock` on one lock file per host (`quality.heavy_lock`, default
-  `/tmp/sdd-heavy-job.lock`, the same in every worktree). `sdd check coverage` and
-  `sdd check mutation` take it themselves; wrap the other heavy commands (the full plan's test
-  build, nightly runs, cache measurements, jobs started by hand) the same way. A nested call
+- **Every heavy command goes through the lock**: `tools/sdd/scripts/heavy.sh <command>`
+  (builds, test runs, `sdd gates` with or without `--fast`, coverage, mutation, benchmarks,
+  cache measurements, jobs started by hand; not code reading, `sdd trace`, `sdd source`).
+  It runs `heavy-lock.sh` on the project's lock (`quality.heavy_lock`, default
+  `.wt/locks/heavy.lock` in the **main checkout**, found through git's common directory, so the
+  main checkout and every worktree queue together) with the configured budget and job size
+  (`quality.heavy_budget_mb`, `heavy_job_mb`). The agent roles have a "Heavy jobs" section and
+  the pipeline appends the same rule to every prompt of a role that builds or runs tests;
+  people follow it too. `sdd check coverage` and `sdd check mutation` take the lock
+  themselves, and every command `sdd` runs gets `SDD_HEAVY_LOCK`, so gate commands wrapped in
+  `heavy-lock.sh` in the configuration queue on the same lock. A nested call
   for the same lock runs directly, so wrapping a whole gate plan cannot deadlock. The queue is
   **first come, first served**: each caller draws a ticket in `<lock>.queue/` and only the
   oldest live ticket waits on the lock (plain `flock` is not fair: a job looping over long
@@ -464,11 +470,16 @@ until somebody looks, even after the limit has reset.
   runaway mutant then fails alone and counts as caught. If the unmutated baseline fails only
   because of the cap, raise it; never remove it. Other ecosystems: docs/ADAPTING.md §6.
 - **Run the memory guard during unattended heavy runs**:
-  `nohup python3 -I tools/sdd/scripts/memguard.py --log .sdd/logs/memguard.log &` (or a user
-  service). When MemAvailable drops under `--floor-mib` (1536) it kills the largest process
+  `setsid nohup python3 -I tools/sdd/scripts/memguard.py --ceiling-mib 2560 &` (or a user
+  service; kills go to `.wt/locks/memguard.log` of the main checkout unless `--log` says
+  otherwise; a relative `--log` is also in the main checkout). With `--ceiling-mib` it kills
+  any matching process above that resident size at once (a runaway mutant grows about a
+  gigabyte a second). When MemAvailable drops under `--floor-mib` (1536) it kills the largest process
   whose executable matches `--pattern` (default `*/target/*`, test binaries in a build target
   directory) and logs it, so the kernel never picks a system service. It is a backstop for the
   cap, not a replacement: interpreted test runners (python, node) do not match by executable.
+  A test it kills during a mutation run is not a caught mutant: with `quality.mutation.outcomes`
+  the mutation gate fails and names it for a re-run (lesson 47).
 - **Re-check survivors with the slow tests before calling them test gaps**: if the mutation
   command excludes slow end-to-end tests for speed, re-run the surviving mutants with those
   tests included first; a survivor they kill is not a gap.

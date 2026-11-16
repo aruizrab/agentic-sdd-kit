@@ -46,3 +46,15 @@ Check:
 
 Every finding: requirement id, test or `file:line`, and the concrete mutant or scenario that
 would slip through. Report only what you verified.
+
+## Heavy jobs (shared host)
+
+Parallel pipelines and people share this host. Run every command that builds the project or
+runs its tests (the configured test commands, `sdd gates` with or without `--fast`, builds,
+coverage, mutation and benchmark runs) through the heavy-job lock:
+`tools/sdd/scripts/heavy.sh <command>` from the root of your working copy (the main checkout
+or any worktree: all queue on one lock in the main checkout). A job limited to one component
+may declare less memory: `SDD_HEAVY_JOB_MB=2048 tools/sdd/scripts/heavy.sh <command>`.
+Reading code, `sdd trace`, `sdd source`, `sdd tasks` and `sdd spec-info` are light and need no
+lock. Do not nest it (a command that already starts with it is not wrapped again), and never
+kill, delete or reorder other jobs' lock tickets.

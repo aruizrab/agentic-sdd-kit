@@ -128,7 +128,9 @@ DEFAULTS: Dict[str, Any] = {
             "test_filter_when": [],
             "outcomes": "",
         },
-        "heavy_lock": "/tmp/sdd-heavy-job.lock",
+        "heavy_lock": ".wt/locks/heavy.lock",
+        "heavy_budget_mb": 0,
+        "heavy_job_mb": 0,
         "checks": [],
         "secrets": {"gitleaks": True, "patterns": [], "allow_globs": []},
         "hooks": {
@@ -502,8 +504,13 @@ def _validate_quality(q: Dict[str, Any]) -> List[str]:
         _regex(problems, "quality.mutation.survivor_regex", q["mutation"]["survivor_regex"], ("file", "mutation"))
     problems.extend(_validate_mutation_limits(q["mutation"]))
     lock = q.get("heavy_lock")
-    if not isinstance(lock, str) or (lock and not lock.startswith("/")):
-        problems.append("quality.heavy_lock must be an absolute lock file path shared by every worktree (\"\" = no lock)")
+    if not isinstance(lock, str) or ".." in lock.split("/") or any(c.isspace() for c in lock):
+        problems.append("quality.heavy_lock must be a lock file path: relative to the main checkout (shared by every worktree), "
+                        "absolute (shared by every project on the host), or \"\" = no lock")
+    for key in ("heavy_budget_mb", "heavy_job_mb"):
+        v = q.get(key)
+        if not isinstance(v, int) or isinstance(v, bool) or v < 0:
+            problems.append(f"quality.{key} must be a whole number of MB (0 = {'one heavy job at a time' if key == 'heavy_budget_mb' else 'half the budget'})")
     seen = set()
     for i, c in enumerate(q.get("checks") or []):
         where = f"quality.checks[{i}]"

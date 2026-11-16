@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -124,12 +125,47 @@ def no_code(path: str, src: langs.Source, cfg: Dict[str, Any]) -> bool:
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"  # the kit's gate scripts, next to sdd.py
 
 
-def heavy_locked(cfg: Dict[str, Any], cmd: str) -> Tuple[str, Dict[str, str]]:
-    """``cmd`` run under the host-wide heavy-job lock (``quality.heavy_lock``; ``""`` = unlocked)."""
-    lock = cfg["quality"].get("heavy_lock") or ""
+def main_checkout(root: Path) -> Path:
+    """The main checkout of the git repository holding ``root`` (the parent of the common git
+    directory), the same for every worktree; ``root`` itself outside a repository."""
+    for args in (["--path-format=absolute", "--git-common-dir"], ["--git-common-dir"]):
+        try:
+            p = subprocess.run(["git", "rev-parse", *args], cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        except OSError:
+            break
+        out = p.stdout.strip()
+        if p.returncode == 0 and out and not out.startswith("--"):
+            common = Path(out)
+            return (common if common.is_absolute() else Path(root) / common).resolve().parent
+    return Path(root).resolve()
+
+
+def heavy_env(cfg: Dict[str, Any], root: Path) -> Dict[str, str]:
+    """The heavy-job lock settings for ``heavy-lock.sh``: ``SDD_HEAVY_LOCK`` from ``quality.heavy_lock``
+    (a relative path is resolved against the main checkout, so every worktree shares the lock; its
+    directory is created), and the budget and default job size from ``quality.heavy_budget_mb`` /
+    ``heavy_job_mb`` unless the environment already sets them. Empty without a lock."""
+    q = cfg["quality"]
+    lock = q.get("heavy_lock") or ""
     if not lock:
+        return {}
+    if not lock.startswith("/"):
+        path = main_checkout(root) / lock
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock = str(path)
+    env = {"SDD_HEAVY_LOCK": lock}
+    for key, var in (("heavy_budget_mb", "SDD_HEAVY_BUDGET_MB"), ("heavy_job_mb", "SDD_HEAVY_JOB_MB")):
+        if q.get(key) and not os.environ.get(var):
+            env[var] = str(int(q[key]))
+    return env
+
+
+def heavy_locked(cfg: Dict[str, Any], cmd: str, root: Optional[Path] = None) -> Tuple[str, Dict[str, str]]:
+    """``cmd`` run under the heavy-job lock (``quality.heavy_lock``; ``""`` = unlocked)."""
+    env = heavy_env(cfg, Path(root) if root else Path(cfg.get("_root") or "."))
+    if not env:
         return cmd, {}
-    return f"sh {shlex.quote(str(SCRIPTS / 'heavy-lock.sh'))} sh -c {shlex.quote(cmd)}", {"SDD_HEAVY_LOCK": lock}
+    return f"sh {shlex.quote(str(SCRIPTS / 'heavy-lock.sh'))} sh -c {shlex.quote(cmd)}", env
 
 
 def run_tool(root: Path, cfg: Dict[str, Any], section: str, extra_cmd: Optional[str] = None,
@@ -137,7 +173,7 @@ def run_tool(root: Path, cfg: Dict[str, Any], section: str, extra_cmd: Optional[
     """Run ``quality.<section>.command`` (under the heavy-job lock) after deleting its report.
     Returns (failure result or None, output)."""
     t = cfg["quality"][section]
-    locked, lock_env = heavy_locked(cfg, extra_cmd or t["command"])
+    locked, lock_env = heavy_locked(cfg, extra_cmd or t["command"], root)
     env = tool_env(cfg, root, {**(extra_env or {}), **lock_env})
     missing = missing_programs(t["requires"], env)
     if missing:

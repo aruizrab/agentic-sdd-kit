@@ -7,7 +7,11 @@
 # Coverage, mutation testing, full builds and full test runs of concurrent pipelines (other
 # worktrees, other projects) queue on one lock file instead of running at once and exhausting
 # memory. SDD_HEAVY_LOCK names the lock file (default /tmp/sdd-heavy-job.lock: one per host,
-# the same for every worktree). A nested call for the same lock file runs the command directly
+# the same for every worktree). A relative SDD_HEAVY_LOCK (e.g. .wt/locks/heavy.lock) is resolved
+# against the MAIN checkout of the current git repository (found via `git rev-parse
+# --git-common-dir`), so the main checkout and every worktree of a project queue on one lock;
+# its directory is created. tools/sdd/scripts/heavy.sh sets the lock, the budget and the job
+# size from sdd.config.json (quality.heavy_lock, heavy_budget_mb, heavy_job_mb). A nested call for the same lock file runs the command directly
 # (SDD_HEAVY_LOCK_HELD), so wrapping both a gate plan and its gates cannot deadlock; it runs
 # inside its parent's slot (and memory cap).
 #
@@ -43,6 +47,18 @@
 #
 # Needs flock(1) (util-linux); without it the command runs unlocked, with a warning.
 lock="${SDD_HEAVY_LOCK:-/tmp/sdd-heavy-job.lock}"
+case "$lock" in
+  /*) ;;
+  *)
+    common="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || git rev-parse --git-common-dir 2>/dev/null)" || {
+      echo "heavy-lock: relative SDD_HEAVY_LOCK '$lock' needs a git repository (it is resolved against the main checkout)" >&2
+      exit 2
+    }
+    main="$(cd "$common/.." && pwd)" || exit 2
+    lock="$main/$lock"
+    mkdir -p "$(dirname "$lock")" || { echo "heavy-lock: cannot create $(dirname "$lock")" >&2; exit 2; }
+    ;;
+esac
 poll="${SDD_HEAVY_LOCK_POLL:-2}"
 budget="${SDD_HEAVY_BUDGET_MB:-0}"
 if [ "$#" -eq 0 ]; then

@@ -375,7 +375,9 @@
         "RUSTC_WRAPPER": ""
       }
     },
-    "heavy_lock": "/tmp/sdd-heavy-job.lock",
+    "heavy_lock": ".wt/locks/heavy.lock",
+    "heavy_budget_mb": 0,
+    "heavy_job_mb": 0,
     "checks": [
       {
         "name": "docs",

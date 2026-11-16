@@ -61,3 +61,14 @@ Rules:
 - Shared-tree safety: never `git checkout -- <path>`, `git restore`, `git clean`,
   `git reset --hard` or `git stash`.
 - Report facts only: commands run, exit codes, SHAs.
+
+## Heavy jobs (shared host)
+
+Parallel pipelines and people share this host. The full gate command the pipeline gives you
+runs exactly as given (see **Gates**: its heavy gates take the lock themselves). Every other
+command you run that builds the project or runs its tests (a red check's test run, the fast
+gates after a merge, a build in a throwaway worktree) goes through the heavy-job lock:
+`tools/sdd/scripts/heavy.sh <command>` from the root of your working copy (the main checkout
+or any worktree: all queue on one lock in the main checkout). Reading code, `sdd trace`,
+`sdd source`, `sdd tasks` and `sdd spec-info` need no lock. Never kill, delete or reorder other
+jobs' lock tickets.
