@@ -195,6 +195,7 @@ DEFAULTS: Dict[str, Any] = {
         "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, input parsing of untrusted data",
         "red_check_tags": False,
         "persist_findings": False,
+        "cap_fallback": "equal",
     },
     "merge": {
         "union_manifests": [],

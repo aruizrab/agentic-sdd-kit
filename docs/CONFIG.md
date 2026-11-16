@@ -103,6 +103,7 @@ Workflow script takes as `args.config`.
 | `pipeline.role_tiers` | override role -> tier (tiers mode) | `{}` |
 | `pipeline.red_check_tags` | the red check also searches the whole repository for Verifies tags (`trace.verifies_keywords` + `requirements.id_regex`, every id of a multi-id list); a `must` is untested only if neither the trace tool nor that search finds a test (same as the pipeline arg `redCheckTags`) | `false` |
 | `pipeline.persist_findings` | review.md §3 also gets a machine-readable findings block with each finding's outcome, verdicts are written before any fix, and a run resumed from `verify` reloads the findings (same as the pipeline arg `persistFindings`) | `false` |
+| `pipeline.cap_fallback` | when a capped model's call has no equal-or-smarter point left outside the exhausted pools: `equal` pauses the run until the cap resets (never downgrade); `strongest` runs it on the most intelligent point left, e.g. another model at `max` effort (same as the pipeline arg `capFallback`). Put that point in the models table | `"equal"` |
 | `pipeline.routing` | `tiers` (role -> tier) or `formula` (levels and the models table); the pipeline arg `routing` overrides | `"tiers"` |
 | `pipeline.models_table` | the project's models table; when absent `<tools_dir>/pipeline/models.json` (the template) is used. The project file replaces the template, it is not merged. Formula mode rejects a table whose ids still start with `example-` | `"sdd.models.json"` |
 | `merge.union_manifests` | globs `sdd union-merge` may union | `[]` |

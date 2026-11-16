@@ -134,6 +134,10 @@ const RED_CHECK_TAGS = A.redCheckTags === true || P.red_check_tags === true
 // finding's outcome; verdicts are written right after the votes (before any fix), and a run resumed from "verify"
 // without "review" reloads the findings from that block (lesson 24).
 const PERSIST_FINDINGS = A.persistFindings === true || P.persist_findings === true
+// capFallback 'strongest' (lesson: a model cap can last days): when a capped call has no equal-or-smarter point left
+// outside the exhausted pools, it runs on the most intelligent point left (e.g. another vendor model at max effort)
+// instead of pausing the run until the cap resets. Default 'equal': never downgrade, pause instead.
+const CAP_STRONGEST = A.capFallback === 'strongest' || P.cap_fallback === 'strongest'
 // tasks (opt-in): run only these task ids of tasks.md (e.g. ["T01", "T02"]), so one work item of a large plan can run on its
 // own branch. Tests and Implement load tasks.md as before and keep only the listed tasks; waves left empty are skipped and
 // dependencies on unlisted tasks count as satisfied. An empty list counts as absent.
@@ -254,6 +258,10 @@ function fallbackFor(R, pick) {
   if (!pick || pick.intelligence == null || !R.table) return null
   const pts = (R.table.points || []).filter((p) => p.intelligence >= pick.intelligence && !EXHAUSTED.has(p.pool))
   pts.sort((a, b) => a.cost_per_task - b.cost_per_task || b.intelligence - a.intelligence || (a.model < b.model ? -1 : a.model > b.model ? 1 : 0) || ((a.effort || '') < (b.effort || '') ? -1 : 1))
+  if (!pts.length && CAP_STRONGEST) {
+    pts.push(...(R.table.points || []).filter((p) => p.intelligence != null && !EXHAUSTED.has(p.pool)))
+    pts.sort((a, b) => b.intelligence - a.intelligence || a.cost_per_task - b.cost_per_task || (a.model < b.model ? -1 : a.model > b.model ? 1 : 0))
+  }
   // A fallback point without its own effort keeps the pick's effort (never the call site's lower default).
   return pts[0] ? Object.assign({}, pts[0], { effort: pts[0].effort || pick.effort || '' }) : null
 }

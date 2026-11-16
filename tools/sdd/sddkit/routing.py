@@ -33,6 +33,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 TIERS = ("mechanical", "gate", "mid", "strong", "top")
 EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
 MODES = ("tiers", "formula")
+CAP_FALLBACKS = ("equal", "strongest")
 LEVELS = range(1, 7)
 KIT_TABLE = Path(__file__).resolve().parent.parent / "pipeline" / "models.json"
 PLACEHOLDER_PREFIX = "example-"
@@ -281,6 +282,8 @@ def config_problems(cfg: Dict[str, Any]) -> List[str]:
     """Problems of ``models`` and the routing keys (used by ``config.validate``)."""
     problems = tier_problems(cfg["models"])
     mode = cfg["pipeline"].get("routing", "tiers")
+    if cfg["pipeline"].get("cap_fallback", "equal") not in CAP_FALLBACKS:
+        problems.append(f"pipeline.cap_fallback must be 'equal' or 'strongest', got {cfg['pipeline'].get('cap_fallback')!r}")
     if mode not in MODES:
         problems.append(f"pipeline.routing must be 'tiers' or 'formula', got {mode!r}")
     elif mode == "formula":

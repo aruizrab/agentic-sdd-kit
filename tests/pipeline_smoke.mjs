@@ -552,6 +552,20 @@ const task = (id, extra = {}) => Object.assign({ id, title: id, components: ['a'
   console.log('ok 22 usage caps')
 }
 
+// 22c. cap_fallback 'strongest': no equal-or-smarter point left -> the most intelligent point left, no pause.
+{
+  const D = routingFor({ version: 1, pools: POOLS, points: [pt('cap-x', 'medium', 65, 1, 'capped'), pt('low-s', 'medium', 50, 0.5, 'standard'), pt('mid-s', 'max', 58, 3, 'standard')] })
+  for (const config of [{ ...CONFIG, routing: D, pipeline: { ...CONFIG.pipeline, cap_fallback: 'strongest' } }]) {
+    const d = await run({ config, stages: ['plan'] }, [], (o) => (o.model === 'cap-x' ? null : undefined))
+    assert.notEqual(d.result.status, 'paused', JSON.stringify(d.result))
+    assert.deepEqual(d.calls.filter((c) => /^architect-planner/.test(c.label)).map((c) => [c.label, c.model, c.effort]),
+      [['architect-planner F011', 'cap-x', 'medium'], ['architect-planner F011 (fallback)', 'mid-s', 'max']])
+  }
+  const arg = await run({ config: { ...CONFIG, routing: D }, stages: ['plan'], capFallback: 'strongest' }, [], (o) => (o.model === 'cap-x' ? null : undefined))
+  assert.notEqual(arg.result.status, 'paused')
+  console.log('ok 22c cap_fallback strongest')
+}
+
 // 22b. S14: a level without candidates pauses (never the session model); a blank-effort fallback keeps the pick's effort.
 {
   const LOW = routingFor({ version: 1, pools: POOLS, points: [pt('low-s', 'medium', 50, 1, 'standard')] })
