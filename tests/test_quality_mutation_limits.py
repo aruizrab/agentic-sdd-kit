@@ -221,6 +221,63 @@ class SwitchAndTestFilterTest(MutationRepoCase):
         self.assertEqual(len(problems), 2, problems)
 
 
+def _nextest_log(mutant: str, status: str, captured: str = "") -> str:
+    """A cargo-mutants + nextest log of a caught mutant (layout of a real cargo-mutants 27 log): the test line's
+    status word (FAIL, SIGKILL, SIGABRT) sits before a bracketed duration."""
+    return (f"*** {mutant}\n\n*** cargo nextest run --verbose --package=a@0.1.0 --profile mutants\n"
+            "    Starting 2 tests across 1 binary\n       START [         ] (1/2) a::basic one\n"
+            f"        PASS [   0.004s] (1/2) a::basic one\n{status}\n{captured}"
+            f"     Summary [   7.900s] 2 tests run: 1 passed, 1 failed, 0 skipped\n{status}\nerror: test run failed\n\n*** result: Failure(100)\n")
+
+
+class HostKilledMutantTest(MutationRepoCase):
+    """quality.mutation.outcomes: a caught mutant whose test the host SIGKILLed is not caught; an allocation failure
+    under the memory cap (SIGABRT) is caught and listed separately; a genuine failure stays caught."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        mutants = [
+            ("killed", 6, "replace - with + in sub", "     SIGKILL [   7.800s] (2/2) a::basic two", ""),
+            ("genuine", 6, "replace sub -> int with 0", "        FAIL [   0.006s] (2/2) a::basic two",
+             "  stderr ───\n    assertion failed: child ended with SIGKILL, expected exit 0\n     SIGKILL is not a status line here\n"),
+            ("memcap", 5, "replace sub with loop", "     SIGABRT [   0.412s] (2/2) a::basic two",
+             "  stderr ───\n\n    memory allocation of 3221225472 bytes failed\n\n"),
+            ("old", 2, "replace + with - in add", "     SIGKILL [   1.000s] (2/2) a::basic two", ""),
+        ]
+        outcomes = [{"scenario": "Baseline", "summary": "Success", "log_path": "log/baseline.log"}]
+        for key, line, mutation, status, captured in mutants:
+            name = f"src/calc.py:{line}:5: {mutation}"
+            write(self.root, f"mut/log/{key}.log", _nextest_log(name, status, captured))
+            outcomes.append({"scenario": {"Mutant": {"name": name, "package": "a", "file": "src/calc.py",
+                                                      "function": {"function_name": "sub"}, "span": {"start": {"line": line, "column": 5}}}},
+                             "summary": "CaughtMutant", "log_path": f"log/{key}.log"})
+        outcomes.append({"scenario": {"Mutant": {"name": "src/calc.py:6:5: replace sub -> int with 1", "file": "src/calc.py",
+                                                  "span": {"start": {"line": 6, "column": 5}}}}, "summary": "CaughtMutant", "log_path": "log/gone.log"})
+        write(self.root, "mut/outcomes.json", json.dumps({"total_mutants": 5, "outcomes": outcomes}))
+
+    def test_killed_by_host_fails_and_memory_cap_is_listed(self) -> None:
+        code, out = self.check("true", outcomes="mut/outcomes.json")
+        self.assertEqual(code, 1, out)
+        msgs = [(v["line"], v["message"]) for v in out["violations"]]
+        self.assertEqual(len(msgs), 1, msgs)  # the genuine failure and the unchanged line 2 are not violations
+        self.assertEqual(msgs[0][0], 6)
+        self.assertIn("killed by the host", msgs[0][1])
+        self.assertIn("replace - with + in sub", msgs[0][1])
+        notes = " ".join(out["notes"])
+        self.assertIn("caught by memory cap src/calc.py:5: replace sub with loop", notes)
+        self.assertIn("1 mutant(s) caught by the memory cap", notes)
+
+    def test_without_outcomes_nothing_changes(self) -> None:
+        code, out = self.check("true")
+        self.assertEqual((code, out["violations"]), (0, []), out)
+
+    def test_classify(self) -> None:
+        self.assertEqual(mutation.classify_caught(_nextest_log("m", "     SIGKILL [   1.0s] (1/1) a b")), mutation.KILLED_BY_HOST)
+        self.assertEqual(mutation.classify_caught(_nextest_log("m", "        FAIL [   1.0s] (1/1) a b", "    SIGKILL in prose\n")), mutation.CAUGHT)
+        self.assertEqual(mutation.classify_caught(_nextest_log("m", "     SIGABRT [   1.0s] (1/1) a b")), mutation.CAUGHT, "SIGABRT without the allocation message is a crash the mutant caused")
+        self.assertEqual(mutation.classify_caught(_nextest_log("m", "     SIGABRT [   1.0s] (1/1) a b", "    memory allocation of 8 bytes failed\n")), mutation.CAUGHT_BY_MEMORY_CAP)
+
+
 class ScriptsTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = make_tmp("scripts-")

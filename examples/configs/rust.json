@@ -351,6 +351,7 @@
     "mutation": {
       "command": "cargo mutants --workspace --in-diff {diff_file} --no-shuffle --jobs {jobs}",
       "report": "mutants.out/missed.txt",
+      "outcomes": "mutants.out/outcomes.json",
       "format": "regex",
       "survivor_regex": "(?m)^(?P<file>[^:\\n]+):(?P<line>\\d+):\\d+: (?P<mutation>.+)$",
       "ok_exits": [

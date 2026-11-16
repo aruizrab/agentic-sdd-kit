@@ -196,7 +196,19 @@ large unused ranges panic at start-up; docs/LESSONS.md 30), and runs under the h
 | TypeScript (Node) | the example keeps `memory_limit_mib: 0` and caps the heap per process: `env` `{"NODE_OPTIONS": "--max-old-space-size=2048"}`, which gives a clearer error than a killed worker. The data cap also works for plain Node (V8's reserved ranges do not count; a 1.3 GB allocation fails under a 512 MiB cap), but it is not verified with Stryker's worker pool |
 | any (systemd) | a cgroup for the whole run instead: `systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=0 <command>` (the kernel then kills the largest process inside the scope only) |
 
-A runaway mutant then fails alone and counts as caught. If the unmutated baseline fails only
+A runaway mutant then fails alone and counts as caught.
+
+**Host kills are not catches (Rust).** With nextest, a test process killed by a signal gives
+cargo-mutants the same "caught" result as a failed assertion. A memory guard
+(`tools/sdd/scripts/memguard.py`), a cgroup cap or the kernel OOM killer all kill with
+SIGKILL, so a mutant whose test the host killed would count as caught although nothing was
+measured. Set `quality.mutation.outcomes` to `mutants.out/outcomes.json` (the Rust example
+does): `sdd check mutation` then reads the log of every caught mutant, fails on a `SIGKILL [`
+test status line and names the mutant for a re-run (fewer jobs, no memory pressure), and lists
+`SIGABRT [` with `memory allocation of N bytes failed` (the data cap above) as "caught by
+memory cap". Other tools: leave it empty (no per-mutant logs with signal status words).
+
+If the unmutated baseline fails only
 because of the cap, raise `memory_limit_mib`; never remove the cap. If it fails because tests
 need the real repository (end-to-end tests that run git in the checkout; the tool tests a copy
 without `.git`), leave them out with `quality.mutation.test_filter` on the command line (Rust

@@ -28,6 +28,16 @@ names globs and no tracked file matches one (some runners reject a filter that m
 binary). The filter lives on the command line, not in a test-runner profile file, because such
 files are also read by fixture projects that have no such tests.
 
+Host kills (Rust profile, cargo-mutants): with ``quality.mutation.outcomes`` set (its
+``outcomes.json``), every caught mutant is refined by its per-mutant log. With nextest a test
+process killed by a signal gives the same "caught" result as a failed assertion; only the
+status word of the test line tells them apart. A ``SIGKILL [`` status line is a kill by the
+host (memory guard, cgroup cap, kernel OOM killer): the mutant was not measured, so the gate
+fails and names it for a re-run. A ``SIGABRT [`` status line with ``memory allocation of N
+bytes failed`` is the per-test memory cap stopping a runaway allocation: still caught, listed
+separately. Any other ending stays caught. The word SIGKILL elsewhere in a log (a test's own
+message) is not a status line.
+
 ``SDD_MUTATION``: unset or ``run`` runs the check; ``skip`` reports SKIP (exit 3) without
 running anything, for a loaded host; in CI mode ``skip`` fails, so CI never skips mutation
 testing; any other value is an error (exit 2).
@@ -47,6 +57,62 @@ from ..util import any_match
 from .coverage import SCRIPTS, check_report_fresh, considered_files, run_tool
 
 JUSTIFICATION = re.compile(r"^\s*[-*]\s*mutant:\s*(?P<file>[^\s:]+)(?::(?P<line>\d+))?:\s*(?P<mutation>.+?)\s+[—]\s*(?P<reason>.*)$")
+
+
+KILLED_BY_HOST = "killed-by-host"
+CAUGHT_BY_MEMORY_CAP = "caught-by-memory-cap"
+CAUGHT = "caught"
+_MUTANT_NAME = re.compile(r"^(?P<file>[^:\n]+):(?P<line>\d+):\d+: (?P<mutation>.+)$")
+
+
+def _status_line(line: str, word: str) -> bool:
+    """A test-runner status line whose status word is ``word`` (``<spaces><word> [``)."""
+    rest = line.lstrip()
+    return rest.startswith(word) and rest[len(word):].startswith(" [")
+
+
+def classify_caught(log: str) -> str:
+    """How a caught mutant's tests ended, from its log: killed by the host, caught by the memory cap, or caught."""
+    lines = log.splitlines()
+    if any(_status_line(line, "SIGKILL") for line in lines):
+        return KILLED_BY_HOST
+    alloc_failed = any(line.strip().startswith("memory allocation of ") and line.strip().endswith(" bytes failed") for line in lines)
+    if alloc_failed and any(_status_line(line, "SIGABRT") for line in lines):
+        return CAUGHT_BY_MEMORY_CAP
+    return CAUGHT
+
+
+def caught_endings(root: Path, cfg: Dict[str, Any]) -> List[Tuple[str, Optional[int], str, str]]:
+    """``(file, line, mutation, ending)`` of every caught mutant in ``quality.mutation.outcomes``
+    (cargo-mutants' ``outcomes.json``; each ``log_path`` is relative to its directory).
+    A caught mutant without a log file stays caught; no outcomes file means none."""
+    rel = cfg["quality"]["mutation"].get("outcomes") or ""
+    path = root / rel if rel else None
+    if not path or not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except json.JSONDecodeError as exc:
+        raise QualityError(f"unparsable mutation outcomes {rel}: {exc}")
+    out = []
+    for o in (data.get("outcomes") or []) if isinstance(data, dict) else []:
+        scenario = o.get("scenario") if isinstance(o, dict) else None
+        mutant = scenario.get("Mutant") if isinstance(scenario, dict) else None
+        if not isinstance(mutant, dict) or o.get("summary") != "CaughtMutant" or not o.get("log_path"):
+            continue
+        try:
+            log = (path.parent / str(o["log_path"])).read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise QualityError(f"cannot read the mutant log {o['log_path']}: {exc}")
+        name = str(mutant.get("name") or "")
+        m = _MUTANT_NAME.match(name)
+        file = str(mutant.get("file") or (m.group("file") if m else ""))
+        span_line = ((mutant.get("span") or {}).get("start") or {}).get("line")
+        line = int(span_line) if isinstance(span_line, int) else int(m.group("line")) if m else None
+        out.append((normalize_path(file, root), line, m.group("mutation").strip() if m else name, classify_caught(log)))
+    return out
 
 
 def switch(cfg: Dict[str, Any]) -> Optional[Result]:
@@ -186,4 +252,20 @@ def run(root: Path, cfg: Dict[str, Any], no_run: bool = False) -> Result:
         res.violations.append(Violation("mutation", path, line, {"file": path, "message": mutation}, 1,
                                         f"surviving mutant: {mutation} (add a test, or justify it in review.md §6 as "
                                         f"`- mutant: {path}{':' + str(line) if line else ''}: {mutation} — <reason>`)"))
+    capped = 0
+    for path, line, mutation, ending in caught_endings(root, cfg):
+        considered = files.get(path)
+        if ending == CAUGHT or considered is None or (line is not None and line not in considered[0]):
+            continue
+        where = f"{path}{':' + str(line) if line else ''}"
+        if ending == CAUGHT_BY_MEMORY_CAP:
+            capped += 1
+            res.notes.append(f"caught by memory cap {where}: {mutation}")
+            continue
+        # Not justifiable in review.md: the mutant was not measured at all.
+        res.violations.append(Violation("mutation", path, line, {"file": path, "message": f"killed by host: {mutation}"}, 1,
+                                        f"test killed by the host (SIGKILL: memory guard, cgroup cap or OOM killer), not caught: {mutation}; "
+                                        "re-run this mutant with fewer jobs and without memory pressure"))
+    if capped:
+        res.notes.append(f"{capped} mutant(s) caught by the memory cap (a runaway allocation stopped by quality.mutation.memory_limit_mib)")
     return res.finish()

@@ -126,6 +126,7 @@ DEFAULTS: Dict[str, Any] = {
             "env": {},
             "test_filter": "",
             "test_filter_when": [],
+            "outcomes": "",
         },
         "heavy_lock": "/tmp/sdd-heavy-job.lock",
         "checks": [],
@@ -450,6 +451,9 @@ def _validate_mutation_limits(m: Dict[str, Any]) -> List[str]:
     when = m.get("test_filter_when", [])
     if not isinstance(when, list) or not all(isinstance(g, str) and g for g in when):
         problems.append("quality.mutation.test_filter_when must be a list of globs")
+    out = m.get("outcomes", "")
+    if not isinstance(out, str) or out.startswith("/") or ".." in out.split("/"):
+        problems.append("quality.mutation.outcomes must be a repository-relative path to cargo-mutants' outcomes.json (\"\" = off)")
     return problems
 
 

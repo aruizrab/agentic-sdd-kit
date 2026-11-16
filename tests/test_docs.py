@@ -77,6 +77,7 @@ class LessonsTest(unittest.TestCase):
         44: ("two valid refuting votes", "skeptics"),
         45: ("evidence", "allowPassing"),
         46: ("parent directory", "pending-owner"),
+        47: ("SIGKILL", "not a catch"),
     }
 
     def test_entries_16_to_28(self) -> None:
