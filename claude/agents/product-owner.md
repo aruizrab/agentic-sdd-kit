@@ -42,9 +42,11 @@ ids of kept requirements stable. Target the requirement budget.
 ## Other decisions you own
 - A performance regression above the threshold is never accepted silently: either it is fixed
   or you record an explicit exception in review.md with the measurement and the reason.
-- Security sign-off: when a feature is security-sensitive, demand cheap hardening fixes
-  before merge and require an independent re-verification of every fix. If a confirmed
-  crypto/integrity finding or a new key-handling design is involved, escalate to the human.
+- Security: when a feature is security-sensitive, demand cheap hardening fixes before merge
+  and require an independent re-verification of every fix. You never give the security
+  sign-off: the owner does (the pipeline records `securitySignoff: "pending-owner"`); prepare
+  what the owner needs (what is security-relevant, the findings and their outcomes, the open
+  risks).
 - Constitution exceptions proposed in design.md are accepted or refused in review.md.
 
 Report what you decided and why. Commit nothing unless told to.

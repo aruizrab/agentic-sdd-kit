@@ -596,7 +596,12 @@ feature.
 Agents cannot edit protected paths (`.claude/**`, the constitution, the CI configuration); a
 feature that needs such a change ships it as a patch file in an unprotected, tracked place
 (for example `tools/patches/F0NN-<what>.patch`) for the owner to review and apply with
-`SDD_ALLOW_PROTECTED=1`. Tests that check the patch (it applies, the patched hook behaves)
+`SDD_ALLOW_PROTECTED=1`; the commit that applies it carries `Owner-approved: <date> <scope>`
+in its body, so the history shows who allowed the change. The same holds for the pipeline:
+the installed `tools/sdd/pipeline/feature-pipeline.js` is the only copy that runs (named
+copies differ only in `meta.name`), subagents cannot edit it, and a project that protects it
+(`tools/sdd/pipeline/**` in `protected_paths`) changes it only by owner patches; no second,
+untracked "live" copy exists. Tests that check the patch (it applies, the patched hook behaves)
 must also pass **after** the owner applied it: test "applied or applicable", never "applies".
 A patch that reverses cleanly counts as applied:
 
@@ -642,3 +647,30 @@ Typical calls: `{feature, slug, root, stages, tasks, notes}`, plus `testsSha` wh
 starts after Tests and `evidence` when it starts at Finalize. Never resume a run across a
 script change (a resume replays cached failures, and the safety defaults changed the cache
 keys): start a new run from the next stage with `testsSha`.
+
+## 18. Orchestration state lives in the repository
+
+A long orchestrator session compacts its context again and again; whatever exists only in its
+memory (merge order, supersessions to apply at a merge, component claims, pending sign-offs,
+the owner's standing rules) drifts or vanishes. Keep it in tracked files:
+
+- **`docs/ORCHESTRATOR.md`** (template installed by the kit): start-up checklist (start at the
+  repository root, read this file and the register, check the host and that `main` is green),
+  roles and authority (the owner signs security and applies protected-path patches), launch
+  rules, the WIP limit, component claims, reporting rules and the owner's standing rules. When
+  the owner sets a rule, edit the file in the same turn and commit it.
+- **`specs/MERGE-OBLIGATIONS.md`** (template installed by the kit): one row per cross-feature
+  obligation (MARK, EDIT, DOCS, TEST, ORDER, SPEC, SEC, PO), added when the spec that creates
+  it is approved, checked before every merge, closed with the merge commit's sha, never
+  deleted. Requirement text is never written at merge time: successor wording goes through a
+  spec change with a critic round first.
+- **`.wt/handoff/STATE.md`** (untracked): before a compaction, the live state (run ids and
+  their args, the queue, held patches, pending owner items), read back first afterwards.
+- **WIP limit**: no new spec run while more than the limit of approved specs are
+  unimplemented; implementation first.
+- **Component claims**: one in-flight branch per component (`components.path_regex` unit);
+  chores and refactors touching a claimed component wait for its merge.
+- **Main stays green**: no merge into `main`, chores included, without a passing
+  `sdd gates --fast` on the merge result (the reference project once merged with red fast
+  gates; every branch merging `main` afterwards inherits the failure).
+

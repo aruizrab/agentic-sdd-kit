@@ -395,7 +395,8 @@ Add your CI configuration to `protected_paths` too (for example `.github/**`,
 branch's own workflow file.
 
 Agents cannot edit the hooks and checkers locally either: `<tools_dir>/githooks/**`,
-`<tools_dir>/sddkit/**`, `<tools_dir>/scripts/**` and `<tools_dir>/sdd.py` are denied to every subagent (the pipeline's
+`<tools_dir>/sddkit/**`, `<tools_dir>/scripts/**`, `<tools_dir>/pipeline/**` (the one pipeline
+copy) and `<tools_dir>/sdd.py` are denied to every subagent (the pipeline's
 role fallback runs all roles as `general-purpose`, so a role-keyed denial would never fire).
 
 Schedule `CI=true python3 -I tools/sdd/sdd.py gates --plan nightly` for the full-repository

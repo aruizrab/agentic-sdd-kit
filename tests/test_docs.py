@@ -79,6 +79,8 @@ class LessonsTest(unittest.TestCase):
         46: ("parent directory", "pending-owner"),
         47: ("SIGKILL", "not a catch"),
         48: ("heavy.sh", "main checkout"),
+        49: ("compactions", "MERGE-OBLIGATIONS"),
+        50: ("green", "Owner-approved"),
     }
 
     def test_entries_16_to_28(self) -> None:

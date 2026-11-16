@@ -32,8 +32,9 @@ agentic-sdd-kit/
                              (memory guard for unattended runs)
     pipeline/feature-pipeline.js   the per-feature Workflow script (Claude Code Workflow tool)
   claude/                    -> .claude/: 12 agents, 6 skills, 4 hooks, settings.json
-  templates/                 CLAUDE.md, docs/{CONSTITUTION,DEVELOPMENT,ROADMAP}.md,
-                             specs/templates/{spec,design,tasks,review}.md, sdd.config.json
+  templates/                 CLAUDE.md, docs/{CONSTITUTION,DEVELOPMENT,ROADMAP,ORCHESTRATOR}.md,
+                             specs/templates/{spec,design,tasks,review}.md,
+                             specs/MERGE-OBLIGATIONS.md, sdd.config.json
   examples/configs/          sdd.config.json for Rust, TypeScript, Python, Go (incl. quality gates)
   docs/                      PLAYBOOK (how to run it), LESSONS (why the rules exist),
                              ADAPTING (per-language gates), CONFIG (reference)

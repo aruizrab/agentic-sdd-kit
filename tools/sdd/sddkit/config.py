@@ -550,9 +550,10 @@ def _validate_quality(q: Dict[str, Any]) -> List[str]:
 
 
 def kit_checker_globs(cfg: Dict[str, Any]) -> List[str]:
-    """The kit's git hooks, checkers and gate scripts, derived from ``paths.tools_dir``: no subagent may edit them."""
+    """The kit's git hooks, checkers, gate scripts and the pipeline script, derived from ``paths.tools_dir``:
+    no subagent may edit them (the pipeline has one copy; changes are owner patches)."""
     d = (cfg.get("paths") or {}).get("tools_dir", "tools/sdd").strip().strip("/") or "tools/sdd"
-    return [f"{d}/githooks/**", f"{d}/sddkit/**", f"{d}/scripts/**", f"{d}/sdd.py"]
+    return [f"{d}/githooks/**", f"{d}/sddkit/**", f"{d}/scripts/**", f"{d}/pipeline/**", f"{d}/sdd.py"]
 
 
 def public(cfg: Dict[str, Any]) -> Dict[str, Any]:

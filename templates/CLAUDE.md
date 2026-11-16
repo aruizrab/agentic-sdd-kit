@@ -18,6 +18,8 @@ It is built largely by AI agents through a spec-driven workflow.
 | `<normative source dir>` | <standard texts / API contracts / requirements>. **Read-only.** |
 | `specs/templates/` | spec/design/tasks/review templates |
 | `specs/features/NNN-slug/` | per-feature spec.md, design.md, tasks.md, review.md |
+| `specs/MERGE-OBLIGATIONS.md` | cross-feature obligations (marks, edits, merge order, open owner items), checked before every merge |
+| `docs/ORCHESTRATOR.md` | the orchestrator's standing rules (the owner's rules live here, not in session memory) |
 | `.claude/` | agents, skills, hooks, settings. **Human-owned, read-only for agents.** |
 
 ## Commands
@@ -119,7 +121,11 @@ owner's security sign-off is recorded if the change is security-sensitive; revie
 is set.
 
 ## Gotchas
+- Start sessions at the repository root: hooks load only there (the pipeline's hook probe
+  stops a run with `blocked-hooks` otherwise).
 - In worktrees, hooks act on the hook input `cwd`; `CLAUDE_PROJECT_DIR` is the main checkout.
+- Every build and test run goes through `tools/sdd/scripts/heavy.sh <command>` (one fair
+  queue for the main checkout and all worktrees).
 - Worktrees branch from the current HEAD (`worktree.baseRef: "head"`), so commit before
   spawning worktree agents. Uncommitted work is not copied.
 - Never put build output or worktrees under `/tmp` (RAM tmpfs). Watch host disk; delete

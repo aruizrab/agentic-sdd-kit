@@ -25,7 +25,7 @@ Two principles shape everything below:
 
 | Agent (`.claude/agents/`) | Tier | Tools | Stage(s) | Writes |
 |---|---|---|---|---|
-| orchestrator (main session) | session | all | drives the pipeline; **product owner** by default; security sign-off | spec `Status: Approved`, merges |
+| orchestrator (main session) | session | all | drives the pipeline; **product owner** by default; prepares the security summary (the **owner** signs) | spec `Status: Approved`, merges |
 | `product-owner` | strong | file tools | Approve (autonomous mode), spec resolution, exceptions | `specs/features/**` |
 | `spec-author` | strong | file tools + Bash | Specify, critic fixes | `specs/features/**` (hook) |
 | `spec-critic` | strong | read-only + Bash | Critic | nothing |
@@ -164,14 +164,16 @@ implementation and test coverage of `must` requirements only for the statuses li
   `perf-reviewer`, in parallel, each read-only with a fresh context; a reviewer that returns
   nothing is retried once, a persistent gap blocks finalisation.
 - **Security-sensitive changes** (plan or any reviewer) get a **second, independent
-  `security-reviewer`** and need a product-owner sign-off before merge (human-in-the-loop
-  point #2).
+  `security-reviewer`** and need the **owner's** sign-off before merge (human-in-the-loop
+  point #2; the pipeline ends with `securitySignoff: "pending-owner"`, the orchestrator never
+  signs). The script decides sensitivity from the arg, the plan, the reviewers and
+  `pipeline.security_paths`.
 - Only `blocking` findings gate the merge; the rest are recorded in review.md.
 
 ### 5.9 Adversarial verify
 - `pipeline.skeptics` independent `verifier`s per blocking finding, each experimenting only
-  in a detached throwaway worktree. A finding is dismissed only if **every** skeptic that
-  answered refutes it. Confirmed findings are fixed sequentially (code: implementer, tests:
+  in a detached throwaway worktree. A finding is dismissed only by **two valid refuting
+  votes and no confirming one**; a skeptic that returns nothing is not a refutation. Confirmed findings are fixed sequentially (code: implementer, tests:
   test-author), gates re-run, and a verifier fix-checks each ("is the root cause really
   gone?"); two independent fix-checks for security-sensitive features. Unresolved findings
   block.
@@ -181,7 +183,11 @@ implementation and test coverage of `must` requirements only for the statuses li
   `Status: Implemented`; run `sdd trace --check --feature NNN` and `sdd trace --check`; on
   failure revert to Approved and report `blocked-finalize`; commit
   `docs(FNNN): mark implemented, review record`.
-- **Merge (orchestrator):** record the security sign-off if required; merge `main` **into**
+- **Finalize needs evidence:** `Status: Implemented` only when this run's gates passed, the
+  four reviewers returned and every blocking finding is settled, or with an `evidence` arg the
+  script checks (an earlier gate log on the current HEAD, the persisted findings record).
+- **Merge (orchestrator):** check `specs/MERGE-OBLIGATIONS.md` (rows due before this merge
+  closed, §13); record the owner's security sign-off if required; merge `main` **into**
   the feature branch in its worktree, resolve conflicts (manifests by union, sources
   semantically), run full `sdd gates` there; then `git merge --no-ff feat/FNNN-slug` into
   `main` (conflict-free by construction); run `sdd trace --check` on main; delete the
@@ -230,10 +236,22 @@ Configured in `.claude/settings.json`; logic in `tools/sdd/sddkit/hooks.py`, dri
 | `format.sh` | PostToolUse Edit/Write | runs the matching `formatters` entry; exit 2 with the parser error if the edit left invalid syntax. |
 | `stop-check.sh` | Stop, SubagentStop | runs `stop_check.command` once when matching files changed; never loops. |
 
-- **Override:** a human maintenance session: `SDD_ALLOW_PROTECTED=1 claude`
-  (`SDD_ALLOW_DESTRUCTIVE_GIT=1` for the git rules). Agents never set these. The override
-  also exists because the hooks bind the orchestrator; the live pipeline script therefore
-  lives in the tracked, unprotected `tools/sdd/` directory.
+- **The hooks only run in a session started at the repository root.** Claude Code loads
+  `.claude/settings.json` from the session's project directory; a session started in a parent
+  directory runs every agent with no hooks at all. The pipeline's Setup probes the hooks (a
+  write into a protected path that must be blocked) and stops with `blocked-hooks` when they
+  are not active (`pipeline.hook_probe`).
+- **Override:** the owner applies a patch that an agent drafted in an unprotected place (e.g.
+  `tools/patches/<name>.patch`), with `Owner-approved: <date> <scope>` in the commit body, or
+  works in a maintenance session: `SDD_ALLOW_PROTECTED=1 claude`
+  (`SDD_ALLOW_DESTRUCTIVE_GIT=1` for the git rules). Agents never set these and never write
+  protected paths by a route the hooks do not check (python, `git apply`, `patch`).
+- **One pipeline script:** the installed `tools/sdd/pipeline/feature-pipeline.js` is the only
+  copy (named copies from `named-pipeline.sh` differ only in `meta.name`); subagents cannot
+  edit it. Add `tools/sdd/pipeline/**` to `protected_paths` to make it owner-only; changes
+  then come as owner patches.
+- **Heavy jobs:** every command that builds the project or runs its tests goes through
+  `tools/sdd/scripts/heavy.sh` (§13); the agent role files say so.
 - **Permissions:** `.claude/settings.json` allowlists the kit tools and read-only git; the
   deny list covers force-push, `--no-verify`, destructive git and `.env` files. Add the
   project's build/test commands to the allowlist.
@@ -291,9 +309,10 @@ restates the part that still holds.
 | Point | Default actor (autonomous mode) | Escalate to a human when |
 |---|---|---|
 | Spec approval (5.3) | orchestrator or product-owner agent | scope conflicts with the roadmap; a source ambiguity needs a deviation with product impact |
-| Security sign-off (5.8) | orchestrator, after the independent second security review and re-verified fixes | any confirmed crypto/integrity finding; any new key-handling design |
+| Security sign-off (5.8) | **owner**, after the independent second security review and re-verified fixes; the orchestrator prepares a one-page summary | always for security-sensitive features (`securitySignoff: "pending-owner"`) |
 | Performance exception (5.7) | product owner, recorded in review.md | the budget itself needs to change (ADR) |
-| Constitution, `.claude/`, `sdd.config.json` changes | none (agents are blocked) | always: human with `SDD_ALLOW_PROTECTED=1` plus an ADR |
+| Constitution, `.claude/`, `sdd.config.json`, CI changes | none (agents are blocked) | always: the owner applies a drafted patch (`Owner-approved:` in the commit body) or works with `SDD_ALLOW_PROTECTED=1`; an ADR for policy changes |
+| Merge to `main` | orchestrator | an open row of `specs/MERGE-OBLIGATIONS.md` is due and cannot be closed; `main` would not pass `sdd gates --fast` |
 | New dependency / module | architect-planner justification + review | licence not on the allowlist |
 | Pipeline `blocked-*` after retries | orchestrator | the same feature blocks twice for the same reason |
 
@@ -304,3 +323,33 @@ restates the part that still holds.
   (`pipeline.max_parallel_features`).
 - Delete build output after merging a feature; watch host disk before launching builds.
 - Disable OS auto-updates / auto-restarts on the host during long runs.
+
+## 13. Orchestration state and host safety
+
+- **Standing orchestrator rules** are in `docs/ORCHESTRATOR.md`, not in session memory: when
+  the owner sets a rule, the orchestrator edits that file in the same turn and commits it.
+  Before a compaction the orchestrator writes the live state (run ids and args, the queue,
+  held patches, pending owner items) to `.wt/handoff/STATE.md`.
+- **Cross-feature obligations** live in `specs/MERGE-OBLIGATIONS.md`: supersession marks to
+  apply in other specs, edits to other features' documents, tests of other features, merge
+  order, open product-owner items and pending owner sign-offs (row types MARK, EDIT, DOCS,
+  TEST, ORDER, SPEC, SEC, PO). A spec that creates such an obligation adds a row when it is
+  approved; the merge that discharges a row closes it with the merge commit's sha.
+  Requirement text is never written at merge time: successor wording goes through a spec
+  change with a critic round.
+- **WIP limit:** no new spec run starts while more than the limit in `docs/ORCHESTRATOR.md`
+  of approved specs are unimplemented, unless the owner asks.
+- **Component claims:** at most one unmerged branch changes a component's source or tests at
+  a time; chores and refactors that touch a claimed component wait for its merge.
+- **Main stays green:** every merge into `main`, chores and fixture additions included, passes
+  `sdd gates --fast` on the merge result before it is pushed.
+- **Heavy jobs:** `tools/sdd/scripts/heavy.sh <command>` runs a command in the fair heavy-job
+  queue (`quality.heavy_lock`, in the main checkout, shared by every worktree; budget
+  `quality.heavy_budget_mb`, job size `heavy_job_mb`, a capped scope per job). Use it for
+  builds, test runs, `sdd gates` with or without `--fast`, coverage, mutation runs and
+  benchmarks; spec lookups and trace need no lock.
+- **Mutation runs and host kills:** a mutant whose test the host killed (SIGKILL from a memory
+  guard or an OOM kill) is not caught; the mutation gate fails and names it for a re-run
+  (`quality.mutation.outcomes`). A test that aborts on an allocation failure under the
+  per-test memory cap counts as caught and is listed separately.
+

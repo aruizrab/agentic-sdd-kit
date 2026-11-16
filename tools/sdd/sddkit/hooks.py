@@ -156,7 +156,7 @@ def protection_reason(rel: str, agent: str, tool: str, exists: bool, cfg: Dict[s
     # as general-purpose, so a role-keyed denial alone would never fire. The main session (no
     # agent_type) may still patch the kit (lesson 14).
     if agent and any_match(rel, cfgmod.kit_checker_globs(cfg)):
-        return f"no subagent may edit the git hooks or checkers ({rel}); CI runs them (report the problem instead)"
+        return f"no subagent may edit the kit's git hooks, checkers, scripts or pipeline ({rel}); report the problem, or propose a patch the owner applies"
     for role, globs in cfg["role_denied_paths"].items():
         if role == agent and any_match(rel, globs):
             return f"{agent} may not edit {rel} (owned by another role; report the problem instead of editing)"

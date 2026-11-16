@@ -272,6 +272,16 @@ class HooksTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertIn(hp["blocked_marker"], proc.stderr)
 
+    def test_no_subagent_edits_the_pipeline_script(self) -> None:
+        """One pipeline copy: subagents cannot edit it (changes are owner patches); the main session still can."""
+        cfg = cfgmod.load(self.root)
+        self.assertIn("tools/sdd/pipeline/**", cfgmod.kit_checker_globs(cfg))
+        path = str(self.root / "tools/sdd/pipeline/feature-pipeline.js")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(hooks.protect_paths({"tool_name": "Edit", "agent_type": "implementer", "tool_input": {"file_path": path}, "cwd": str(self.root)}), 2)
+        self.assertIn("propose a patch the owner applies", err.getvalue())
+
 
 class PipelineSafetyConfigTest(unittest.TestCase):
     """pipeline.* safety keys: validation and what `sdd config --pipeline` hands the script."""
