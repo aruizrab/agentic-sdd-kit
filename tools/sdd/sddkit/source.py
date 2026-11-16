@@ -8,7 +8,9 @@ Configured by ``sources``:
   When set, ``sdd source clause <doc> <clause>`` runs it.
 * ``text_dir``: a directory of Markdown documents. Without a lookup command the
   built-in reader finds the file whose name starts with ``<doc>`` (case-
-  insensitive, dots and spaces ignored) and prints the clause whose heading
+  insensitive, dots, dashes and spaces ignored, so ``24.501``, ``TS 24501``,
+  ``tr38.901``, ``RFC 9048`` and ``rfc-9048`` all work; a designation never matches
+  a longer number such as ``rfc90481``) and prints the clause whose heading
   matches ``heading_regex`` (``{clause}`` substituted) up to the next heading of
   the same or a smaller depth.
 * ``sdd source find <doc> <regex>`` searches a document and prints matching lines
@@ -38,7 +40,10 @@ def find_doc(text_dir: Path, doc: str) -> Optional[Path]:
     exact = [p for p in candidates if _norm(p.stem) == key]
     if exact:
         return exact[-1]
-    containing = [p for p in candidates if key and key in _norm(p.stem)]
+    # The designation must not continue into more digits on either side: "rfc9048" is not "rfc90481", "24501" is not "124501".
+    # Any document kind works this way (ts24501-h10.md, tr38901-h00.md, rfc9048.md, ...): no per-kind patterns to configure.
+    whole = re.compile(r"(?<![0-9])" + re.escape(key) + r"(?![0-9])") if key else None
+    containing = [p for p in candidates if whole and whole.search(_norm(p.stem))]
     if not containing:
         return None
     # Prefer the shortest stem (e.g. "<doc>" over "<doc>-annex-notes"); latest version last.

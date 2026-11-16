@@ -461,6 +461,40 @@ class SourceTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0)
         self.assertIn("[5.5.1.2.4 Accepted]", proc.stdout)
 
+    def test_rfc_and_report_style_designations(self) -> None:
+        """RFC and technical-report texts resolve like standards: any spelling, no match on a longer number."""
+        write(self.root, "specs/source/text/rfc9048.md", "# RFC 9048\n\n## 3.  Overview\n\nintro\n\n## 3.3.  Key Hierarchy\n\nThe KDF shall use HMAC.\n\n## 3.4.  Next\n\nNo.\n")
+        write(self.root, "specs/source/text/rfc90481.md", "# RFC 90481\n\n## 3.3.  Wrong document\n\nwrong\n")
+        write(self.root, "specs/source/text/rfc9048-errata.md", "# RFC 9048 errata\n\n## 3.3.  Errata\n\nerrata\n")
+        write(self.root, "specs/source/text/tr38901-h00.md", "# TR 38.901\n\n## 7.4 Fast fading\n\nTR text.\n\n## 7.5 Next\n")
+        write(self.root, "specs/source/text/ts38901-h00.md", "# TS 38.901\n\n## 7.4 Not the report\n\nTS text.\n")
+        for doc in ("rfc9048", "RFC 9048", "rfc-9048", "Rfc9048"):
+            proc = run_cli(self.root, "source", "clause", doc, "3.3")
+            self.assertEqual(proc.returncode, 0, (doc, proc.stdout))
+            self.assertIn("The KDF shall use HMAC.", proc.stdout, doc)
+            self.assertNotIn("Wrong document", proc.stdout, doc)
+            self.assertNotIn("errata", proc.stdout.lower().replace("rfc9048.md", ""), doc)
+            self.assertNotIn("No.", proc.stdout, doc)
+        for doc in ("tr38.901", "TR 38.901", "tr38901"):
+            proc = run_cli(self.root, "source", "clause", doc, "7.4")
+            self.assertEqual(proc.returncode, 0, (doc, proc.stdout))
+            self.assertIn("TR text.", proc.stdout, doc)
+        proc = run_cli(self.root, "source", "clause", "ts 38.901", "7.4")
+        self.assertIn("TS text.", proc.stdout)
+        # A designation is never a prefix of a longer number: rfc904 and rfc90 match no file, rfc90481 only its own.
+        for doc in ("rfc904", "rfc90", "rfc9"):
+            proc = run_cli(self.root, "source", "clause", doc, "3.3")
+            self.assertEqual(proc.returncode, 1, (doc, proc.stdout))
+            self.assertIn("no document matching", proc.stdout)
+        self.assertIn("wrong", run_cli(self.root, "source", "clause", "rfc 90481", "3.3").stdout)
+        proc = run_cli(self.root, "source", "find", "RFC 9048", "HMAC")
+        self.assertIn("[3.3.  Key Hierarchy]", proc.stdout)
+        # Only the longer-numbered file exists for this designation: no fallback to it.
+        os.remove(self.root / "specs/source/text/rfc9048.md")
+        os.remove(self.root / "specs/source/text/rfc9048-errata.md")
+        proc = run_cli(self.root, "source", "clause", "rfc9048", "3.3")
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+
     def test_lookup_command_wins(self) -> None:
         self.cfg["sources"]["lookup_command"] = "echo LOOKUP {doc} {clause}"
         write_config(self.root, self.cfg)
