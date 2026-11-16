@@ -185,14 +185,15 @@ process grows by gigabytes in seconds, far faster than any test timeout, and sev
 several test threads each exhausted a 16 GB host (docs/LESSONS.md 28). `sdd check mutation`
 therefore applies `quality.mutation.jobs` (default 2), `test_threads` (3) and a per-test-process
 memory cap, `memory_limit_mib` (2048), through `tools/sdd/scripts/memcap-runner.sh`
-(`ulimit -v`), and runs under the host-wide heavy-job lock (`tools/sdd/scripts/heavy-lock.sh`,
+(`ulimit -d`, the data limit: an address-space cap, `ulimit -v`, made Go tools that reserve
+large unused ranges panic at start-up; docs/LESSONS.md 30), and runs under the host-wide heavy-job lock (`tools/sdd/scripts/heavy-lock.sh`,
 `quality.heavy_lock`). Cap the test processes, not the compiler:
 
 | Ecosystem | How the cap reaches the tests |
 |---|---|
 | Rust | target runner hook: `env` `{"CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER": "{memcap_runner}", "NEXTEST_TEST_THREADS": "{test_threads}", "RUST_TEST_THREADS": "{test_threads}", "RUSTC_WRAPPER": ""}` (use your host triple: `rustc -vV`, upper-case, `-` to `_`); cargo and nextest start every test binary through the runner, rustc stays uncapped |
 | Python, Go | no `{memcap_runner}`: the whole command runs under the runner, each process (the Go compiler too) with its own cap |
-| TypeScript (Node) | `ulimit -v` breaks V8, which reserves large address space: `memory_limit_mib: 0` and `env` `{"NODE_OPTIONS": "--max-old-space-size=2048"}` (heap cap per process) |
+| TypeScript (Node) | the example keeps `memory_limit_mib: 0` and caps the heap per process: `env` `{"NODE_OPTIONS": "--max-old-space-size=2048"}`, which gives a clearer error than a killed worker. The data cap also works for plain Node (V8's reserved ranges do not count; a 1.3 GB allocation fails under a 512 MiB cap), but it is not verified with Stryker's worker pool |
 | any (systemd) | a cgroup for the whole run instead: `systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=0 <command>` (the kernel then kills the largest process inside the scope only) |
 
 A runaway mutant then fails alone and counts as caught. If the unmutated baseline fails only

@@ -37,8 +37,8 @@ def load_memguard():
     return mod
 
 
-def shell_ulimit_v() -> str:
-    return subprocess.run(["sh", "-c", "ulimit -v"], stdout=subprocess.PIPE, text=True).stdout.strip()
+def shell_ulimit(flag: str = "-d") -> str:
+    return subprocess.run(["sh", "-c", f"ulimit {flag}"], stdout=subprocess.PIPE, text=True).stdout.strip()
 
 
 class ConfigValidationTest(unittest.TestCase):
@@ -142,17 +142,18 @@ class MutationGateLimitsTest(unittest.TestCase):
         return (self.root / "mut" / name).read_text().strip()
 
     def test_whole_command_capped_by_default(self) -> None:
-        code, out = self.check("ulimit -v > mut/limit; echo {jobs} $SDD_TEST_THREADS > mut/par")
+        code, out = self.check("ulimit -d > mut/limit; ulimit -v > mut/as; echo {jobs} $SDD_TEST_THREADS > mut/par")
         self.assertEqual(code, 0, out)
         self.assertEqual(self.read("limit"), "1048576")
+        self.assertEqual(self.read("as"), shell_ulimit("-v"))  # the address space stays as inherited
         self.assertEqual(self.read("par"), "2 3")
 
     def test_runner_hook_caps_only_the_test_process(self) -> None:
-        code, out = self.check('ulimit -v > mut/outer; "$TEST_RUNNER" sh -c "ulimit -v" > mut/inner',
+        code, out = self.check('ulimit -d > mut/outer; "$TEST_RUNNER" sh -c "ulimit -d" > mut/inner',
                                env={"TEST_RUNNER": "{memcap_runner}"})
         self.assertEqual(code, 0, out)
         self.assertEqual(self.read("inner"), "1048576")
-        self.assertEqual(self.read("outer"), shell_ulimit_v())
+        self.assertEqual(self.read("outer"), shell_ulimit())
 
     def test_runaway_allocation_fails_alone(self) -> None:
         """A test process that allocates past the cap dies; the tool goes on and reports it."""
@@ -191,18 +192,33 @@ class ScriptsTest(unittest.TestCase):
             self.assertTrue(os.access(SCRIPTS / name, os.X_OK), name)
 
     def test_memcap_runner(self) -> None:
-        p = self.run_script(str(RUNNER), "sh", "-c", "ulimit -v", env={"SDD_MEM_LIMIT_KB": "524288"})
-        self.assertEqual((p.returncode, p.stdout.strip()), (0, "524288"))
-        p = self.run_script(str(RUNNER), "sh", "-c", "ulimit -v", env={"SDD_MEM_LIMIT_KB": "0"})
-        self.assertEqual(p.stdout.strip(), shell_ulimit_v())
+        p = self.run_script(str(RUNNER), "sh", "-c", 'echo "$(ulimit -d) $(ulimit -v)"', env={"SDD_MEM_LIMIT_KB": "524288"})
+        self.assertEqual((p.returncode, p.stdout.strip()), (0, f"524288 {shell_ulimit('-v')}"))  # data capped, address space untouched
+        p = self.run_script(str(RUNNER), "sh", "-c", "ulimit -d", env={"SDD_MEM_LIMIT_KB": "0"})
+        self.assertEqual(p.stdout.strip(), shell_ulimit())
         e = dict(os.environ)
         e.pop("SDD_MEM_LIMIT_KB", None)
-        p = subprocess.run(["sh", str(RUNNER), "sh", "-c", "ulimit -v"], stdout=subprocess.PIPE, text=True, env=e)
+        p = subprocess.run(["sh", str(RUNNER), "sh", "-c", "ulimit -d"], stdout=subprocess.PIPE, text=True, env=e)
         self.assertEqual(p.stdout.strip(), "2097152")  # default 2 GiB
         p = self.run_script(str(RUNNER), "true", env={"SDD_MEM_LIMIT_KB": "not-a-number"})
         self.assertEqual(p.returncode, 125)  # an uncapped run never passes for a capped one
         self.assertIn("cannot set ulimit", p.stderr)
         self.assertEqual(self.run_script(str(RUNNER)).returncode, 2)
+
+    def test_memcap_runner_stops_a_touched_allocation_but_not_a_reservation(self) -> None:
+        """The data cap stops memory a test writes to; address space a runtime only reserves (Go,
+        V8: PROT_NONE ranges) does not count, unlike under an address-space cap."""
+        env = {"SDD_MEM_LIMIT_KB": str(256 << 10)}
+        touch = "b = bytearray({} << 20); b[::4096] = b'\\x01' * len(b[::4096]); print(len(b) >> 20)"
+        small = self.run_script(str(RUNNER), "python3", "-I", "-c", touch.format(64), env=env)
+        self.assertEqual((small.returncode, small.stdout.strip()), (0, "64"), small.stderr)
+        big = self.run_script(str(RUNNER), "python3", "-I", "-c", touch.format(512), env=env)
+        self.assertNotEqual(big.returncode, 0)
+        self.assertIn("MemoryError", big.stderr)
+        # prot=0 is PROT_NONE: 1 GiB reserved, never writable, four times the cap.
+        reserve = "import mmap; m = mmap.mmap(-1, 1 << 30, flags=mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS, prot=0); print('reserved')"
+        r = self.run_script(str(RUNNER), "python3", "-I", "-c", reserve, env=env)
+        self.assertEqual((r.returncode, r.stdout.strip()), (0, "reserved"), r.stderr)
 
     @unittest.skipUnless(shutil.which("flock"), "flock(1) not installed")
     def test_heavy_lock_nested_and_exit_code(self) -> None:

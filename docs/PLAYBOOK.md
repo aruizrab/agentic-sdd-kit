@@ -342,8 +342,9 @@ until somebody looks, even after the limit has reset.
   grows a test process by gigabytes in seconds, far faster than a test timeout stops it. With
   3 jobs and 8 test threads per job that took a 16 GB host down, init system and unrelated user
   services included. `sdd check mutation` runs at most `quality.mutation.jobs` (2) mutants with
-  `test_threads` (3) each and caps each test process's address space at `memory_limit_mib`
-  (2048) through `tools/sdd/scripts/memcap-runner.sh` (`ulimit -v`); for Rust the runner is the
+  `test_threads` (3) each and caps each test process's data memory at `memory_limit_mib`
+  (2048) through `tools/sdd/scripts/memcap-runner.sh` (`ulimit -d`; an address-space cap,
+  `ulimit -v`, made Go tools such as gitleaks panic at start-up, lesson 30); for Rust the runner is the
   cargo target runner (`CARGO_TARGET_<TRIPLE>_RUNNER`), so the compiler stays uncapped. A
   runaway mutant then fails alone and counts as caught. If the unmutated baseline fails only
   because of the cap, raise it; never remove it. Other ecosystems: docs/ADAPTING.md §6.
