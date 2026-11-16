@@ -212,6 +212,14 @@ class ProcedureStepsTest(unittest.TestCase):
         self.assertEqual(res.errors, [])
         self.assertIn({"feature": "098-other", "status": "Approved", "stepTables": [], "exemptions": [],
                        "featureWideReasons": ["runs no procedure of PROTO"]}, res.coverage)
+        # A reason keeps everything after the colon, `;` included (the reference project cut it at the first `;`).
+        self.spec(PLAIN.format(status="Approved", extra="\nNo step table: parsers only; no procedure of PROTO applies; see D-3\n"), "098-other")
+        self.edit("No step table for PROTO §4.3: fixture", "No step table for PROTO §4.3: fixture; owned by the next release; see D-4")
+        res = self.evaluate()
+        self.assertEqual(res.errors, [])
+        cov = {c["feature"]: c for c in res.coverage}
+        self.assertEqual(cov["098-other"]["featureWideReasons"], ["parsers only; no procedure of PROTO applies; see D-3"])
+        self.assertEqual(cov["099-fixture"]["exemptions"], [{"procedure": "PROTO §4.3", "reason": "fixture; owned by the next release; see D-4"}])
         self.spec(PLAIN.format(status="Approved", extra="\nNo step table:\n"), "098-other")
         self.assertFails("F098: empty reason in `No step table:`")
         self.edit("No step table for PROTO §4.3: fixture", "No step table for PROTO §4.3:")
