@@ -113,10 +113,16 @@ const COMPONENT_WORD = (C.components && C.components.word) || 'component'
 const WT_ROOT = `${PROJECT_DIR}/${C.paths.worktree_root || '.wt'}`
 const shq = (s) => (/^[A-Za-z0-9_./@+:,=%~-]*$/.test(String(s)) ? String(s) : `'${String(s).replace(/'/g, `'\\''`)}'`)
 const CACHE_VARS = Object.entries((C.build_cache && C.build_cache.env) || {}).map(([k, v]) => `${k}=${shq(v)}`)
+// One rule for every project (sync 2026-11-16): the feature directory's Markdown files are read from the working copy (the
+// spec is still uncommitted while the critic and the product owner read it), and an experiment that needs a build or new
+// code runs in a throwaway worktree that the agent removes; code is read as of the recorded commit.
 const READ_RULE =
-  `READ VIA GIT (hard rule for this read-only task): first record SHA=$(git -C ${ROOT || PROJECT_DIR} rev-parse ${BRANCH}); read files as of that commit with ` +
-  '`git show $SHA:<path>`, use `git diff <range>` and `git log`; do not create worktrees and do not edit any file. You may run the existing test command in the ' +
-  'working copy without editing anything; a reproduction that needs new code is described in `reproduction`, not executed.'
+  `READ VIA GIT (hard rule; this task is read-only except for the edits its prompt names): first record SHA=$(git -C ${ROOT || PROJECT_DIR} rev-parse ${BRANCH}); ` +
+  'read code as of that commit with `git show $SHA:<path>`, `git diff <range>`, `git log` and `git grep <pattern> $SHA`; do not create worktrees or edit files to read. ' +
+  `The feature directory's Markdown files (${DIR}/*.md) may be uncommitted: read those from the working copy. You may run the existing test command in the ` +
+  'working copy without editing anything. An experiment that needs a build or new code runs in a detached throwaway worktree ' +
+  `(\`git worktree add --detach ${WT_ROOT}/exp-<unique> $SHA\`, its build output inside it) that you remove (\`git worktree remove --force\`) before you finish; ` +
+  'put what you ran and saw in `reproduction`.'
 const readOnly = (prompt) => (READ_VIA_GIT ? `${prompt}\n${READ_RULE}` : prompt)
 // Opt-in behaviour (args or sdd.config.json pipeline.*). Without them every agent prompt and opts object is
 // byte-identical to the previous script (tests/pipeline_cachekeys.mjs), so paused runs resume from their journal.
@@ -363,7 +369,8 @@ const CTX = [
     '`git clean`, `git reset --hard`, `git stash`, `git switch`/`checkout <branch>`, or `rm` on files you did not create in this task. To revert your own ' +
     'scratch edits, undo exactly those edits; never discard edits you did not make (they may be an interrupted worker\'s work). ' +
     (READ_VIA_GIT
-      ? 'Read-only roles (critics, reviewers, verifiers, fix-checks) must not edit tracked files at all and read through git (READ VIA GIT), without worktrees.'
+      ? 'Read-only roles (critics, reviewers, verifiers, fix-checks) must not edit tracked files at all and read through git (READ VIA GIT); an experiment that needs a build ' +
+        'runs in a throwaway worktree they remove.'
       : 'Read-only roles (reviewers, verifiers, fix-checks) must not edit tracked files at all: for experiments create a ' +
         `detached worktree (\`git worktree add --detach ${WT_ROOT}/exp-<unique> HEAD\`), work there, then \`git worktree remove --force\` it.`),
   `DISK RULE: never put build output, worktrees or large files under /tmp (small RAM tmpfs); use the project's build directory inside ${ROOT || PROJECT_DIR}${BUILD_DIRS.length ? ` (${BUILD_DIRS.join(', ')})` : ''} and delete what you created when done. Cap parallel build jobs at ${P.max_build_jobs || 4}.` +
@@ -936,13 +943,13 @@ if (want('approve') || LATER.some(want)) {
   if (want('approve') && APPROVAL === 'agent' && st && st.status === 'Draft') {
     let po = null
     for (let attempt = 0; attempt < 2; attempt++) {
-      po = await agentR(
+      po = await agentR(readOnly(
         `${CTX}\n\nAct as PRODUCT OWNER for ${FID} (follow the product-owner role). You did not write this spec. Decide whether ${DIR}/spec.md can be approved:\n` +
           `- it matches the roadmap scope (${C.paths.roadmap}) with no creep and a proportionate requirement count (about ${BUDGET.min}-${BUDGET.max});\n` +
           `- no ${MARKER} markers remain (resolve product questions yourself by recording them under "Decisions", but never invent normative behaviour);\n` +
           '- every in-scope abnormal/error case is covered or explicitly out of scope;\n- the critic has no open blocking/major issues;\n' +
           '- each `must` has an acceptance scenario.\nIf approvable, change the header line to "Status: Approved" (only that line plus Decisions). Otherwise leave it Draft. ' +
-          'Return approved and your reasons.',
+          'Return approved and your reasons.'),
         { label: `product-owner ${attempt + 1}`, phase: 'Approve', schema: APPROVAL_SCHEMA, agentType: 'product-owner' },
       )
       if (!po || po.approved || attempt > 0) break

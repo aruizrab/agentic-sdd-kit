@@ -128,6 +128,12 @@ async function run(src, args, scenario = {}) {
 
 let checks = 0
 const ok = (m) => { checks++; console.log(`ok - ${m}`) }
+// readViaGit got one rule for every project in the 2026-11-16 batch (the feature's Markdown from the working copy, a removed
+// throwaway worktree for experiments, the product-owner approval too): with readViaGit on, the comparison with older scripts
+// ignores the rule text and the CTX sentence about it; 2d checks the new text itself.
+const RV_RULE = /\nREAD VIA GIT \(hard rule[^\n]*/g
+const RV_CTX = /Read-only roles \(critics, reviewers, verifiers, fix-checks\) must not edit tracked files at all and read through git \(READ VIA GIT\)(?:, without worktrees\.|; an experiment that needs a build runs in a throwaway worktree they remove\.)/g
+const norm = (args, prompt) => (args.readViaGit ? prompt.replace(RV_RULE, '').replace(RV_CTX, '<read-via-git ctx>') : prompt)
 
 // 1. Byte-identical without the new args ------------------------------------------------------------------
 const ROOT = '/proj/.wt/F011'
@@ -152,7 +158,7 @@ if (baselineSrc) {
       assert.equal(after.calls.length, before.calls.length, `${name} / ${sname}: call count`)
       for (let i = 0; i < after.calls.length; i++) {
         assert.equal(after.calls[i].opts, before.calls[i].opts, `${name} / ${sname}: opts differ at call ${i} (${after.calls[i].label})`)
-        assert.equal(after.calls[i].prompt, before.calls[i].prompt, `${name} / ${sname}: prompt differs at call ${i} (${after.calls[i].label})`)
+        assert.equal(norm(args, after.calls[i].prompt), norm(args, before.calls[i].prompt), `${name} / ${sname}: prompt differs at call ${i} (${after.calls[i].label})`)
       }
       assert.deepEqual(after.summary, before.summary, `${name} / ${sname}: summary differs`)
       compared += after.calls.length
@@ -294,7 +300,7 @@ if (prevSrc) {
       assert.equal(after.calls.length, before.calls.length, `${name} / ${sname}: call count vs ${PREV_REV}`)
       for (let i = 0; i < after.calls.length; i++) {
         assert.equal(after.calls[i].opts, before.calls[i].opts, `${name} / ${sname}: opts differ at call ${i} (${after.calls[i].label})`)
-        assert.equal(after.calls[i].prompt, before.calls[i].prompt, `${name} / ${sname}: prompt differs at call ${i} (${after.calls[i].label})`)
+        assert.equal(norm(args, after.calls[i].prompt), norm(args, before.calls[i].prompt), `${name} / ${sname}: prompt differs at call ${i} (${after.calls[i].label})`)
       }
       assert.deepEqual(after.summary, before.summary, `${name} / ${sname}: summary differs`)
       n += after.calls.length
@@ -345,6 +351,29 @@ if (prevSrc) {
   assert.ok(!none.calls.some((c) => /^test-author/.test(c.label)))
   await assert.rejects(run(currentSrc, Object.assign({}, REF, { tasks: ['first'] })), /args\.tasks must be task ids/)
   ok('tasks: no matching task blocks the Tests stage before the test-author runs; malformed ids are rejected')
+}
+
+// 2d. readViaGit: the one rule is appended to the read-only calls and the product-owner approval, nothing else gains it.
+{
+  const args = { approval: 'agent', readViaGit: true }
+  const r = await run(currentSrc, args)
+  const plain = await run(currentSrc, { approval: 'agent' })
+  assert.equal(r.calls.length, plain.calls.length)
+  const RO = /^(spec-critic|product-owner \d|spec-compliance-reviewer|security-reviewer|test-adequacy-reviewer|perf-reviewer|verify R|fix-check)/
+  let n = 0
+  for (let i = 0; i < r.calls.length; i++) {
+    const c = r.calls[i]
+    const has = c.prompt.includes('\nREAD VIA GIT (hard rule; this task is read-only except for the edits its prompt names)')
+    assert.equal(has, RO.test(c.label), `rule present only in read-only calls and the approval: ${c.label}`)
+    if (has) {
+      n++
+      assert.ok(c.prompt.includes("The feature directory's Markdown files (specs/features/011-x/*.md) may be uncommitted: read those from the working copy."), c.label)
+      assert.ok(c.prompt.includes('`git worktree add --detach /proj/.wt/exp-<unique> $SHA`, its build output inside it) that you remove'), c.label)
+    }
+  }
+  assert.ok(r.calls.find((c) => c.label === 'product-owner 1').prompt.includes('READ VIA GIT'))
+  assert.ok(n >= 8, `read-only calls with the rule: ${n}`)
+  ok(`readViaGit: ${n} read-only calls (critic, product-owner approval, reviewers, verifiers, fix-checks) carry the one rule; the other calls do not`)
 }
 
 console.log(`\npipeline cache keys: ${checks} checks passed${baselineSrc ? ` (${compared} agent calls compared byte for byte against ${BASE_REV})` : ''}`)
