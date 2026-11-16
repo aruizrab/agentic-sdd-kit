@@ -4,9 +4,9 @@ The standing rules for the session that orchestrates this project's pipelines. T
 this file, not in the session's memory: a long session compacts its context many times, and
 rules kept only in memory drift or vanish (the kit's docs/LESSONS.md 49). This file is the
 source of truth; session memory may point here but never overrides it. **When the owner sets
-a new standing rule, record it in this file in the same turn with the `owner-rule` skill**
-(it edits and commits, `docs(orchestrator): <rule>`). When a new rule conflicts with this
-file, the skill replaces the old line or asks the owner which one wins.
+a new standing rule, record it in this file in the same turn** (§7 "Recording an owner rule":
+edit and commit, `docs(orchestrator): <rule>`). When a new rule conflicts with this file,
+replace the old line or ask the owner which one wins.
 
 ## 1. Start-up checklist (every new session, and after every compaction)
 
@@ -18,10 +18,15 @@ file, the skill replaces the old line or asks the owner which one wins.
    from an override session (`SDD_ALLOW_PROTECTED=1`).
 2. Read, in order: this file, `specs/MERGE-OBLIGATIONS.md`, the roadmap's order of work,
    `git log --oneline -20`, `git worktree list`, and the latest handoff
-   (`.wt/handoff/STATE.md`) if there is one.
+   (`.wt/handoff/STATE.md`) if there is one. The `orchestrator-context` SessionStart hook
+   reminds the main session of this file and its habits at startup, resume, clear and
+   after every compaction (then: read the handoff first).
 3. Check the host: free memory and disk, and the heavy-job queue
    (`ls .wt/locks/heavy.lock.queue/`).
 4. Check that `main` is green: `tools/sdd/scripts/heavy.sh sdd gates --fast`.
+5. Make sure the heartbeat runs. Run `CronList`; if no "{{PROJECT}} heartbeat" job exists,
+   create it as §4 "Heartbeat and wake-ups" says, and note its id and creation date in the
+   handoff file.
 
 ## 2. Roles and authority
 
@@ -83,6 +88,48 @@ orchestrator does itself.
   work (plans, reviews, documents) may run next to execution-heavy phases.
 - **Never idle**: if nothing runs and the usage window is not used up, start the cheapest
   runnable work (kit PLAYBOOK §6 and §14 for pacing and unattended pauses).
+- **Pacing bands** (kit PLAYBOOK §6): aim to end each usage window at 85-90 % used. If the
+  projected use is below 70 %, add a run; between 70 and 90 %, hold; above 95 %, pause the run
+  furthest from a milestone. Wake at each window reset with a one-shot cron (below).
+
+### Heartbeat and wake-ups
+
+The harness gives the orchestrator no wake-up of its own: work keeps flowing only if the
+session schedules its own turns. Session crons (`CronCreate`) live only as long as the session,
+fire only while it is idle (an hourly job may run up to 30 minutes late), and recurring jobs
+expire after 7 days. So:
+
+- **Hourly heartbeat:** a recurring `CronCreate` with cron `<orchestrator.heartbeat.minute> * * * *`
+  (default `17 * * * *`; an off-the-hour minute) and the prompt
+  `{{PROJECT}} heartbeat: follow docs/ORCHESTRATOR.md §4 "Heartbeat and wake-ups", heartbeat steps.`
+  Create it at session start (§1 step 5). Never create a second one: check `CronList` first.
+  `orchestrator.heartbeat.enabled: false` drops this habit from the SessionStart reminder.
+- **Renewal:** when the heartbeat is 6 or more days old (creation date in the handoff file),
+  create a fresh one, then `CronDelete` the old one.
+- **Reset wake-up:** when the usage window passes 70 % (or a limit is hit, or a run pauses on
+  one), add a one-shot cron at the reset time plus 2 minutes (local time), with the prompt
+  `{{PROJECT}} wake-up after the usage reset: follow docs/ORCHESTRATOR.md §4 "Heartbeat and wake-ups", heartbeat steps.`
+  Keep at most one pending reset wake-up.
+- **Cron turns are launch turns:** they carry no relayed user message, so pipelines may be
+  launched from them (§3).
+
+Heartbeat steps, on every heartbeat or wake-up turn:
+1. **Usage:** read the usage source (`orchestrator.usage_file`: a JSON capture of Claude Code's
+   status-line input, e.g. written by the project's status-line script; its `rate_limits` hold
+   the used percentages and `resets_at`, a Unix epoch), e.g. `jq .rate_limits <usage_file>`.
+   Without one, go by limit messages and paused runs. Compute the projection (used % plus the
+   burn rate times the hours left in the window) and decide per the bands above. Schedule the
+   reset wake-up if it is due.
+2. **Work in flight:** check the running workflows and background agents (their notifications
+   and outputs). Act on finished ones: review, merge per §2 and §5, start the next stage.
+3. **Fill the window:** if the bands allow more work and the memory budget has room, launch the
+   next runnable work in the roadmap's order (§4 concurrency, §5 component claims). If nothing
+   runs at all, launch the cheapest runnable work.
+4. **Host:** check free memory and disk and the heavy-job queue. A job waiting much longer than
+   its peers means something is stuck; look into it.
+5. **Report only changes:** one or two lines if something happened (a launch, a merge, a
+   blocker, a decision the owner should know). Nothing if nothing changed.
+6. **Renew** the heartbeat if it is due (above).
 
 ## 5. Component claims, merge order, main stays green
 
@@ -117,20 +164,68 @@ orchestrator does itself.
 - Say when work is paused or blocked, and why; never let a summary show a paused feature as
   moving (`sdd progress` marks it idle).
 - Separate verified from believed: a diagnosis is a hypothesis until it is checked.
-- **Keep standing rules in this file, with the `owner-rule` skill.** Whenever the owner states
-  a standing rule or direction, invoke `owner-rule` in that same turn. It records the rule here
-  (in the section that owns the topic, else in §8), replaces any line it contradicts (or asks
-  which wins), commits, and confirms in one line; then act on the rule.
-- **Compaction, with the `compact-handoff` skill.** The owner triggers compaction. Before any
-  `/compact`, or when the owner says the context is long, invoke `compact-handoff`. It writes
-  the live state (running run ids and their args, the queue, in-flight work, held patches,
-  pending owner items and decisions) to the handoff file (`paths.handoff`, default
-  `.wt/handoff/STATE.md`), so the summary only needs to point there; read it back first after
-  the compaction.
-- Both skills are for the main session only (`orchestrator.main_only_skills`): the
-  `main-only-skills` hook blocks them for any subagent, built-in agents, forks and workflow
-  agents included. A subagent reports such things to the orchestrator in its final message.
-  That is the only restriction on skills; every other skill stays available to subagents.
+- **Keep standing rules in this file.** Whenever the owner states a standing rule or
+  direction, record it here in that same turn ("Recording an owner rule" below).
+- **Compaction:** the owner triggers it. Before any `/compact`, or when the owner says the
+  context is long, run "Handoff before compaction" below, so the summary only needs to point
+  to the handoff file (`paths.handoff`, default `.wt/handoff/STATE.md`).
+- **How these two habits are wired** (kit PLAYBOOK §18): the SessionStart hook
+  `.claude/hooks/orchestrator-context.sh` reminds the main session of both habits (and of the
+  heartbeat, §4 "Heartbeat and wake-ups") at startup, on resume, on clear and after every
+  compaction, and never reaches a subagent. The owner can
+  also type `/owner-rule <rule>` or `/compact-handoff`; both skills set
+  `disable-model-invocation`, so no model context lists them and subagents never see them,
+  and their bodies pull the procedures below (one copy). The `main-only-skills` hook
+  (`orchestrator.main_only_skills`) is the backstop: it blocks either skill for any subagent,
+  and every other skill stays available to subagents. A subagent reports rules or state to the
+  orchestrator in its final message.
+
+### Recording an owner rule
+
+1. **Quote the rule.** Restate the owner's words as one imperative line with the date and
+   "owner" as the source, e.g. `- **Concurrency:** up to 4 implementation pipelines (owner, <yyyy-mm-dd>).`
+2. **Find its home** in this file: §2 authority and escalation, §3 launching, §4 how much runs
+   at once, §5 component claims and merge order, §6 models, effort and host, §7 reporting; if
+   none fits, add a row to the §8 table. A process rule for every agent (not only the
+   orchestrator) belongs in `docs/DEVELOPMENT.md`. A rule that changes protected configuration
+   (`.claude/**`, the constitution, `sdd.config.json`, CI) becomes a patch file for the owner
+   (§2; kit PLAYBOOK §16), not an edit.
+3. **Check for conflicts.** If the rule contradicts or narrows an existing line, replace that
+   line; never keep both. If it is unclear which one the owner wants, ask one short question
+   quoting both before writing.
+4. **Edit and commit in the same turn:** `docs(orchestrator): <rule in a few words>`, with the
+   configured trailer lines (`commit.trailers`). Commit only this file (or
+   `docs/DEVELOPMENT.md`), even if other files are dirty.
+5. **Confirm in one line**, e.g. "Recorded in docs/ORCHESTRATOR.md §4: up to 4 implementation
+   pipelines."
+6. **Act on it now.** If the rule changes what should be running (more or fewer pipelines, a
+   pause, a new priority), do it in this turn or schedule it (§3 launch turn).
+
+Never keep rule text in session memory. Memory may point to this file.
+
+### Handoff before compaction
+
+1. **Collect the live state** and check each item against git, `sdd progress` or the task
+   list, not memory:
+   - running workflows: run id, task id, feature, stage, arguments, what to do when it ends;
+   - background agents and jobs: purpose, worktree and branch, what to do on their report;
+   - the heavy-job queue (`ls .wt/locks/heavy.lock.queue/`) and what is waiting on it;
+   - in-flight branches and worktrees with uncommitted or unpushed work, and the next step for
+     each;
+   - decisions taken this session that no tracked file holds yet, and open questions for the
+     owner;
+   - wake-ups and crons this session created (id, time, purpose);
+   - owner instructions from this session: each must already be in this file. Record any that
+     is missing first ("Recording an owner rule").
+2. **Rewrite the handoff file** (`paths.handoff`, default `.wt/handoff/STATE.md`: under the
+   git-ignored worktree root, under about 150 lines). First copy the old file to
+   `STATE-<yyyymmdd-hhmm>.md` next to it. Sections: a dated header, `## Running`,
+   `## In flight`, `## Waiting on the owner`, `## Next actions` (ordered), and `## Rules` with
+   only a pointer to this file.
+3. **Commit what a tracked file owns:** merge-obligation rows, roadmap edits and the like.
+   Never leave such decisions only in the handoff file.
+4. **Tell the owner it is safe to compact,** and suggest:
+   `/compact Read .wt/handoff/STATE.md and docs/ORCHESTRATOR.md first; keep run ids and the next actions.`
 
 ## 8. Owner rules (append here, newest last)
 

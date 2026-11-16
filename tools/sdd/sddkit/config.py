@@ -208,8 +208,14 @@ DEFAULTS: Dict[str, Any] = {
         "hook_probe": {"enabled": True, "path": ".claude/.hook-probe", "blocked_marker": "BLOCKED by SDD hook"},
     },
     # Skills only the main session (the orchestrator) may run: the main-only-skills hook blocks them
-    # for every subagent. Every other skill stays available to subagents.
-    "orchestrator": {"main_only_skills": ["owner-rule", "compact-handoff"]},
+    # for every subagent. Every other skill stays available to subagents. heartbeat and usage_file feed
+    # the orchestrator-context SessionStart reminder (the hourly "<project.name> heartbeat" cron at
+    # heartbeat.minute; usage_file: a JSON capture of Claude Code's status-line input with rate_limits).
+    "orchestrator": {
+        "main_only_skills": ["owner-rule", "compact-handoff"],
+        "heartbeat": {"enabled": True, "minute": 17},
+        "usage_file": "",
+    },
     "merge": {
         "union_manifests": [],
         "after_union": "",
@@ -387,6 +393,16 @@ def _validate_orchestrator(cfg: Dict[str, Any]) -> List[str]:
     skills = (cfg.get("orchestrator") or {}).get("main_only_skills")
     if not isinstance(skills, list) or not all(isinstance(s, str) and re.fullmatch(r"[a-z0-9][a-z0-9-]*", s) for s in skills):
         problems.append("orchestrator.main_only_skills must be a list of skill names (lowercase letters, digits, hyphens; no plugin prefix)")
+    orch = cfg.get("orchestrator") or {}
+    hb = orch.get("heartbeat")
+    if not isinstance(hb, dict) or not isinstance(hb.get("enabled"), bool):
+        problems.append("orchestrator.heartbeat.enabled must be true or false")
+    minute = hb.get("minute") if isinstance(hb, dict) else None
+    if not isinstance(minute, int) or isinstance(minute, bool) or not 0 <= minute <= 59:
+        problems.append("orchestrator.heartbeat.minute must be an integer from 0 to 59")
+    usage = orch.get("usage_file")
+    if not isinstance(usage, str) or (usage and not re.fullmatch(r"~?[A-Za-z0-9_./@+-]+", usage)):
+        problems.append("orchestrator.usage_file must be empty or a plain file path (a leading ~ is allowed)")
     for key in ("orchestrator", "handoff"):
         value = cfg["paths"].get(key)
         if not isinstance(value, str) or not _PLAIN_PATH.fullmatch(value) or ".." in value.split("/"):

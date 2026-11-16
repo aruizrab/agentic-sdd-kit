@@ -416,6 +416,9 @@ The orchestrator acts only when something notifies it (a finished agent, a finis
 message). A run that ends `paused` on a usage limit while the owner is away therefore sits idle
 until somebody looks, even after the limit has reset.
 
+- **Keep an hourly heartbeat and wake at each reset**: the orchestrator has no wake-up of its
+  own, so it schedules its own turns (ORCHESTRATOR template §4 "Heartbeat and wake-ups"; the
+  `orchestrator-context` SessionStart hook reminds it, §18).
 - **Schedule a one-shot wake-up at the reset time** when a run pauses on a usage limit: a
   scheduled task or timer that sends the orchestrator a message at the time the limit resets
   (plus a few minutes), with the resume instruction (`Workflow({scriptPath, resumeFromRunId,
@@ -674,30 +677,48 @@ the owner's standing rules) drifts or vanishes. Keep it in tracked files:
   repository root, read this file and the register, check the host and that `main` is green),
   roles and authority (who signs security per `pipeline.security_signoff`, the escalation list,
   the owner applies protected-path patches), launch
-  rules, the WIP limit, component claims, reporting rules and the owner's standing rules. When
-  the owner sets a rule, record it in the same turn with the **`owner-rule`** skill: it puts the
-  rule in the section that owns its topic (else the owner-rules table), replaces a line it
-  contradicts or asks which wins, commits (`docs(orchestrator): <rule>`), confirms in one line
-  and acts on the rule.
+  rules, the WIP limit, component claims, reporting rules, the owner's standing rules and the
+  two orchestrator procedures (§7 "Recording an owner rule", "Handoff before compaction"; one
+  copy each). When the owner sets a rule, the orchestrator records it in the same turn: in the
+  section that owns its topic (else the owner-rules table), replacing a line it contradicts or
+  asking which wins, commits (`docs(orchestrator): <rule>`), confirms in one line and acts on
+  the rule.
 - **`specs/MERGE-OBLIGATIONS.md`** (template installed by the kit): one row per cross-feature
   obligation (MARK, EDIT, DOCS, TEST, ORDER, SPEC, SEC, PO), added when the spec that creates
   it is approved, checked before every merge, closed with the merge commit's sha, never
   deleted. Requirement text is never written at merge time: successor wording goes through a
   spec change with a critic round first.
 - **`.wt/handoff/STATE.md`** (untracked, `paths.handoff`): before any `/compact` the
-  orchestrator runs the **`compact-handoff`** skill, which writes the live state (run ids and
+  orchestrator follows "Handoff before compaction": it writes the live state (run ids and
   their args, the queue, in-flight branches, held patches, pending owner items, scheduled
   wake-ups) after saving the previous file, checks that every owner instruction of the
   session is already in the rules file, and suggests the `/compact` instruction; the file is
   read back first afterwards.
-- **Main-session-only skills**: `owner-rule` and `compact-handoff` are listed in
-  `orchestrator.main_only_skills`; the `main-only-skills` hook (PreToolUse `Skill`) blocks
-  them whenever the hook input carries `agent_id` or `agent_type`, which every subagent has
-  (custom agents, built-in agents such as general-purpose, forks, workflow agents). A
-  subagent reports an owner rule or state to the orchestrator in its final message instead.
-  This is the only restriction on skills: the agent definitions do not disallow the `Skill`
-  tool, and every other skill stays available to subagents. Add a project's own
-  orchestrator-only skills to the list (it is protected configuration).
+- **How the two habits reach the orchestrator, and only it** (lessons 53, 54):
+  - the **`orchestrator-context`** hook (SessionStart; `sdd hook orchestrator-context`)
+    injects them as `additionalContext` at startup, resume, clear and after every
+    compaction, when it adds "read the handoff file first". Unless
+    `orchestrator.heartbeat.enabled` is false it adds a third habit: keep the hourly
+    "<project.name> heartbeat" session cron alive (`CronList`, else `CronCreate` at
+    `orchestrator.heartbeat.minute`; session crons die with the session and recurring ones
+    expire after 7 days, so renew at 6) and schedule a one-shot wake-up at each usage reset
+    plus 2 minutes (usage from `orchestrator.usage_file`; ORCHESTRATOR template §4 "Heartbeat
+    and wake-ups", with the six heartbeat steps). SessionStart fires for the main
+    session only (subagents get SubagentStart), and the hook exits silently for input
+    carrying `agent_id`, and when `paths.orchestrator` does not exist. Paths come from
+    `paths.orchestrator` and `paths.handoff`;
+  - the skills **`owner-rule`** and **`compact-handoff`** set `disable-model-invocation:
+    true`: no model context, main or subagent, lists their descriptions, and the owner types
+    `/owner-rule <rule>` or `/compact-handoff`. Their bodies pull the procedure from the rules
+    file's section, so each procedure exists once;
+  - the **`main-only-skills`** hook (PreToolUse `Skill`) is the backstop: it blocks the skills
+    in `orchestrator.main_only_skills` whenever the hook input carries `agent_id` or
+    `agent_type`, which every subagent has (custom agents, built-in agents such as
+    general-purpose, forks, workflow agents). A subagent reports an owner rule or state to the
+    orchestrator in its final message instead. This is the only restriction on skills: the
+    agent definitions do not disallow the `Skill` tool, and every other skill stays available
+    to subagents. Add a project's own orchestrator-only skills to the list (it is protected
+    configuration).
 - **WIP limit**: no new spec run while more than the limit of approved specs are
   unimplemented; implementation first.
 - **Component claims**: one in-flight branch per component (`components.path_regex` unit);

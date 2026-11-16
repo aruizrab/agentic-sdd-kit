@@ -25,6 +25,17 @@ Hooks:
   calls one of ``orchestrator.main_only_skills`` (default ``owner-rule``, ``compact-handoff``);
   the name is matched after stripping a leading ``/``, arguments and a ``plugin:`` namespace.
   The main session is never blocked, and every other skill stays available to subagents.
+  A backstop: both skills set ``disable-model-invocation``, so no model context lists them.
+* ``orchestrator-context`` (SessionStart): prints ``additionalContext`` JSON reminding the main
+  session (the orchestrator) of its habits: record an owner rule in ``paths.orchestrator`` in
+  the same turn, and write ``paths.handoff`` before any compaction (procedures in that file's
+  sections "Recording an owner rule" and "Handoff before compaction"), and (unless
+  ``orchestrator.heartbeat.enabled`` is false) keep the hourly "<project.name> heartbeat" cron alive
+  and schedule a one-shot wake-up at each usage reset (section "Heartbeat and wake-ups",
+  ``orchestrator.heartbeat.minute``, ``orchestrator.usage_file``); after a compaction
+  (``source: compact``) it adds "read the handoff file first". SessionStart fires for the main
+  session only (startup, resume, clear, compact; subagents get SubagentStart); it exits silently
+  for input carrying ``agent_id``, when the rules file does not exist, and on bad input.
 * ``format`` (PostToolUse Edit|Write): runs the ``formatters`` entry whose glob
   matches the edited file; exit 2 with the output when it fails (a syntax
   error from the last edit).
@@ -410,6 +421,70 @@ def main_only_skills(data: Optional[Dict[str, Any]] = None) -> int:
 
 
 # ----------------------------------------------------------------------------
+# orchestrator-context
+# ----------------------------------------------------------------------------
+
+OWNER_RULE_SECTION = "Recording an owner rule"
+HANDOFF_SECTION = "Handoff before compaction"
+HEARTBEAT_SECTION = "Heartbeat and wake-ups"
+
+
+def orchestrator_reminder(rules: str, handoff: str, source: str, heartbeat: Optional[Dict[str, Any]] = None) -> str:
+    """The habits text the SessionStart hook injects into the main session.
+
+    ``heartbeat`` (None: off) holds ``name``, ``minute`` and ``usage_file`` for the third habit.
+    """
+    habits = (
+        f"(1) when the owner states a standing rule or direction, record it in {rules} in the same turn, "
+        f'following its section "{OWNER_RULE_SECTION}"; (2) before any compaction (the owner asks to compact '
+        f'or says the context is long), write {handoff} following the section "{HANDOFF_SECTION}" in {rules}, '
+        "then tell the owner it is safe to compact"
+    )
+    count = "Two"
+    if heartbeat:
+        usage = heartbeat.get("usage_file") or ""
+        usage_note = f" (rate_limits.*.resets_at in {usage})" if usage else ""
+        habits += (
+            f'; (3) keep work flowing: make sure the hourly "{heartbeat["name"]}" cron exists (CronList; if it is '
+            f'missing, CronCreate it with cron "{heartbeat["minute"]} * * * *" per the section "{HEARTBEAT_SECTION}" '
+            f"in {rules}; session crons die with the session and recurring ones expire after 7 days, so renew it "
+            f"at 6 days), and schedule a one-shot wake-up at each usage reset{usage_note} plus 2 minutes"
+        )
+        count = "Three"
+    msg = (
+        "Main session: you are the orchestrator unless the owner says otherwise. Standing rules are in "
+        f"{rules} (read it before launching anything). {count} habits, every time: {habits}."
+    )
+    if source == "compact":
+        msg += f" A compaction just happened: read {handoff} and {rules} before acting on the summary."
+    return msg
+
+
+def orchestrator_context(data: Optional[Dict[str, Any]] = None) -> int:
+    """SessionStart: remind the main session of its two habits. Never blocks, never fails the session."""
+    data = _read_input() if data is None else data
+    # agent_id marks a subagent; agent_type alone also appears for a main session started with --agent.
+    if data.get("_invalid") or data.get("agent_id"):
+        return 0
+    try:
+        root = project_root(data.get("cwd") or os.getcwd())
+        cfg = config_for(root)
+        rules, handoff = str(cfg["paths"]["orchestrator"]), str(cfg["paths"]["handoff"])
+        orch = cfg.get("orchestrator") or {}
+        hb = orch.get("heartbeat") or {}
+        heartbeat = ({"name": f"{cfg['project']['name']} heartbeat", "minute": int(hb.get("minute", 17)),
+                      "usage_file": str(orch.get("usage_file") or "")} if hb.get("enabled", True) else None)
+    except (cfgmod.ConfigError, OSError, KeyError, TypeError, ValueError):  # a broken config must not break session start; `sdd doctor` reports it
+        return 0
+    if not (root / rules).is_file():
+        return 0  # no orchestrator guide installed: nothing to remind of
+    out = {"hookSpecificOutput": {"hookEventName": "SessionStart",
+                                  "additionalContext": orchestrator_reminder(rules, handoff, str(data.get("source") or ""), heartbeat)}}
+    sys.stdout.write(json.dumps(out) + "\n")
+    return 0
+
+
+# ----------------------------------------------------------------------------
 # format and stop-check
 # ----------------------------------------------------------------------------
 
@@ -492,6 +567,7 @@ HOOKS = {
     "protect-paths": protect_paths,
     "bash-guard": bash_guard,
     "main-only-skills": main_only_skills,
+    "orchestrator-context": orchestrator_context,
     "format": format_file,
     "stop-check": stop_check,
 }

@@ -84,6 +84,7 @@ class LessonsTest(unittest.TestCase):
         51: ("every test directory", "stop_check.nice"),
         52: ("pending-po", "security_signoff"),
         53: ("main_only_skills", "agent_id"),
+        54: ("disable-model-invocation", "SessionStart"),
     }
 
     def test_entries_16_to_28(self) -> None:

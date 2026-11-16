@@ -235,7 +235,8 @@ Configured in `.claude/settings.json`; logic in `tools/sdd/sddkit/hooks.py`, dri
 |---|---|---|
 | `protect-paths.sh` | PreToolUse Edit/Write | blocks `protected_paths`, `append_only_paths` (listed roles may only create new files), `role_denied_paths`, and writes outside `role_write_scopes`. Paths resolve against the tree holding the file (worktree-safe). Fails closed on bad input. |
 | `bash-guard.sh` | PreToolUse Bash | best effort: redirections and mutating commands naming protected paths; destructive git commands (`checkout -- <path>`, `restore`, `clean`, `reset --hard`, `stash`, force-push, `--no-verify`) everywhere. |
-| `main-only-skills.sh` | PreToolUse Skill | blocks the orchestrator-only skills (`orchestrator.main_only_skills`, default `owner-rule`, `compact-handoff`) when the call comes from any subagent (the hook input carries `agent_id`/`agent_type`): custom, built-in, forks and workflow agents. The main session is never blocked, and every other skill stays available to subagents. |
+| `orchestrator-context.sh` | SessionStart (main session only: startup, resume, clear, compact) | injects the orchestrator's two habits into the main session: record owner rules in `docs/ORCHESTRATOR.md` (`paths.orchestrator`) in the same turn, and write the handoff file (`paths.handoff`) before a compaction (procedures in its §7). It also says to keep the hourly heartbeat cron alive and to schedule a one-shot wake-up at each usage reset (`orchestrator.heartbeat`, `orchestrator.usage_file`; its §4). After a compaction it adds "read the handoff file first". Subagents never receive it (exits silently for input with `agent_id`). |
+| `main-only-skills.sh` | PreToolUse Skill | backstop. `owner-rule` and `compact-handoff` set `disable-model-invocation`, so no model context lists them and only the owner types them. If a subagent calls one of `orchestrator.main_only_skills` (the hook input carries `agent_id`/`agent_type`: custom, built-in, forks and workflow agents), the hook blocks the call. The main session is never blocked, and every other skill stays available to subagents. |
 | `format.sh` | PostToolUse Edit/Write | runs the matching `formatters` entry; exit 2 with the parser error if the edit left invalid syntax. |
 | `stop-check.sh` | Stop, SubagentStop | runs `stop_check.command` once when matching files changed; never loops. Light by design: not under the heavy-job lock (a stop hook must not wait in the queue), at low priority (`stop_check.nice`) with a low build parallelism (`stop_check.env`). |
 
@@ -330,11 +331,12 @@ restates the part that still holds.
 ## 13. Orchestration state and host safety
 
 - **Standing orchestrator rules** are in `docs/ORCHESTRATOR.md`, not in session memory: when
-  the owner sets a rule, the orchestrator records it there in the same turn with the
-  `owner-rule` skill (edit and commit). Before a compaction the orchestrator runs the
-  `compact-handoff` skill, which writes the live state (run ids and args, the queue, held
-  patches, pending owner items) to `.wt/handoff/STATE.md`. Both skills are main-session only
-  (the `main-only-skills` hook, §8).
+  the owner sets a rule, the orchestrator records it there in the same turn (edit and commit;
+  its §7 "Recording an owner rule"). Before a compaction the orchestrator writes the live state
+  (run ids and args, the queue, held patches, pending owner items) to `.wt/handoff/STATE.md`
+  (its §7 "Handoff before compaction"). The `orchestrator-context` SessionStart hook reminds the
+  main session of both habits; the owner can also type `/owner-rule` or `/compact-handoff`
+  (hidden from every model context; `main-only-skills` hook as backstop, §8).
 - **Cross-feature obligations** live in `specs/MERGE-OBLIGATIONS.md`: supersession marks to
   apply in other specs, edits to other features' documents, tests of other features, merge
   order, open product-owner items and pending security sign-offs (row types MARK, EDIT, DOCS,
