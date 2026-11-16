@@ -30,7 +30,9 @@ would kill a foreground run)::
     sdd gates --wait <log>          # blocks until the GATES_EXIT=<n> marker appears
 
 Every log ends with the line ``GATES_EXIT=<code>``; never report a gate run
-that has no such line. ``--wait`` exits 124 when it timed out while the run is going
+that has no such line. A log of a git working tree starts with ``GATES_HEAD=<full sha>``
+(`` dirty`` appended when tracked files differed from HEAD), so a reader can tell which
+commit the gates ran on (the pipeline judges a gate result from these two lines). ``--wait`` exits 124 when it timed out while the run is going
 (wait again) and 125 when the run is incomplete (no marker, runner gone): re-run it with
 ``--fresh``; an incomplete run is not a gate failure.
 """
@@ -50,6 +52,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 MARKER = "GATES_EXIT="
+HEAD_MARKER = "GATES_HEAD="
 NONCE_ENV = "SDD_GATES_NONCE"
 
 
@@ -133,6 +136,10 @@ def run(cfg: Dict[str, Any], root: Path, fast: bool, only: Optional[List[str]], 
             raise OSError("tee has no fileno")
 
     tee = Tee()
+    if log_file:
+        head = head_line(root)
+        if head:
+            tee.write(head + "\n")
     if not gates:
         print("no gates configured in sdd.config.json (gates.fast / gates.full)", file=sys.stderr)
         code = 2
@@ -220,6 +227,18 @@ class GateRunError(Exception):
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
+def head_line(root: Path) -> Optional[str]:
+    """``GATES_HEAD=<sha>`` (`` dirty`` when tracked files differ from HEAD), or None outside a git work tree."""
+    try:
+        head = _git(root, "rev-parse", "--verify", "-q", "HEAD")
+        if head.returncode != 0 or not head.stdout.strip():
+            return None
+        dirty = _git(root, "diff", "--quiet", "HEAD").returncode != 0
+    except OSError:
+        return None
+    return f"{HEAD_MARKER}{head.stdout.strip()}{' dirty' if dirty else ''}"
 
 
 def _safe(part: str) -> str:

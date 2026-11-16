@@ -193,9 +193,11 @@ DEFAULTS: Dict[str, Any] = {
         "routing": "tiers",
         "models_table": "sdd.models.json",
         "security_sensitive_hint": "authentication, authorization, cryptography, secrets, session or token handling, input parsing of untrusted data",
-        "red_check_tags": False,
-        "persist_findings": False,
-        "cap_fallback": "equal",
+        "red_check_tags": True,
+        "persist_findings": True,
+        "cap_fallback": "strongest",
+        "security_paths": [],
+        "hook_probe": {"enabled": True, "path": ".claude/.hook-probe", "blocked_marker": "BLOCKED by SDD hook"},
     },
     "merge": {
         "union_manifests": [],
@@ -348,6 +350,7 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
             if not isinstance(value, str):
                 problems.append(f"build_cache.env.{key} must be a string")
     problems.extend(routing.config_problems(cfg))
+    problems.extend(_validate_pipeline(cfg))
     if not cfg["commit"]["trailers"]:
         problems.append("commit.trailers is empty: add at least the attribution trailer line the project uses")
     for i, trailer in enumerate(cfg["commit"]["trailers"]):
@@ -355,6 +358,37 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
             problems.append(f"commit.trailers[{i}] must be a non-empty string")
         elif re.search(r"<[^<>@]*>", trailer.split("<noreply@", 1)[0]) or re.search(r"<[^<>]*\s[^<>]*>", trailer):
             problems.append(f"commit.trailers[{i}]: still the template placeholder ({trailer!r}); set the real attribution line")
+    return problems
+
+
+def _validate_pipeline(cfg: Dict[str, Any]) -> List[str]:
+    """The pipeline's safety settings: switches are booleans, the hook probe writes into a protected path."""
+    from .util import any_match
+
+    p = cfg["pipeline"]
+    problems: List[str] = []
+    for key in ("red_check_tags", "persist_findings"):
+        if not isinstance(p.get(key), bool):
+            problems.append(f"pipeline.{key} must be true or false")
+    if p.get("cap_fallback") not in ("equal", "strongest"):
+        problems.append("pipeline.cap_fallback must be 'equal' or 'strongest'")
+    if not isinstance(p.get("skeptics"), int) or p["skeptics"] < 2:
+        problems.append("pipeline.skeptics must be at least 2 (a blocking finding is dismissed only by two refuting votes)")
+    paths = p.get("security_paths")
+    if not isinstance(paths, list) or not all(isinstance(g, str) and g for g in paths):
+        problems.append("pipeline.security_paths must be a list of path globs")
+    hp = p.get("hook_probe")
+    if not isinstance(hp, dict):
+        return problems + ["pipeline.hook_probe must be an object {enabled, path, blocked_marker}"]
+    if not isinstance(hp.get("enabled"), bool):
+        problems.append("pipeline.hook_probe.enabled must be true or false")
+    path, marker = hp.get("path"), hp.get("blocked_marker")
+    if not isinstance(path, str) or not re.fullmatch(r"[A-Za-z0-9_.@+-]+(?:/[A-Za-z0-9_.@+-]+)*", path) or ".." in path.split("/"):
+        problems.append("pipeline.hook_probe.path must be a plain repository-relative file path")
+    elif hp.get("enabled") and not any_match(path, [e.get("glob", "") for e in cfg["protected_paths"] if isinstance(e, dict)]):
+        problems.append(f"pipeline.hook_probe.path {path!r} is not under protected_paths: the protect-paths hook would not block the probe")
+    if not isinstance(marker, str) or not marker.strip():
+        problems.append("pipeline.hook_probe.blocked_marker must be the text the protect-paths hook prints when it blocks")
     return problems
 
 
@@ -529,4 +563,9 @@ def pipeline_view(cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
     view["root"] = cfg["_root"]
     view["routing"] = routing.pipeline_routing(Path(cfg["_root"]), cfg)
+    # The testsSha check needs the test paths; the heavy-job lock rule needs to know whether a lock is configured.
+    from .quality import langs
+
+    view["test_globs"] = langs.test_globs(cfg)
+    view["heavy_lock"] = bool(cfg["quality"].get("heavy_lock"))
     return view

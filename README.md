@@ -199,6 +199,7 @@ changes the table. Reference: docs/CONFIG.md ("Model routing"), docs/PLAYBOOK.md
 ```sh
 python3 -I -m unittest discover -s tests -v     # 232 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
 node tests/pipeline_smoke.mjs                   # drives feature-pipeline.js with a fake agent()
+node tests/pipeline_hardening.mjs               # the safety defaults: arg checks, hook probe, raw gate lines, votes, evidence, security, testsSha
 node tests/pipeline_cachekeys.mjs               # cache keys: (prompt, opts) byte-identical to the baseline script without new args (PLAYBOOK §13)
 ```
 

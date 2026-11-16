@@ -252,8 +252,20 @@ Workflow({
 Arguments: `feature`, `slug` (required); `config` (the JSON from `sdd config --pipeline`;
 loaded by a bootstrap agent when omitted); `root` (absolute worktree path; created from
 `main` if missing); `stages`; `approval` (`"orchestrator"` default, `"agent"`); `isolation`;
-`security: true`; `hard: true`; `notes`; `testsSha`; `findings`; `poResolved`; `models`,
-`modelsFromPhase`, `modelsBefore` (tier changes on resume); `tiering: false`.
+`security: true`; `hard: true`; `notes`; `testsSha` (**required** when a run starts after
+Tests; the script checks each is a `test(...)` commit, an ancestor of HEAD, touching a test
+path); `evidence` (`{gateLog}`: lets Finalize use an earlier run's gate log and persisted
+findings, checked by the script); `allowPassing` (`{<requirement id>: <reason>}`: a new test
+that already passes); `findings`; `poResolved`; `tasks`; `models`, `modelsFromPhase`,
+`modelsBefore` (tier changes on resume); `tiering: false`.
+
+Safety defaults (docs/PLAYBOOK.md §17 of the kit): `strictScope`, `readViaGit`,
+`redCheckTags`, `persistFindings`, `setupStrict`, `hookProbe` and `heavyLock` are on,
+`capFallback` is `"strongest"` and `roleFallback` is off; turn one off with an explicit `false`.
+Unknown argument names and wrongly typed values stop the run. `legacy: true` exists for the
+cache-key test only. The script, not an agent, decides gate results (from `GATES_HEAD` and
+`GATES_EXIT`), dismissals (two refuting votes), security sensitivity (`pipeline.security_paths`
+and the plan) and whether Finalize has evidence.
 
 Statuses: `awaiting-approval`, `ready-to-merge`, `blocked-<stage>`, `paused` (an agent
 failed twice: usage limit or outage; resume with `resumeFromRunId` and the same args),

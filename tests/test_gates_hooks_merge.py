@@ -259,6 +259,53 @@ class HooksTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 2)
         self.assertIn("BLOCKED by SDD hook", proc.stderr)
 
+    def test_hook_probe_is_blocked_with_the_configured_marker(self) -> None:
+        """The pipeline's Setup probe (pipeline.hook_probe) writes a protected path and expects the hook's block message."""
+        import subprocess
+
+        hp = cfgmod.load(self.root)["pipeline"]["hook_probe"]
+        proc = subprocess.run(
+            [sys.executable, "-I", str(KIT / "tools/sdd/sdd.py"), "hook", "protect-paths"],
+            input=json.dumps({"tool_name": "Write", "agent_type": "integrator", "tool_input": {"file_path": str(self.root / hp["path"]), "content": "probe"}, "cwd": str(self.root)}),
+            cwd=str(self.root), env={**os.environ, "SDD_ROOT": str(self.root)}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        self.assertEqual(proc.returncode, 2)
+        self.assertIn(hp["blocked_marker"], proc.stderr)
+
+
+class PipelineSafetyConfigTest(unittest.TestCase):
+    """pipeline.* safety keys: validation and what `sdd config --pipeline` hands the script."""
+
+    def test_defaults_validate_and_reach_the_pipeline(self) -> None:
+        cfg = cfgmod._merge(cfgmod.DEFAULTS, test_config())
+        cfg["_root"] = "/proj"
+        view = cfgmod.pipeline_view(cfg)
+        self.assertEqual(view["pipeline"]["hook_probe"], {"enabled": True, "path": ".claude/.hook-probe", "blocked_marker": "BLOCKED by SDD hook"})
+        self.assertTrue(view["pipeline"]["persist_findings"] and view["pipeline"]["red_check_tags"])
+        self.assertEqual(view["pipeline"]["cap_fallback"], "strongest")
+        self.assertIn("**/tests/**", view["test_globs"])
+        self.assertIn("**/*_test.go", view["test_globs"])
+        self.assertTrue(view["heavy_lock"])
+
+    def test_bad_values(self) -> None:
+        cases = [
+            ({"skeptics": 1}, "skeptics must be at least 2"),
+            ({"security_paths": "src/auth/**"}, "security_paths must be a list"),
+            ({"cap_fallback": "max"}, "cap_fallback must be"),
+            ({"persist_findings": "yes"}, "persist_findings must be true or false"),
+            ({"hook_probe": {"enabled": True, "path": "src/probe.txt", "blocked_marker": "x"}}, "is not under protected_paths"),
+            ({"hook_probe": {"enabled": True, "path": "../x", "blocked_marker": "x"}}, "plain repository-relative"),
+            ({"hook_probe": {"enabled": True, "path": ".claude/p", "blocked_marker": ""}}, "blocked_marker"),
+        ]
+        for pipe, text in cases:
+            with self.subTest(pipe=pipe):
+                cfg = cfgmod._merge(cfgmod.DEFAULTS, test_config())
+                cfg["pipeline"].update(pipe)
+                self.assertTrue(any(text in p for p in cfgmod.validate(cfg)), cfgmod.validate(cfg))
+        cfg = cfgmod._merge(cfgmod.DEFAULTS, test_config())
+        cfg["pipeline"]["hook_probe"] = {"enabled": False, "path": "src/probe.txt", "blocked_marker": "x"}
+        self.assertFalse([p for p in cfgmod.validate(cfg) if "hook_probe" in p], "a disabled probe needs no protected path")
+
 
 class UnionMergeTest(unittest.TestCase):
     def setUp(self) -> None:

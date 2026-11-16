@@ -30,6 +30,13 @@ const CONFIG = {
   gates: { fast: ['lint'], full: ['lint', 'test'] },
 }
 
+// Raw facts the script judges (safety defaults): the hook probe's blocked Write, gate log lines of the current HEAD, a persisted record.
+const HEAD = 'a'.repeat(40)
+const PROBE_BLOCKED = 'BLOCKED by SDD hook: .claude/.hook-probe is protected (agent configuration is human-owned).'
+const GATE_OK = { pass: true, infraError: false, failed: [], exitLine: 'GATES_EXIT=0 n0nce', logHead: `GATES_HEAD=${HEAD}`, headSha: HEAD, logPath: '.sdd/logs/gates/x.log' }
+const REVIEWERS = ['spec-compliance-reviewer', 'security-reviewer', 'test-adequacy-reviewer', 'perf-reviewer']
+const GOOD_BLOCK = '<!-- pipeline-findings: record -->\n```json\n' + JSON.stringify({ reviewers: REVIEWERS, securitySensitive: false, findings: [] }) + '\n```\n<!-- /pipeline-findings -->'
+
 function fromSchema(schema) {
   const out = {}
   for (const [k, p] of Object.entries(schema.properties || {})) {
@@ -55,15 +62,22 @@ function makeRuntime(rules, byModel) {
     }
     for (const [rx, fn] of rules) if (rx.test(label)) return fn(base, label, prompt, calls)
     if (/^commit/.test(label)) return { ok: true, sha: 'abc1234' }
+    if (/^testsSha check/.test(label)) {
+      const shas = JSON.parse(/For each commit sha in (\[[^\]]*\])/.exec(prompt)[1])
+      return { commits: shas.map((sha) => ({ sha, full: sha.padEnd(40, '0'), ancestorExit: 0, files: ['a/tests/x.test.ts'], subject: 'test(F011): failing tests' })) }
+    }
+    if (/^security facts/.test(label)) return { files: ['a/x.ts'], tasksSecurityLine: 'Security-sensitive: no' }
+    if (/^finalize evidence/.test(label)) return { headSha: HEAD, logHead: `GATES_HEAD=${HEAD}`, exitLine: 'GATES_EXIT=0', changedSinceGate: [], findingsBlock: GOOD_BLOCK }
+    if (/^load persisted findings/.test(label)) return { found: false, block: '' }
     if (/^tests-commit check/.test(label)) return { changed: ['t', 'a/x.ts'], testFiles: ['t'] }
     if (/^spec status/.test(label)) return { status: 'Approved', needsClarification: 0, requirements: 20 }
     if (/^spec-critic/.test(label)) return { verdict: 'pass', issues: [] }
-    if (/^red-check/.test(label)) return { compiles: true, failingTests: 5, unexpectedPasses: [], mustWithoutTest: [] }
-    if (/^gates /.test(label)) return { pass: true, infraError: false, failed: [] }
+    if (/^red-check/.test(label)) return { compiles: true, failingTests: 5, unexpectedPasses: [], passingVerifies: [], mustWithoutTest: [] }
+    if (/^gates /.test(label)) return GATE_OK
     if (/^verify|^fix-check/.test(label)) return { refuted: true, confidence: 'high', reasoning: 'r' }
     if (/^architect-planner|^load tasks/.test(label)) return { ok: true, securitySensitive: false, waves: [{ wave: 1, tasks: [{ id: 'T01', title: 't', components: ['a'], files: ['a/x.ts'], verifies: ['REQ-A-R010'], depends: [], parallel: false }] }] }
     if (/^finalize/.test(label)) return { ok: true, traceCheck: 'pass', status: 'Implemented', commit: 'fff' }
-    if (/^setup/.test(label)) return { ok: true, branch: 'feat/F011-x', baseSha: 'base', headSha: 'head', scaffolded: true }
+    if (/^setup/.test(label)) return { ok: true, branch: 'feat/F011-x', baseSha: 'base', headSha: 'head', scaffolded: true, hookProbe: PROBE_BLOCKED }
     if (/^test-author/.test(label)) return { ok: true, components: ['a'], testsAdded: ['t'], summary: 's' }
     if (/reviewer/.test(label)) return { securitySensitive: false, findings: [] }
     if (/^T\d+ impl|^wave/.test(label)) return { ok: true, tasksDone: ['T01'], tasksFailed: [], summary: 's', headSha: 'lane', branch: 'wip' }
@@ -86,7 +100,8 @@ function makeRuntime(rules, byModel) {
 
 async function run(args, rules = [], byModel = null) {
   const rt = makeRuntime(rules, byModel)
-  const result = await script({ config: CONFIG, feature: 'F011', slug: 'x', ...args }, rt.agent, rt.parallel, rt.pipeline, rt.phase, rt.log)
+  // Runs that start after Tests name the red tests commit; finalize-only runs take an earlier run's evidence (both checked).
+  const result = await script({ config: CONFIG, feature: 'F011', slug: 'x', testsSha: 'abc1234', evidence: { gateLog: '.sdd/logs/gates/x.log' }, ...args }, rt.agent, rt.parallel, rt.pipeline, rt.phase, rt.log)
   return { result, ...rt }
 }
 
@@ -106,8 +121,9 @@ async function run(args, rules = [], byModel = null) {
   assert.equal(by['perf-reviewer'], 'm-mid')
   assert.equal(by['security-reviewer'], 'm-strong')
   assert.equal(by['finalize F011'], 'm-mid')
-  // Role fallback injects the role file path from the project's agents dir.
-  assert.match(calls.find((c) => c.label === 'spec-author F011').prompt, /\/proj\/\.claude\/agents\/spec-author\.md/)
+  // Role fallback is opt-in: by default every role runs as its own agent type (tool restrictions and hook role rules apply).
+  assert.equal(calls.find((c) => c.label === 'spec-author F011').agentType, 'spec-author')
+  assert.doesNotMatch(calls.find((c) => c.label === 'spec-author F011').prompt, /^ROLE: /)
   // Nothing project-specific leaked: tools path and source rule come from config.
   assert.match(calls.find((c) => c.label === 'setup').prompt, /python3 -I \/proj\/tools\/sdd\/sdd\.py new-feature 011 x/)
   assert.match(calls.find((c) => c.label === 'gates post-implement #1').prompt, /gates --detached --feature F011 --tag post-implement-1/)
@@ -157,7 +173,7 @@ async function run(args, rules = [], byModel = null) {
 {
   let g = 0
   const { result, calls } = await run({ stages: ['gates'] }, [
-    [/^gates post-implement/, () => (g++ < 3 ? { pass: false, infraError: false, failed: [{ gate: 'test', excerpt: 'boom' }] } : { pass: true, infraError: false, failed: [] })],
+    [/^gates post-implement/, () => (g++ < 3 ? { ...GATE_OK, exitLine: 'GATES_EXIT=1 n0nce', pass: false, failed: [{ gate: 'test', excerpt: 'boom' }] } : GATE_OK)],
   ])
   assert.equal(result.status, 'stopped')
   const labels = calls.map((c) => c.label)
@@ -231,7 +247,7 @@ async function run(args, rules = [], byModel = null) {
 // 10. Worktree root: setup creates the worktree, verifiers use detached scratch worktrees, merge steps mention main-into-branch.
 {
   const finding = { severity: 'blocking', category: 'logic', file: 'a.ts', line: 3, claim: 'c', evidence: 'e' }
-  const { result, calls } = await run({ root: '/proj/.wt/F011', stages: ['review', 'verify', 'finalize'] }, [
+  const { result, calls } = await run({ root: '/proj/.wt/F011', stages: ['review', 'verify', 'finalize'], readViaGit: false, evidence: { gateLog: '.sdd/logs/gates/x.log' } }, [
     [/^spec-compliance-reviewer$/, () => ({ securitySensitive: false, findings: [finding] })],
   ])
   assert.match(calls.find((c) => c.label === 'setup').prompt, /git worktree add -b feat\/F011-x \/proj\/\.wt\/F011 main/)
@@ -297,7 +313,7 @@ const indexOf = (calls, rx) => calls.findIndex((c) => rx.test(c.label))
   assert.ok(off.logs.some((l) => /WARNING: strictScope: false/.test(l)), off.logs.join('\n'))
   // Every role file the prompts point to carries the rule itself (manual dispatch, role fallback).
   const agentsDir = path.join(here, '..', 'claude', 'agents')
-  const roles = new Set(calls.map((c) => (c.prompt.match(/^ROLE: you are the "([\w-]+)" agent/) || [])[1]).filter(Boolean))
+  const roles = new Set(calls.map((c) => c.agentType).filter((t) => t && t !== 'general-purpose'))
   assert.ok(roles.size >= 8, [...roles].join(','))
   for (const t of roles) {
     assert.ok(readFileSync(path.join(agentsDir, `${t}.md`), 'utf8').includes(SCOPE), `no scope rule in claude/agents/${t}.md`)
@@ -310,7 +326,7 @@ const indexOf = (calls, rx) => calls.findIndex((c) => rx.test(c.label))
   let n = 0
   const incomplete = { pass: false, infraError: false, incomplete: true, failed: [{ gate: 'runner', excerpt: 'killed' }] }
   const { result, calls } = await run({ approval: 'agent' }, [
-    [/^gates post-implement/, () => (n++ < 3 ? incomplete : { pass: true, infraError: false, incomplete: false, failed: [] })],
+    [/^gates post-implement/, () => (n++ < 3 ? incomplete : { ...GATE_OK, incomplete: false })],
   ])
   assert.equal(result.status, 'ready-to-merge', JSON.stringify(result))
   assert.equal(result.gates.length, 1, JSON.stringify(result.gates))
@@ -330,7 +346,7 @@ const indexOf = (calls, rx) => calls.findIndex((c) => rx.test(c.label))
 }
 
 // 14. readViaGit: read-only roles (and the product-owner approval) read code through git, the feature's Markdown from the
-// working copy, no Verify isolation; a worktree only as a removed throwaway for an experiment; default unchanged.
+// working copy, no Verify isolation; a worktree only as a removed throwaway for an experiment; on by default, readViaGit: false turns it off.
 {
   let st = 0
   const rules = [[/^spec-compliance-reviewer$/, () => ({ securitySensitive: false, findings: [BLOCKING] })], [/^verify R1 #1/, () => ({ refuted: false, confidence: 'high', reasoning: 'real' })], [/^fix-check/, () => ({ refuted: false, confidence: 'high', reasoning: 'fixed' })],
@@ -348,8 +364,11 @@ const indexOf = (calls, rx) => calls.findIndex((c) => rx.test(c.label))
     assert.match(c.prompt, /that you remove \(`git worktree remove --force`\) before you finish/, c.label)
   }
   for (const c of on.calls.filter((x) => /^verify R/.test(x.label))) assert.equal(c.isolation, undefined)
+  // On by default since the safety defaults: the plain run reads via git too.
+  const dflt = await run({ approval: 'agent' }, (st = 0, rules))
+  for (const c of dflt.calls.filter((x) => readOnly.test(x.label))) assert.match(c.prompt, /READ VIA GIT/, c.label)
   st = 0
-  const off = await run({ approval: 'agent' }, rules)
+  const off = await run({ approval: 'agent', readViaGit: false }, rules)
   assert.ok(off.calls.some((c) => c.label === 'product-owner 1'))
   for (const c of off.calls.filter((x) => readOnly.test(x.label))) assert.doesNotMatch(c.prompt, /READ VIA GIT/, c.label)
   for (const c of off.calls.filter((x) => /^verify R/.test(x.label))) assert.equal(c.isolation, 'worktree')
@@ -415,7 +434,7 @@ const indexOf = (calls, rx) => calls.findIndex((c) => rx.test(c.label))
 
 // 18. Interrupted work: uncommitted edits outside the feature dir stop Setup, nothing is discarded.
 {
-  const { result, calls } = await run({ approval: 'agent' }, [[/^setup/, () => ({ ok: true, branch: 'feat/F011-x', baseSha: 'b', headSha: 'h', dirty: ['src/a.ts'] })]])
+  const { result, calls } = await run({ approval: 'agent' }, [[/^setup/, () => ({ ok: true, branch: 'feat/F011-x', baseSha: 'b', headSha: 'h', dirty: ['src/a.ts'], hookProbe: PROBE_BLOCKED })]])
   assert.equal(result.status, 'blocked-setup')
   assert.equal(calls.length, 1)
   assert.match(result.nextAction, /[Ii]nspect/)
@@ -485,7 +504,7 @@ const task = (id, extra = {}) => Object.assign({ id, title: id, components: ['a'
   const rec = l.result.telemetry.find((t) => t.label === 'wave 1 lane 1')
   assert.equal(rec.level, 5) // as (high, concurrency): 3 + 1 + 1
   assert.equal(rec.role, 'implementer')
-  assert.equal(l.calls.find((c) => c.label === 'wave 1 lane 1').agentType, 'general-purpose')
+  assert.equal(l.calls.find((c) => c.label === 'wave 1 lane 1').agentType, 'implementer')
   assert.equal(l.result.telemetry.find((t) => t.label === 'gates post-implement #1'), undefined)
   console.log('ok 20 levels')
 }
@@ -538,8 +557,10 @@ const task = (id, extra = {}) => Object.assign({ id, title: id, components: ['a'
   assert.deepEqual(tel(b.result, /^architect-planner/).map((t) => t.fallback_of), [null, 'cap-a', 'cap-b'])
   // (d): no equal-or-smarter point outside the exhausted pools -> one retry on the same point -> paused.
   const D = routingFor({ version: 1, pools: POOLS, points: [pt('cap-x', 'medium', 65, 1, 'capped'), pt('low-s', 'medium', 50, 0.5, 'standard')] })
-  const d = await run({ config: { ...CONFIG, routing: D }, stages: ['plan'] }, [], failOn(['cap-x']))
+  const d = await run({ config: { ...CONFIG, routing: D }, stages: ['plan'], capFallback: 'equal' }, [], failOn(['cap-x']))
   assert.equal(d.result.status, 'paused')
+  const dc = await run({ config: { ...CONFIG, routing: D, pipeline: { ...CONFIG.pipeline, cap_fallback: 'equal' } }, stages: ['plan'] }, [], failOn(['cap-x']))
+  assert.equal(dc.result.status, 'paused')
   assert.deepEqual(d.calls.filter((c) => /^architect-planner/.test(c.label)).map((c) => [c.label, c.model]), [['architect-planner F011', 'cap-x'], ['architect-planner F011 (retry)', 'cap-x']])
   // (e): an uncapped failure is retried once on the same point, then the run pauses.
   const E = routingFor({ version: 1, pools: POOLS, points: [pt('std-s', 'medium', 65, 2, 'standard')] })
@@ -563,7 +584,10 @@ const task = (id, extra = {}) => Object.assign({ id, title: id, components: ['a'
   }
   const arg = await run({ config: { ...CONFIG, routing: D }, stages: ['plan'], capFallback: 'strongest' }, [], (o) => (o.model === 'cap-x' ? null : undefined))
   assert.notEqual(arg.result.status, 'paused')
-  console.log('ok 22c cap_fallback strongest')
+  // 'strongest' is the default since the safety defaults (no key, no arg).
+  const dflt = await run({ config: { ...CONFIG, routing: D }, stages: ['plan'] }, [], (o) => (o.model === 'cap-x' ? null : undefined))
+  assert.deepEqual(dflt.calls.filter((c) => /^architect-planner/.test(c.label)).map((c) => c.model), ['cap-x', 'mid-s'])
+  console.log('ok 22c cap_fallback strongest (default)')
 }
 
 // 22b. S14: a level without candidates pauses (never the session model); a blank-effort fallback keeps the pick's effort.
@@ -589,7 +613,7 @@ const task = (id, extra = {}) => Object.assign({ id, title: id, components: ['a'
   let n = 0
   const r = await run({ approval: 'agent', runKey: 'F011-20260101T000000' }, [
     [/^architect-planner/, (b, label) => (n++ ? { ok: true, securitySensitive: false, waves: [{ wave: 1, tasks: [task('T01')] }] } : null)],
-    [/^gates post-implement/, () => ({ pass: false, infraError: false, failed: [{ gate: 'lint', excerpt: 'x' }] })],
+    [/^gates post-implement/, () => ({ ...GATE_OK, exitLine: 'GATES_EXIT=1 n0nce', pass: false, failed: [{ gate: 'lint', excerpt: 'x' }] })],
   ])
   assert.equal(r.result.runKey, 'F011-20260101T000000')
   assert.equal(r.result.telemetry.length, r.calls.length)
@@ -620,7 +644,7 @@ const task = (id, extra = {}) => Object.assign({ id, title: id, components: ['a'
   const before = routingFor({ version: 1, pools: POOLS, points: [pt('old-cap', 'medium', 60, 1, 'capped'), pt('old-std', 'low', 65, 2, 'standard')] })
   const now = routingFor({ version: 1, pools: POOLS, points: [pt('new-cap', 'high', 60, 1, 'capped'), pt('new-std', 'medium', 65, 2, 'standard')] })
   const { result, calls } = await run({ config: { ...CONFIG, routing: now }, routingBefore: before, modelsFromPhase: 'Gates', stages: ['plan', 'gates', 'review'] }, [], (o) => (o.model === 'old-cap' ? null : undefined))
-  const PRE = ['Setup', 'Approve', 'Plan']
+  const PRE = ['Setup', 'Approve', 'Plan', 'Tests'] // Tests: the testsSha check of a run that starts after Tests
   for (const c of calls) {
     const old = PRE.includes(c.phase)
     assert.ok(old ? /^old-/.test(c.model) : /^new-/.test(c.model), `${c.label} (${c.phase}) ran on ${c.model}`)

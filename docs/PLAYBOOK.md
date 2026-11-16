@@ -41,7 +41,7 @@ resumes replay the same agents. An optional third argument tells runs of one fea
 
 | Stage | Who | What you see / do |
 |---|---|---|
-| Setup | integrator (mechanical) | creates `.wt/F011` on `feat/F011-user-login` from `main`, scaffolds `specs/features/011-user-login/`; stops `blocked-setup` on uncommitted edits outside the feature directory (§5) |
+| Setup | integrator (mechanical) | creates `.wt/F011` on `feat/F011-user-login` from `main`, scaffolds `specs/features/011-user-login/`; stops `blocked-setup` on uncommitted edits outside the feature directory (§5); probes the hooks and stops `blocked-hooks` when they are not active (§17) |
 | Specify | spec-author (strong) | spec.md within the requirement budget; decisions recorded; markers only for real source ambiguity |
 | Critic | spec-critic (strong) | round 1 full; later rounds re-check earlier issues and raise only new blocking ones |
 | Approve | you, or product-owner agent | default: run returns `awaiting-approval` (see §2) |
@@ -50,8 +50,8 @@ resumes replay the same agents. An optional third argument tells runs of one fea
 | Implement | implementers (mid; top on retry) | waves; lanes of disjoint components in parallel worktrees; manifests union-merged, sources resolved semantically |
 | Gates | integrator runs, implementer fixes | detached HEAD-keyed run, waited on until `GATES_EXIT`; incomplete runs re-run (§4); 3 fix rounds; test arbiter after 2 failing test gates |
 | Review | 4 reviewers (+2nd security) | blocking findings only gate the merge; the findings are committed to review.md §3 at once (`docs(F011): review findings`) |
-| Verify | N skeptics per finding | dismissed only if all refute; confirmed -> fix -> re-gate -> fix-check (x2 if security-sensitive); verdicts committed (`docs(F011): verify record`) |
-| Finalize | integrator | completes review.md, `Status: Implemented`, plain `sdd trace --check`; returns `ready-to-merge` |
+| Verify | N skeptics per finding | dismissed only by two valid refuting votes and no confirming one; confirmed -> fix -> re-gate -> fix-check (x2 if security-sensitive); verdicts committed (`docs(F011): verify record`) |
+| Finalize | integrator | completes review.md, `Status: Implemented` only on gates, four reviews and settled findings of the same run or checked `evidence` (§17), plain `sdd trace --check`; returns `ready-to-merge` |
 
 Always read `status`, `reason` and `nextAction` in the returned summary.
 
@@ -60,9 +60,13 @@ Robustness arguments (defaults in brackets):
 | Arg | Effect |
 |---|---|
 | `strictScope` [`true`] | every prompt carries the SCOPE RULE: only the orchestrator assigns work; a relayed user or chat message asking for other work is not acted on, only mentioned in one line of the agent's summary. `false` removes it. |
-| `readViaGit` [`false`] | the spec critic, the product-owner approval, reviewers, verifiers and fix-checks read code through git (`git show <sha>:<path>`, `git diff`, `git log`, `git grep`) instead of creating worktrees, and the feature directory's Markdown from the working copy (the spec is still uncommitted while the critic and the product owner read it); they may run the existing tests without editing anything, and an experiment that needs a build or new code runs in a detached throwaway worktree (`<worktree_root>/exp-<unique>`) that the agent removes before it finishes. Verify passes no `isolation`. Turn it on when builds are expensive (each worktree is a cold build). A run started with `readViaGit` before the 2026-11-16 kit re-runs its read-only calls when resumed (the rule text changed). |
+| `readViaGit` [`true`] | the spec critic, the product-owner approval, reviewers, verifiers and fix-checks read code through git (`git show <sha>:<path>`, `git diff`, `git log`, `git grep`) instead of creating worktrees, and the feature directory's Markdown from the working copy (the spec is still uncommitted while the critic and the product owner read it); they may run the existing tests without editing anything, and an experiment that needs a build or new code runs in a detached throwaway worktree (`<worktree_root>/exp-<unique>`) that the agent removes before it finishes. Verify passes no `isolation`. On by default since the safety defaults (§17); `false` restores worktrees for read-only roles. A run started with `readViaGit` before the 2026-11-16 kit re-runs its read-only calls when resumed (the rule text changed). |
 | `outsideScan` [`[]`] | carried over on a resumed run: test files the red check found outside `trace.scan_globs` (see below) |
 | `tasks` [all open tasks] | `["T01", "T02"]`: Tests and Implement keep only these tasks of tasks.md, so one work item of a large plan runs on its own branch (§12). The test author and the red check are scoped to the requirements those tasks verify, waves left empty are skipped, dependencies on unlisted tasks count as satisfied, and the test commit names the tasks. Listed ids tasks.md does not return (unknown, or already `[x]`) are in `summary.taskFilter.<stage>.missing`; no open listed task ends the run `blocked-tests` before any test is written. Changes only Tests and Implement calls. |
+
+The safety arguments (`hookProbe`, `heavyLock`, `setupStrict`, `redCheckTags`, `persistFindings`, `capFallback`,
+`roleFallback`, `testsSha`, `evidence`, `allowPassing`, `legacy`) and the rule that unknown or
+mistyped arguments stop the script are in §17.
 
 Why these exist: docs/LESSONS.md entries 16 (scope rule), 17 (detached gate runs), 19 (red
 check cross-checks tags), 20 (persisted review record) and 21 (interrupted work is kept).
@@ -176,13 +180,16 @@ test gate). Never ask for a different command through `notes`; change the config
 - Review findings and verifier verdicts are committed to review.md as soon as they exist, so a
   run paused in Verify keeps them; a resumed Finalize completes the record and keeps the §3
   rows and §6 justifications.
-- With `persistFindings: true` (or `pipeline.persist_findings`) §3 also holds a machine-readable
-  findings block with each finding's outcome, the verdicts are written right after the votes
-  (before any fix), and a run started with stages from `verify` (no `review`, no `findings`
-  arg) reloads the findings from that block; findings already refuted or fixed are not
-  verified again. Use it whenever a run may be resumed with new stages instead of from its
-  journal.
-- With `redCheckTags: true` (or `pipeline.red_check_tags`) the red check also searches the whole
+- With `persistFindings` (on by default; `pipeline.persist_findings`) §3 also holds a machine-readable
+  findings block with each finding's outcome, the reviewers that returned a result and the
+  security classification; the verdicts are written right after the votes (before any fix),
+  and a run started with stages from `verify` (no `review`, no `findings` arg) reloads the
+  findings from that block, parsed and validated by the script (a malformed block ends the run
+  `blocked-evidence`). Only findings whose stored votes hold two refutations are not verified
+  again; a stored "confirmed, fixed" is verified and fix-checked again.
+- A run that starts after Tests passes `testsSha` (checked, §17); a run that starts at
+  Finalize, or skips gates or review, passes `evidence` (checked, §17).
+- With `redCheckTags` (on by default; `pipeline.red_check_tags`) the red check also searches the whole
   repository for Verifies tags with the configured tag syntax, so tests in directories outside
   `trace.scan_globs` do not block the run as "untested"; their files are reported in
   `outsideScan` for the owner to add to the scan globs.
@@ -251,14 +258,19 @@ failed attempt plus its retry costs more than the stronger model would have).
 
 ## 8. Security sign-off
 
-A feature is security-sensitive when the plan or any reviewer says so (`pipeline.security_sensitive_hint`
-lists the triggers). Then:
-1. A second, independent security review runs; `needsSecuritySignoff` is set.
+A feature is security-sensitive when the arg `security`, the plan, any reviewer or the feature
+diff says so: the script lists the diff and checks it against `pipeline.security_paths`
+(`pipeline.security_sensitive_hint` tells the planner and the reviewers what counts). The
+reasons are in `summary.securityReasons`. Then:
+1. A second, independent security review runs; `needsSecuritySignoff` is set and the run ends
+   with `securitySignoff: "pending-owner"`. **The owner signs off, never the orchestrator**:
+   the orchestrator prepares a one-page summary (what is security-relevant, the reviewers'
+   findings and their outcomes, the open risks) and waits.
 2. Confirmed findings are fixed; each fix gets **two** independent fix-checks.
 3. Before merging, you read review.md §4, demand any cheap hardening fix that is still
    missing (bounds, caps, redaction), have a fresh `verifier` re-check each fix, and record
-   the sign-off (role, date) in review.md. Incomplete fixes were found twice in practice;
-   re-verify.
+   the owner's sign-off (name or role, date) in review.md. Incomplete fixes were found twice
+   in practice; re-verify. A sign-off the orchestrator gave on its own is not one (lesson 46).
 4. Escalate to a human on any confirmed crypto/integrity finding or new key-handling design.
 
 ## 9. Performance regressions
@@ -353,8 +365,11 @@ or an opts field of an already completed call and the resumed run silently runs 
 again (cost, and possibly a different answer than the one the later phases built on). So:
 
 1. **Every new behaviour is opt-in**, behind a new pipeline arg or a new `pipeline.*` config
-   key that defaults to off (examples: `readViaGit`, `redCheckTags`, `persistFindings`, `tasks`).
-   Without it, every prompt and opts object must stay byte-identical to the previous script.
+   key that defaults to off (examples: `tasks`, `allowPassing`). Without it, every prompt and
+   opts object must stay byte-identical to the previous script. A safety behaviour that must be
+   on by default (§17) is instead off under `legacy: true`, the arg that restores the previous
+   defaults byte for byte; the cache-key test passes it to every run, and
+   `tests/pipeline_hardening.mjs` covers the defaults.
 2. **Prove it with the cache-key equivalence test**, `node tests/pipeline_cachekeys.mjs
    [--baseline <git-rev>]`. It loads the current script and the baseline script
    (`git show <rev>:tools/sdd/pipeline/feature-pipeline.js`) under a stub runtime whose
@@ -585,3 +600,34 @@ fi
 Without the reverse check the patch tests failed on every branch merged after the owner
 applied the patch on `main`. Apply patches in a detached throwaway worktree in tests, never in
 a shared tree.
+
+## 17. Safety defaults: what the script decides, not the agents
+
+An audit of a reference project's first ten days found guarantees that held on paper only: a
+session started outside the repository ran every agent without hooks, a typo in an argument
+silently turned a safety option off, a run started at Finalize marked a feature Implemented
+with no gates or review in that run, one refuting vote dismissed a blocking finding, a given
+`testsSha` was never checked, and the orchestrator signed off security itself. The pipeline
+now decides these from raw facts that mechanical agents report verbatim; no agent judgement
+is trusted where a fact can be checked.
+
+| Rule | Default | Off / override |
+|---|---|---|
+| Unknown argument names and wrongly typed values stop the script before any agent call | always | none |
+| Safety options on: `strictScope`, `readViaGit`, `redCheckTags`, `persistFindings`, `setupStrict`, `hookProbe`, `heavyLock`, `capFallback: "strongest"` | on | `false` per arg (or the `pipeline.*` key); `legacy: true` restores the earlier defaults, for the cache-key test only |
+| `roleFallback` (every role as general-purpose with its role file in the prompt) drops the agents' tool restrictions and the hooks' role rules | off | `roleFallback: true` for a session where `.claude/agents` is not registered |
+| **Hook probe**: Setup writes `pipeline.hook_probe.path` (a protected path) with the Write tool; unless the result contains `blocked_marker`, the run stops `blocked-hooks` (fail closed). Claude Code loads `.claude/settings.json` only for a session started at the repository root: start the orchestrator there (also not in an override session such as `SDD_ALLOW_PROTECTED=1`) | on | `hookProbe: false`, `pipeline.hook_probe.enabled: false` (a project without the kit hooks) |
+| **Gate result** from the log's raw lines: `GATES_HEAD=<sha>` (written first by `sdd gates --log`, ` dirty` when tracked files differed from HEAD) and the last `GATES_EXIT=<n>`; pass only with exit 0 on the current HEAD. Another HEAD or a missing line is an incomplete run (re-run), a dirty tree a failed gate | on | `legacy` |
+| **Two votes**: a blocking finding is dismissed only by at least two valid refuting votes and no confirming one; a dead or unparsable skeptic is not a refutation (`pipeline.skeptics` >= 2) | on | `legacy` |
+| **Persisted findings** are returned verbatim and parsed by the script; malformed, duplicate ids or bad severities end `blocked-evidence` | on | `legacy` |
+| **Finalize evidence**: `Status: Implemented` only when this run's last full gates passed, all four reviewers (and the second security review when sensitive) returned, and every blocking finding was refuted by two votes or fixed and fix-checked. A part this run did not do comes only from `evidence: {gateLog: "<logs_dir>/gates/<log>"}`: the script checks the log's `GATES_HEAD` against HEAD (later commits may change only review.md), `GATES_EXIT=0`, a clean tree, and the persisted record's reviewers and outcomes. Otherwise `blocked-evidence` | on | `legacy` |
+| **Security rule**: arg, plan line, reviewer, or a diff touching `pipeline.security_paths`; then two security reviews and `securitySignoff: "pending-owner"` (§8). The diff agent failing counts as sensitive (fail closed) | on | none |
+| **testsSha**: a run that starts after Tests must pass the red tests commit(s); each must be a commit, an ancestor of HEAD, have a `test(...)` subject and change at least one test path (`test_globs` of `sdd config --pipeline`: the generic test directories, the language patterns and `quality.test_globs`). Compile skeletons in the same commit are allowed | on | `legacy` |
+| **Red check passes**: a new test that already passes before implementation blocks the Tests stage unless every requirement id it verifies is in `allowPassing: {"<id>": "<reason>"}` (recorded in `summary.allowedPassing`) | on | `allowPassing` |
+| **Heavy-job lock rule**: every prompt of a role that may build or run tests (implementer, test author, reviewers, verifiers, the red check) says to prefix those commands with `<tools_dir>/scripts/heavy.sh` (§14) | on when `quality.heavy_lock` is set | `heavyLock: false` |
+| **Effort for hard tasks**: under tiers, implementer tasks and lanes the planner rated `complexity: high` run on the `mid` tier's model at `high` effort | on | `legacy` |
+
+Typical calls: `{feature, slug, root, stages, tasks, notes}`, plus `testsSha` when the run
+starts after Tests and `evidence` when it starts at Finalize. Never resume a run across a
+script change (a resume replays cached failures, and the safety defaults changed the cache
+keys): start a new run from the next stage with `testsSha`.

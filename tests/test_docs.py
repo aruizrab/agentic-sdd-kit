@@ -72,6 +72,11 @@ class LessonsTest(unittest.TestCase):
         39: ("test_filter", "fails in CI"),
         40: ("reverse", "already applied"),
         41: ("comment", "gitleaks:allow"),
+        42: ("misspelt", "legacy"),
+        43: ("raw facts", "GATES_HEAD"),
+        44: ("two valid refuting votes", "skeptics"),
+        45: ("evidence", "allowPassing"),
+        46: ("parent directory", "pending-owner"),
     }
 
     def test_entries_16_to_28(self) -> None:

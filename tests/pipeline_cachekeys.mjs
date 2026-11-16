@@ -12,6 +12,8 @@
 //   without a tests commit), is dropped from the current run before every comparison (dropNew); 2j tests its blocking and 1c
 //   compares against the script before it (--prev2).
 //   2. it checks that the opt-in args change exactly what they should (redCheckTags, persistFindings, tasks).
+// Every run passes legacy: true: since the safety defaults (sync 2026-11-16) the script's defaults differ on purpose, and
+// legacy: true restores the earlier defaults byte for byte; tests/pipeline_hardening.mjs covers the new defaults.
 //
 // Run: node tests/pipeline_cachekeys.mjs [--baseline <git-rev>] [--prev <git-rev>] [--prev2 <git-rev>]
 import { readFileSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
@@ -127,7 +129,8 @@ async function run(src, args, scenario = {}) {
     }
     return out
   }
-  const summary = await compile(src)({ config: CONFIG, feature: 'F011', slug: 'x', ...args }, agent, parallel, pipeline, () => {}, () => {})
+  // legacy: true replays the defaults before the safety defaults (older scripts ignore the arg); tests/pipeline_hardening.mjs covers the defaults.
+  const summary = await compile(src)({ config: CONFIG, feature: 'F011', slug: 'x', legacy: true, ...args }, agent, parallel, pipeline, () => {}, () => {})
   return { calls, summary }
 }
 

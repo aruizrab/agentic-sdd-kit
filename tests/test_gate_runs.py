@@ -61,6 +61,10 @@ class KeyedGateRunTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         nonce = json.loads(Path(first["log"] + ".pid").read_text())["nonce"]
         self.assertTrue(self.clean_log.read_text().rstrip().endswith(f"GATES_EXIT=0 {nonce}"))
+        # The log names the commit it ran on (the pipeline judges a gate result from GATES_HEAD and GATES_EXIT).
+        head = self.repo.git("rev-parse", "HEAD").strip()
+        heads = [line for line in self.clean_log.read_text().splitlines() if line.startswith("GATES_HEAD=")]
+        self.assertEqual(heads, [f"GATES_HEAD={head}"])
         before = self.clean_log.read_text()
         third = _start(self.root)
         self.assertEqual(third["state"], "done")
@@ -77,6 +81,8 @@ class KeyedGateRunTest(unittest.TestCase):
         self.assertEqual(again["state"], "running")
         self.assertEqual(again["pid"], dirty["pid"])
         self.assertEqual(_wait(self.root, dirty["log"]).returncode, 0)
+        head = self.repo.git("rev-parse", "HEAD").strip()
+        self.assertIn(f"GATES_HEAD={head} dirty", Path(dirty["log"]).read_text().splitlines())
         # A completed dirty log is never reused: the tree may have changed since.
         rerun = _start(self.root)
         self.assertEqual(rerun["state"], "started")

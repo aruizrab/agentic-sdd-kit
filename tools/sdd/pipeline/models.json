@@ -1,5 +1,5 @@
 {
-  "_comment": "Template models table for the formula router (pipeline.routing = \"formula\"). The points below are ILLUSTRATIVE PLACEHOLDERS (ids start with example-): copy this file to sdd.models.json at the project root and replace every point with your real frontier (intelligence from a public intelligence index, cost and tokens per task measured in your own runs). The project file replaces this one; it is not merged. Reference: docs/CONFIG.md, section Models table.",
+  "_comment": "Template models table for the formula router (pipeline.routing = \"formula\"). The points below are ILLUSTRATIVE PLACEHOLDERS (ids start with example-): copy this file to sdd.models.json at the project root and replace every point with your real frontier (intelligence from a public intelligence index, cost and tokens per task measured in your own runs). The project file replaces this one; it is not merged. Reference: docs/CONFIG.md, section Models table. Give the cheapest model a medium-effort point, not max: the reference project's effort experiment (2026-11-16) replaced its cheapest model's max-effort point by medium.",
   "version": 1,
   "params": {"p0": 0.3, "s": 4, "retry_mult": 2},
   "floors": {"1": 0, "2": 40, "3": 47, "4": 53, "5": 56, "6": 61},

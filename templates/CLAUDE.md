@@ -114,8 +114,8 @@ it is committed, and it stays inside its files.
 
 A **feature** is done when: every `must` has an implementation site and a passing verifying
 test (`sdd trace --check`); full `sdd gates` passes; the four reviewers ran and every blocking
-finding was refuted by all verifiers or fixed and re-checked; the security sign-off is
-recorded if the change is security-sensitive; review.md is written and `Status: Implemented`
+finding was refuted by two verifiers (and confirmed by none) or fixed and re-checked; the
+owner's security sign-off is recorded if the change is security-sensitive; review.md is written and `Status: Implemented`
 is set.
 
 ## Gotchas

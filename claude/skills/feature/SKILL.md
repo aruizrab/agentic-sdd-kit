@@ -33,7 +33,12 @@ allowed-tools: Read Grep Bash(git status *) Bash(git log *) Bash(git branch *) B
    `"orchestrator"` stops for you), `isolation`, `notes`, `security: true`, `hard: true`
    (top-tier model for spec/critic/plan/security/verifier roles), `models`/`modelsFromPhase`
    (tier change on resume), `poResolved: true` (you resolved a non-converging spec), `tasks: ["T01", ...]` (one work
-   item of a large plan on its own branch, PLAYBOOK §12).
+   item of a large plan on its own branch, PLAYBOOK §12). A run that starts after Tests needs
+   `testsSha` (the red tests commit), a run that starts at Finalize `evidence: {gateLog}`;
+   both are checked. Unknown argument names stop the run; the safety options are on by
+   default (PLAYBOOK §17): never pass `false` for one unless the owner asks.
+   `blocked-hooks` means this session did not load the project hooks: restart it at the
+   repository root.
 4. **Log the routing telemetry after every run end** (finished, blocked or paused): run
    `python3 -I tools/sdd/sdd.py routing log --output-file <the output file named in the
    Workflow completion notice>` in the main checkout (if the output file is gone:
@@ -50,10 +55,10 @@ allowed-tools: Read Grep Bash(git status *) Bash(git log *) Bash(git branch *) B
      `resumeFromRunId` and the same args (completed agents replay from the journal); to change
      routing for the remaining phases pass `modelsFromPhase` plus `models` + `modelsBefore`
      (tiers) or `routingBefore: <summary.routing>` after editing the models table (formula).
-   - `ready-to-merge`: if `needsSecuritySignoff`, review the security sections of review.md,
-     demand cheap hardening fixes, have a fresh `verifier` re-check each fix (with the scope
-     rule below in its prompt), record the
-     sign-off in review.md. Then merge `main` into the feature branch (in the worktree),
+   - `ready-to-merge`: if `securitySignoff` is `pending-owner`, review the security sections
+     of review.md, demand cheap hardening fixes, have a fresh `verifier` re-check each fix
+     (with the scope rule below in its prompt), write the owner a one-page summary and wait:
+     **the owner signs off, you never do**; record the owner's sign-off in review.md. Then merge `main` into the feature branch (in the worktree),
      resolve conflicts (`sdd union-merge` for manifests, an implementer for sources), run full
      `sdd gates` there, merge the branch into `main` with `--no-ff`, run `sdd trace --check`
      on main, delete the worktree's build output and remove the worktree.
