@@ -330,7 +330,14 @@ until somebody looks, even after the limit has reset.
   `/tmp/sdd-heavy-job.lock`, the same in every worktree). `sdd check coverage` and
   `sdd check mutation` take it themselves; wrap the other heavy commands (the full plan's test
   build, nightly runs, cache measurements, jobs started by hand) the same way. A nested call
-  for the same lock runs directly, so wrapping a whole gate plan cannot deadlock.
+  for the same lock runs directly, so wrapping a whole gate plan cannot deadlock. The queue is
+  **first come, first served**: each caller draws a ticket in `<lock>.queue/` and only the
+  oldest live ticket waits on the lock (plain `flock` is not fair: a job looping over long
+  locked steps re-took the lock the moment it released it and kept short jobs waiting for four
+  hours). So lock each step of a long loop separately (per package, per crate, per module),
+  never the whole loop: jobs that arrive meanwhile get the lock between steps. Run short jobs
+  (a feature's gates, follow-up fixes) before starting a long series. A tool that takes the
+  lock file with `flock` directly bypasses the queue; give it `heavy-lock.sh` instead.
 - **Cap every mutation test process**: a mutant can turn a loop into a runaway allocator that
   grows a test process by gigabytes in seconds, far faster than a test timeout stops it. With
   3 jobs and 8 test threads per job that took a 16 GB host down, init system and unrelated user

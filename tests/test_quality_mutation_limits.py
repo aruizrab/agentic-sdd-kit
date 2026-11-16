@@ -226,6 +226,64 @@ class ScriptsTest(unittest.TestCase):
         with proc.stderr:
             self.assertIn("waiting for", proc.stderr.read())
 
+    @unittest.skipUnless(shutil.which("flock"), "flock(1) not installed")
+    def test_heavy_lock_is_first_come_first_served(self) -> None:
+        """A job that loops over locked steps queues behind a job that arrived while it held the lock
+        (flock alone let the loop re-take the lock at once and starve the short job for hours)."""
+        lock = str(self.tmp / "heavy.lock")
+        out = self.tmp / "order"
+        env = dict(os.environ, SDD_HEAVY_LOCK=lock, SDD_HEAVY_LOCK_POLL="0.05")
+        env.pop("SDD_HEAVY_LOCK_HELD", None)
+        step = f'echo L$i >> {shlex.quote(str(out))}; sleep 0.8'
+        loop = subprocess.Popen(["sh", "-c", f'for i in 1 2 3; do sh {shlex.quote(str(LOCK))} sh -c "{step}"; done'], env=env)
+        try:
+            for _ in range(200):  # until the first step holds the lock
+                if out.exists():
+                    break
+                time.sleep(0.02)
+            short = subprocess.run(["sh", str(LOCK), "sh", "-c", f"echo S >> {shlex.quote(str(out))}"], env=env,
+                                   stderr=subprocess.PIPE, text=True, timeout=30)
+            self.assertEqual(short.returncode, 0, short.stderr)
+            self.assertIn("heavy-lock: ", short.stderr)
+            self.assertEqual(loop.wait(timeout=30), 0)
+        finally:
+            if loop.poll() is None:
+                loop.kill()
+        self.assertEqual(out.read_text().split(), ["L1", "S", "L2", "L3"])
+        self.assertEqual([p.name for p in Path(lock + ".queue").iterdir() if not p.name.startswith(".")], [])
+
+    @unittest.skipUnless(shutil.which("flock"), "flock(1) not installed")
+    def test_heavy_lock_drops_dead_and_cancelled_tickets(self) -> None:
+        lock = str(self.tmp / "heavy.lock")
+        queue = Path(lock + ".queue")
+        queue.mkdir()
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        (queue / f"{1:012d}.{dead.pid}").write_text("")  # a caller killed while queued
+        env = {"SDD_HEAVY_LOCK": lock, "SDD_HEAVY_LOCK_POLL": "0.05"}
+        p = self.run_script(str(LOCK), "sh", "-c", "echo ran", env=env, timeout=10)
+        self.assertEqual((p.returncode, p.stdout.strip()), (0, "ran"))
+        self.assertEqual([x.name for x in queue.iterdir() if not x.name.startswith(".")], [])
+        # A caller cancelled while it waits removes its own ticket.
+        holder = subprocess.Popen(["flock", lock, "sleep", "30"], start_new_session=True)
+        try:
+            for _ in range(100):
+                if subprocess.run(["flock", "-n", lock, "true"]).returncode != 0:
+                    break
+                time.sleep(0.05)
+            waiter = subprocess.Popen(["sh", str(LOCK), "true"], env=dict(os.environ, **env), stderr=subprocess.DEVNULL)
+            for _ in range(100):
+                if any(not x.name.startswith(".") for x in queue.iterdir()):
+                    break
+                time.sleep(0.05)
+            self.assertEqual(len([x for x in queue.iterdir() if not x.name.startswith(".")]), 1)
+            waiter.terminate()
+            self.assertNotEqual(waiter.wait(timeout=10), 0)
+        finally:
+            os.killpg(holder.pid, signal.SIGKILL)
+            holder.wait()
+        self.assertEqual([x.name for x in queue.iterdir() if not x.name.startswith(".")], [])
+
 
 class MemguardTest(unittest.TestCase):
     def setUp(self) -> None:

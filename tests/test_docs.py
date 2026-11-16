@@ -59,6 +59,7 @@ class LessonsTest(unittest.TestCase):
         26: ("wake-up", "reset"),
         27: ("none applies", "explicit entry"),
         28: ("runaway", "memcap-runner"),
+        29: ("not fair", "ticket queue"),
     }
 
     def test_entries_16_to_28(self) -> None:
