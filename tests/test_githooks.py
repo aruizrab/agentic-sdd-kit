@@ -300,6 +300,14 @@ class SecretsHookTest(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("commit message", proc.stderr)
         self.assertNotIn(AWS, proc.stdout + proc.stderr)
+        # `git commit -m` keeps comment-character lines and a bare scissors line (cleanup `whitespace`):
+        # a secret there would be stored, so the scan reads them too.
+        for msg in (f"docs: note\n\n# deploy key {AWS}\n", f"docs: note\n# ------------------------ >8 ------------------------\n# {AWS}\n"):
+            with self.subTest(msg=msg.splitlines()[1][:12]):
+                proc = self.r.commit(msg, "notes.md")
+                self.assertNotEqual(proc.returncode, 0, proc.stderr)
+                self.assertIn("commit message", proc.stderr)
+                self.assertNotIn(AWS, proc.stdout + proc.stderr)
 
     def test_binary_to_git_is_still_scanned(self) -> None:
         """S1: `-diff`/`binary` attributes or a NUL byte must not hide added lines from the scan;
@@ -346,6 +354,12 @@ class SecretsHookTest(unittest.TestCase):
         proc = self.r.commit("chore: cfg", "cfg.ini")
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("gitleaks:generic-api-key", proc.stderr)
+        # An inline gitleaks:allow comment does not exempt the line (F058 review: a change could exempt its own secret).
+        write(self.r.root, "cfg.ini", generic.rstrip("\n") + "  # gitleaks:allow\n")
+        proc = self.r.commit("chore: cfg", "cfg.ini")
+        self.assertNotEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("gitleaks:generic-api-key", proc.stderr)
+        write(self.r.root, "cfg.ini", generic)
         write(self.r.root, ".gitleaks.toml", "[extend]\nuseDefault = true\n[allowlist]\npaths = ['''.*''']\n")
         proc = self.r.commit("chore: cfg", "cfg.ini", ".gitleaks.toml")
         self.assertNotEqual(proc.returncode, 0, proc.stderr)

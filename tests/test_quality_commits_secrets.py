@@ -90,6 +90,31 @@ class BypassGuardTest(unittest.TestCase):
             self.assertIn(entry, deny)
 
 
+class SecretScanTextTest(unittest.TestCase):
+    """The commit-msg secret scan reads every line git may store, not the cleaned message."""
+
+    CUT = "# ------------------------ >8 ------------------------"
+
+    def test_keeps_comment_lines_and_a_bare_scissors_line(self) -> None:
+        from sddkit.quality import commits
+
+        raw = "fix(x): y\n\n# deploy token X\n"
+        self.assertEqual(commits.secret_scan_text(raw), raw)
+        raw = f"fix(x): y\n{self.CUT}\n# token X\n"
+        self.assertEqual(commits.secret_scan_text(raw), raw)
+        self.assertNotIn("token", commits.clean(raw))  # the format check still reads the cleaned text
+
+    def test_cuts_only_the_verbose_diff(self) -> None:
+        from sddkit.quality import commits
+
+        raw = f"fix(x): y\n# kept\n{self.CUT}\n# Do not modify or remove the line above.\n# Everything below it will be ignored.\ndiff --git a/x b/x\n"
+        self.assertEqual(commits.secret_scan_text(raw), "fix(x): y\n# kept\n")
+        semi = raw.replace("# ", "; ")
+        self.assertEqual(commits.secret_scan_text(semi), "fix(x): y\n; kept\n")  # any core.commentChar
+        mixed = semi.replace("; Do not", "# Do not")
+        self.assertEqual(commits.secret_scan_text(mixed), mixed)  # the marker must use the scissors' character
+
+
 class CommitsAndSecretsCheckTest(unittest.TestCase):
     def setUp(self) -> None:
         self.root = make_tmp("cs-")
@@ -209,6 +234,15 @@ class CommitsAndSecretsCheckTest(unittest.TestCase):
             self.assertEqual(proc.returncode, 2, check + proc.stdout)
             self.assertIn("CI=true needs SDD_BASE_REF", proc.stdout)
         self.assertEqual(self._protected(), (1, [("protected-changed", "sdd.config.json")]))
+        # Project gate commands get the same base from `sdd merge-base` (never a hard-coded main).
+        proc = run_cli(self.root, "merge-base", env={"CI": "true", "SDD_BASE_REF": ""})
+        self.assertEqual((proc.returncode, proc.stdout), (2, ""))
+        self.assertIn("CI=true needs SDD_BASE_REF", proc.stderr)
+        main = self.repo.git("rev-parse", "main").strip()
+        proc = run_cli(self.root, "merge-base", env={"CI": "true", "SDD_BASE_REF": "main"})
+        self.assertEqual((proc.returncode, proc.stdout.strip()), (0, main), proc.stderr)
+        proc = run_cli(self.root, "merge-base", env={"CI": "", "SDD_BASE_REF": "no-such-ref"})
+        self.assertEqual(proc.returncode, 2)
 
     def test_gitattributes_hiding_content_is_protected(self) -> None:
         """S1: a branch that marks files `binary` or `-diff` needs the owner's approval."""

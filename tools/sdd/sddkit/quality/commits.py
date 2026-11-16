@@ -41,6 +41,23 @@ def clean(message: str) -> str:
     return "\n".join(out)
 
 
+VERBOSE_CUT = re.compile(r"^(?P<c>\S) -{24} >8 -{24}$")
+
+
+def secret_scan_text(message: str) -> str:
+    """The text git may store as the commit message, for the secret scan: comment lines and a bare
+    scissors line are kept (``git commit -m``/``-F`` use the ``whitespace`` cleanup, and
+    ``--cleanup=verbatim|scissors`` keep them too); only git's own ``commit -v`` diff section is
+    cut: a scissors line followed by git's ``Do not modify or remove the line above.`` comment,
+    which no cleanup mode stores. Works for any ``core.commentChar``."""
+    lines = message.splitlines()
+    for i, line in enumerate(lines):
+        m = VERBOSE_CUT.match(line)
+        if m and i + 1 < len(lines) and lines[i + 1] == f"{m.group('c')} Do not modify or remove the line above.":
+            return "\n".join(lines[:i]) + "\n"
+    return message
+
+
 def expected_format(cfg: Dict[str, Any]) -> str:
     h = cfg["quality"]["hooks"]
     scope = "(<scope>)" if h["scope_regex"] else "[(<scope>)]"

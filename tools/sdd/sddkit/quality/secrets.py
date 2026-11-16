@@ -14,7 +14,9 @@ matched text is never printed or stored. gitleaks runs with ``--redact`` and its
 and deleted right after. gitleaks runs with an explicit ``--config``: the ``.gitleaks.toml`` of a
 trusted commit (HEAD in the hook, the merge-base in ``sdd check secrets``) or its default rules,
 never the scanned tree's own file; a ``.gitleaksignore`` that differs from the trusted commit
-fails.
+fails, and inline ``gitleaks:allow`` comments are ignored (``--ignore-gitleaks-allow``): a change
+cannot exempt its own secrets. Exemptions are ``quality.secrets.allow_globs`` or the trusted
+``.gitleaks.toml``.
 """
 
 from __future__ import annotations
@@ -117,8 +119,9 @@ def gitleaks(root: Path, cfg: Dict[str, Any], args: List[str], stdin: Optional[s
     gitleaks runs; relative target paths are what its path allowlists see."""
     report = (scratch_dir(root, cfg) / f"gitleaks-{abs(hash((tuple(args), stdin))) % 10**8}.json").resolve()
     conf = gitleaks_config(root, cfg, trusted_ref).resolve()
-    cmd = ["gitleaks", *args, "--config", str(conf), "--redact", "--no-banner", "--exit-code", "1", "--report-format", "json",
-           "--report-path", str(report)]
+    # --ignore-gitleaks-allow: an inline `gitleaks:allow` comment would let a change exempt its own secret.
+    cmd = ["gitleaks", *args, "--config", str(conf), "--redact", "--no-banner", "--ignore-gitleaks-allow", "--exit-code", "1",
+           "--report-format", "json", "--report-path", str(report)]
     data_in = stdin.encode("utf-8") if stdin is not None else None
     try:
         try:

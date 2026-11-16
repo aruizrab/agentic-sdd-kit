@@ -349,7 +349,16 @@ unset (the branch's `features.main_branch` could name the branch itself and empt
 ignores the branch's `quality.base_ref`, refuses a configured base that resolves to HEAD while
 the branch has its own commits, and `sdd check baseline` takes
 `quality.baseline_file` from the merge-base's configuration (a renamed baseline fails as
-`baseline-moved`).
+`baseline-moved`). A project gate of your own that selects work by changed files (fuzz targets,
+benchmarks, affected packages) takes its base from `sdd merge-base`, which applies the same
+rules, never from a hard-coded `main`: a pull-request checkout has no local `main`, and such a
+gate silently fuzzed nothing in CI in the reference project.
+
+Install CI tools from pinned versions **and pinned checksums** (`echo "<sha256>  <file>" |
+sha256sum -c` before extracting, or the release's signed checksum file): a version pin fixes a
+name, not the content, and the secret scanner is itself the control a replaced release asset
+would disable. The commit-message rules of `sdd check commits` include the secret scan of every
+message on the branch (git stores messages that the diff scans never see).
 **Do not let the branch grade itself.** The plan above runs the branch's own `tools/sdd` and
 `sdd.config.json`, so a branch that weakens a checker or drops a gate would pass. Two
 controls: the full plan's `protected` gate (`sdd check protected`) fails a branch that

@@ -125,6 +125,18 @@ def cmd_check(args: argparse.Namespace) -> int:
     return quality.emit(res, args.json)
 
 
+def cmd_merge_base(args: argparse.Namespace) -> int:
+    """The merge-base every diffing check uses, for project gate commands that select work by changed
+    files (fuzz targets, benchmarks): one rule for all of them, including CI's SDD_BASE_REF requirement."""
+    root, cfg = _cfg(args)
+    try:
+        print(vcs.merge_base(root, cfg))
+    except quality.QualityError as exc:
+        print(f"sdd merge-base: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def cmd_baseline(args: argparse.Namespace) -> int:
     root, cfg = _cfg(args)
     try:
@@ -400,6 +412,9 @@ def build_parser() -> argparse.ArgumentParser:
     ck.add_argument("--staged", action="store_true", help="size: check the staged content of staged files only")
     ck.add_argument("--no-run", action="store_true", help="coverage/mutation: read the existing report instead of running the tool")
     ck.set_defaults(fn=cmd_check)
+
+    mb = sub.add_parser("merge-base", help="print the merge-base of HEAD and the base ref that every diffing check uses (SDD_BASE_REF; required with CI=true)")
+    mb.set_defaults(fn=cmd_merge_base)
 
     bl = sub.add_parser("baseline", help="the shrink-only violation baseline: report (default), init, update, resolve")
     mode = bl.add_mutually_exclusive_group()

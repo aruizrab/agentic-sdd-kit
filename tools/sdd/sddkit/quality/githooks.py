@@ -330,9 +330,11 @@ def _commit_msg(hook: _Hook, msg_file: str) -> int:
         p = Path(os.getcwd()) / p
     message = p.read_text(encoding="utf-8", errors="replace")
     t0 = time.monotonic()
-    found = secrets.scan_message(cfg, commits.clean(message))
+    # Scan every line git may store (comment lines included), not the cleaned text the format check reads.
+    scanned = commits.secret_scan_text(message)
+    found = secrets.scan_message(cfg, scanned)
     if secrets.gitleaks_available(cfg):
-        found += secrets.gitleaks(root, cfg, ["stdin"], stdin=commits.clean(message), in_message=True)
+        found += secrets.gitleaks(root, cfg, ["stdin"], stdin=scanned, in_message=True)
     elif cfg["quality"]["secrets"]["gitleaks"]:
         res = Result("secrets")
         secrets.gitleaks_note(cfg, res)
