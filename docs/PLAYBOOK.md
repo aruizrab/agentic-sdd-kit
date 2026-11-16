@@ -32,6 +32,12 @@ Workflow({
   args: { feature: "F011", slug: "user-login", root: "<repo>/.wt/F011", config: <output of `sdd config --pipeline`> }
 })
 ```
+Every run of that script is listed as "feature-pipeline" in the progress view (the list shows the
+script's literal `meta.name`; the Workflow `title` argument is ignored). To see which feature a run
+is, launch a named copy instead: `scriptPath: $(tools/sdd/scripts/named-pipeline.sh F011 user-login)`
+writes `.wt/pipeline-runs/F011-user-login.js`, the same script with only the name changed, so
+resumes replay the same agents. An optional third argument tells runs of one feature apart
+(`... F011 user-login spec`).
 
 | Stage | Who | What you see / do |
 |---|---|---|
