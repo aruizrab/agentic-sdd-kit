@@ -7,9 +7,10 @@
 //   1. it runs the current script and the baseline (default: `git show 43c0883:<script>`) under a stub runtime
 //      that records every agent(prompt, opts) and answers from the label and the per-label call count only, so both
 //      scripts walk the same path; over several arg sets and scenarios it compares the sequences and the summaries;
-//   2. it checks that the opt-in args change exactly what they should (redCheckTags, persistFindings).
+//   1b. with every earlier opt-in on, it compares the current script with the one before the last batch (--prev);
+//   2. it checks that the opt-in args change exactly what they should (redCheckTags, persistFindings, tasks).
 //
-// Run: node tests/pipeline_cachekeys.mjs [--baseline <git-rev>]
+// Run: node tests/pipeline_cachekeys.mjs [--baseline <git-rev>] [--prev <git-rev>]
 import { readFileSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -264,6 +265,86 @@ const ref = await run(currentSrc, REF)
   const lost = await run(currentSrc, Object.assign({}, REF, { stages: ['verify', 'finalize'] }), { persisted, approved: true })
   assert.ok(!lost.calls.some((c) => /^(load persisted|verify R)/.test(c.label)), 'without the option the resumed run has no findings')
   ok('persistFindings resume from "verify": findings reload; refuted/fixed keep their outcome, the unresolved one is verified again')
+}
+
+// 1b. Without tasks, byte-identical to the script before the 2026-11-16 batch (PREV_REV), also with every earlier opt-in
+// (readViaGit, formula routing, redCheckTags, persistFindings) on. An empty tasks list counts as absent.
+const PREV_REV = argv.includes('--prev') ? argv[argv.indexOf('--prev') + 1] : 'a5c4ace'
+let prevSrc = null
+try {
+  prevSrc = execFileSync('git', ['-C', KIT, 'show', `${PREV_REV}:${SCRIPT}`], { encoding: 'utf8', maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'ignore'] })
+} catch {
+  console.log(`skip - ${PREV_REV} not available: opt-in byte-identity checks not run`)
+}
+if (prevSrc) {
+  const OPTIN = Object.assign({}, REF, { redCheckTags: true, persistFindings: true, runKey: 'k' })
+  const sets = ARGSETS.concat([
+    ['all earlier opt-ins', OPTIN],
+    ['all earlier opt-ins, read via git, main checkout', Object.assign({}, OPTIN, { root: undefined, readViaGit: true })],
+    ['all earlier opt-ins + formula routing', Object.assign({}, OPTIN, { config: Object.assign({}, CONFIG, { routing: FORMULA }) })],
+    ['stages from tests, earlier opt-ins', Object.assign({}, OPTIN, { stages: ['tests', 'implement', 'gates', 'review', 'verify', 'finalize'] }), { approved: true }],
+    ['tasks: []', Object.assign({}, REF, { tasks: [] })],
+  ])
+  let n = 0
+  for (const [name, args, extra] of sets) {
+    for (const [sname, scen0] of SCENARIOS) {
+      const scen = Object.assign({}, scen0, extra || {})
+      const before = await run(prevSrc, args, scen)
+      const after = await run(currentSrc, args, scen)
+      assert.equal(after.calls.length, before.calls.length, `${name} / ${sname}: call count vs ${PREV_REV}`)
+      for (let i = 0; i < after.calls.length; i++) {
+        assert.equal(after.calls[i].opts, before.calls[i].opts, `${name} / ${sname}: opts differ at call ${i} (${after.calls[i].label})`)
+        assert.equal(after.calls[i].prompt, before.calls[i].prompt, `${name} / ${sname}: prompt differs at call ${i} (${after.calls[i].label})`)
+      }
+      assert.deepEqual(after.summary, before.summary, `${name} / ${sname}: summary differs`)
+      n += after.calls.length
+    }
+  }
+  ok(`absent tasks: ${sets.length} arg sets x ${SCENARIOS.length} scenarios, ${n} agent calls identical to ${PREV_REV} (prompt, opts, summary)`)
+}
+
+// 2c. tasks: Tests and Implement keep only the listed tasks; empty waves skipped; unlisted dependencies dropped.
+{
+  const FROM_TESTS = Object.assign({}, REF, { stages: ['tests', 'implement', 'gates', 'review', 'verify', 'finalize'] })
+  const plain = await run(currentSrc, FROM_TESTS, { approved: true })
+  const r = await run(currentSrc, Object.assign({}, FROM_TESTS, { tasks: ['T02', 't04'] }), { approved: true })
+  const labels = r.calls.map((c) => c.label)
+  assert.deepEqual(r.calls.filter((c) => c.label === 'load tasks.md').map((c) => JSON.parse(c.opts).phase), ['Tests', 'Implement'], 'tasks.md loaded in Tests and in Implement')
+  const ta = r.calls.find((c) => /^test-author F/.test(c.label)).prompt
+  const ta0 = plain.calls.find((c) => /^test-author F/.test(c.label)).prompt
+  assert.equal(ta, ta0 + '\nTASK FILTER: this run covers only tasks T02, T04 of tasks.md. Write tests only for the requirements they verify (REQ-A-R010); ' +
+    'requirements scheduled only by other tasks are out of scope (another run covers them).', 'test-author scoped to the listed tasks')
+  for (const c of r.calls.filter((x) => /^red-check #/.test(x.label))) assert.ok(c.prompt.endsWith('Report in mustWithoutTest only must requirements among REQ-A-R010; requirements of other tasks are out of scope.'), c.label)
+  assert.ok(r.calls.find((c) => c.label === 'test-author fix').prompt.includes('\nTASK FILTER: this run covers only tasks T02, T04'))
+  assert.ok(labels.includes('commit: test(F011): failing tests for x (T02, T04)'), labels.filter((l) => /^commit/.test(l)).join('; '))
+  assert.deepEqual(labels.filter((l) => / impl/.test(l)), ['T02 impl', 'T04 impl'], 'only the listed tasks are implemented')
+  const t02 = r.calls.find((c) => c.label === 'T02 impl').prompt
+  assert.ok(t02.includes('| depends: -\nTASK FILTER: this run covers only tasks T02, T04 of tasks.md. Do not work on other tasks; dependencies on tasks outside this list count as satisfied.'), 'unlisted dependency T01 dropped; scope note added')
+  assert.deepEqual(r.summary.waves.map((w) => [w.wave, w.done]), [[1, ['T02']], [2, ['T04']]])
+  assert.deepEqual(r.summary.taskFilter, { requested: ['T02', 'T04'], tests: { kept: ['T02', 'T04'], missing: [] }, implement: { kept: ['T02', 'T04'], missing: [] } })
+  const gates = (x) => x.calls.filter((c) => /^gates /.test(c.label)).map((c) => c.label + c.prompt + c.opts)
+  assert.deepEqual(gates(r), gates(plain), 'gate calls are unaffected by the filter')
+  ok('tasks: [T02, t04]: tasks.md loaded in Tests and Implement, tests and red check scoped, only T02/T04 implemented, T01 dependency treated as satisfied')
+
+  const e = await run(currentSrc, Object.assign({}, REF, { stages: ['implement', 'gates'], tasks: ['T03', 'T09'] }), { approved: true })
+  assert.deepEqual(e.summary.waves.map((w) => w.wave), [2], 'wave 1 (no listed task) skipped')
+  assert.deepEqual(e.summary.taskFilter.implement, { kept: ['T03'], missing: ['T09'] })
+  ok('tasks: a wave with no listed task is skipped; unknown or done ids are recorded as missing')
+
+  const MAINCO = { approval: 'agent', stages: ['implement'] }
+  const two = await run(currentSrc, Object.assign({}, MAINCO, { tasks: ['T03', 'T04'] }), { approved: true })
+  const lanes = two.calls.filter((c) => /^wave 2 lane/.test(c.label))
+  assert.equal(lanes.length, 2)
+  assert.ok(lanes.every((c) => c.prompt.endsWith('\nTASK FILTER: this run covers only tasks T03, T04 of tasks.md. Do not work on other tasks; dependencies on tasks outside this list count as satisfied.')))
+  const one = await run(currentSrc, Object.assign({}, MAINCO, { tasks: ['T03'] }), { approved: true })
+  assert.deepEqual(one.summary.waves.map((w) => [w.wave, w.mode, w.lanes]), [[2, 'main-tree', 1]])
+  ok('tasks: lanes are built from the listed tasks only (two lanes in worktrees; one listed task runs in the main tree)')
+
+  const none = await run(currentSrc, Object.assign({}, FROM_TESTS, { tasks: ['T09'] }), { approved: true })
+  assert.equal(none.summary.status, 'blocked-tests')
+  assert.ok(!none.calls.some((c) => /^test-author/.test(c.label)))
+  await assert.rejects(run(currentSrc, Object.assign({}, REF, { tasks: ['first'] })), /args\.tasks must be task ids/)
+  ok('tasks: no matching task blocks the Tests stage before the test-author runs; malformed ids are rejected')
 }
 
 console.log(`\npipeline cache keys: ${checks} checks passed${baselineSrc ? ` (${compared} agent calls compared byte for byte against ${BASE_REV})` : ''}`)

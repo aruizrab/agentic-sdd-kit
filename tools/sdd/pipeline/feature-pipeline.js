@@ -2,7 +2,7 @@ export const meta = {
   name: 'feature-pipeline',
   description: 'Spec-driven lifecycle for one roadmap feature: specify, critique, approve, plan, tests-first, implement in waves, gates, review, adversarial verify, finalize',
   whenToUse:
-    'Orchestrator runs this per feature with args {feature: "F011", slug: "user-login", config?: <sdd config --pipeline>, root?: "<abs worktree path>", stages?: [...], approval?: "orchestrator"|"agent", isolation?: "auto"|"none"|"worktree", security?: bool, hard?: bool, notes?: string, models?: {...}, modelsFromPhase?: "Gates", modelsBefore?: {...}, routing?: "tiers"|"formula", routingBefore?: <summary.routing>, runKey?: string, strictScope?: bool (default true), readViaGit?: bool (default false), outsideScan?: [paths], redCheckTags?: bool, persistFindings?: bool}. See docs/PLAYBOOK.md.',
+    'Orchestrator runs this per feature with args {feature: "F011", slug: "user-login", config?: <sdd config --pipeline>, root?: "<abs worktree path>", stages?: [...], approval?: "orchestrator"|"agent", isolation?: "auto"|"none"|"worktree", security?: bool, hard?: bool, notes?: string, models?: {...}, modelsFromPhase?: "Gates", modelsBefore?: {...}, routing?: "tiers"|"formula", routingBefore?: <summary.routing>, runKey?: string, strictScope?: bool (default true), readViaGit?: bool (default false), outsideScan?: [paths], redCheckTags?: bool, persistFindings?: bool, tasks?: ["T01", ...]}. See docs/PLAYBOOK.md.',
   phases: [
     { title: 'Setup', detail: 'load sdd.config.json (unless passed as args.config), feature branch/worktree, scaffold the feature directory' },
     { title: 'Specify', detail: 'spec-author writes spec.md (atomic requirements with ids) from the normative source, within the requirement budget' },
@@ -128,6 +128,13 @@ const RED_CHECK_TAGS = A.redCheckTags === true || P.red_check_tags === true
 // finding's outcome; verdicts are written right after the votes (before any fix), and a run resumed from "verify"
 // without "review" reloads the findings from that block (lesson 24).
 const PERSIST_FINDINGS = A.persistFindings === true || P.persist_findings === true
+// tasks (opt-in): run only these task ids of tasks.md (e.g. ["T01", "T02"]), so one work item of a large plan can run on its
+// own branch. Tests and Implement load tasks.md as before and keep only the listed tasks; waves left empty are skipped and
+// dependencies on unlisted tasks count as satisfied. An empty list counts as absent.
+const TASK_FILTER = Array.isArray(A.tasks) && A.tasks.length ? A.tasks.map((t) => String(t).trim().toUpperCase()) : null
+if (TASK_FILTER && TASK_FILTER.some((t) => !/^T\d{2,3}$/.test(t))) {
+  throw new Error(`feature-pipeline: args.tasks must be task ids like "T01"; got ${JSON.stringify(A.tasks)}`)
+}
 const TR = C.trace || {}
 const VERIFIES_KW = Array.isArray(TR.verifies_keywords) && TR.verifies_keywords.length ? TR.verifies_keywords : ['Verifies']
 const ID_RX = (C.requirements && C.requirements.id_regex) || '[A-Z][A-Z0-9]*(?:-[A-Z0-9.]+)*-R\\d{2,3}'
@@ -393,6 +400,7 @@ const summary = {
   routing: R_NOW, // pass as routingBefore when resuming with a changed models table (with modelsFromPhase)
   telemetry: [], // one record per agent() attempt; the orchestrator appends them with `sdd routing log` after the run
 }
+if (TASK_FILTER) summary.taskFilter = { requested: TASK_FILTER }
 if (!STRICT_SCOPE) log('WARNING: strictScope: false: the SCOPE RULE is NOT in the agent prompts (agents may act on relayed chat messages); summary.strictScope records it')
 
 function finish(status, reason, nextAction) {
@@ -689,6 +697,25 @@ function taskBlock(t) {
   return `- ${t.id} ${t.title} | ${COMPONENT_WORD}s: ${t.components.join(', ')} | files: ${t.files.join(', ')} | verifies: ${t.verifies.join(', ')} | depends: ${t.depends.join(', ') || '-'}`
 }
 
+// tasks: keep only the listed tasks; drop waves left empty; drop dependencies on unlisted tasks (treated as satisfied).
+// Records per stage which listed ids were kept and which tasks.md did not return (unknown, or already checked [x]).
+function filterPlan(p, stage) {
+  if (!TASK_FILTER || !p || !Array.isArray(p.waves)) return p
+  const keep = new Set(TASK_FILTER)
+  const waves = p.waves
+    .map((w) => Object.assign({}, w, {
+      tasks: (w.tasks || []).filter((t) => keep.has(t.id)).map((t) => Object.assign({}, t, { depends: (t.depends || []).filter((d) => keep.has(d)) })),
+    }))
+    .filter((w) => w.tasks.length)
+  const kept = waves.flatMap((w) => w.tasks.map((t) => t.id))
+  const missing = TASK_FILTER.filter((id) => !kept.includes(id))
+  summary.taskFilter[stage] = { kept, missing }
+  log(`task filter (${stage}): running ${kept.join(', ') || 'no task'}` + (missing.length ? `; not in tasks.md or already done: ${missing.join(', ')}` : ''))
+  return Object.assign({}, p, { waves })
+}
+const filterNote = () =>
+  `\nTASK FILTER: this run covers only tasks ${TASK_FILTER.join(', ')} of tasks.md. Do not work on other tasks; dependencies on tasks outside this list count as satisfied.`
+
 async function testDefectRoute(defects, ph, tag) {
   if (!defects || !defects.length) return
   log(`${tag}: ${defects.length} reported test defect(s) routed to test-author`)
@@ -969,10 +996,25 @@ if (plan && plan.securitySensitive) summary.securitySensitive = true
 // ---------------------------------------------------------------------------
 if (want('tests')) {
   phase('Tests')
+  // tasks: tests only for the requirements the listed tasks verify (every prompt unchanged without it).
+  let tfTests = ''
+  let tfRed = ''
+  let tfKept = []
+  if (TASK_FILTER) {
+    const tp = filterPlan(plan || (await loadPlan('Tests')), 'tests')
+    if (!tp || !tp.ok) return finish('blocked-plan', tp && tp.problems ? tp.problems.join('; ') : 'could not load tasks.md', 'Fix tasks.md (sdd tasks --validate) or re-run from "plan".')
+    if (!tp.waves.length) return finish('blocked-tests', `task filter ${TASK_FILTER.join(', ')} matched no open task in tasks.md`, 'Check args.tasks against tasks.md.')
+    tfKept = tp.waves.flatMap((w) => w.tasks.map((x) => x.id))
+    const ids = [...new Set(tp.waves.flatMap((w) => w.tasks.flatMap((x) => x.verifies || [])))]
+    tfTests = `\nTASK FILTER: this run covers only tasks ${tfKept.join(', ')} of tasks.md. Write tests only for the requirements they verify (${ids.join(', ')}); ` +
+      'requirements scheduled only by other tasks are out of scope (another run covers them).'
+    tfRed = `\nTASK FILTER: this run covers only tasks ${tfKept.join(', ')} of tasks.md. Report in mustWithoutTest only must requirements among ${ids.join(', ')}; ` +
+      'requirements of other tasks are out of scope.'
+  }
   const t = await agentR(
     `${CTX}\n\nWrite the failing tests for ${FID} BEFORE implementation, following your test-author role: every requirement in ${DIR}/spec.md that tasks.md ` +
       'schedules gets a test tagged with its id (Verifies tag); abnormal/error cases, time via the test clock, fixtures/vectors as NEW files only with provenance, ' +
-      `property tests where cheap, minimal skeletons so the tests compile. Run the red check and \`${SDD} trace --feature ${NUM}\`. Do not commit.`,
+      `property tests where cheap, minimal skeletons so the tests compile. Run the red check and \`${SDD} trace --feature ${NUM}\`. Do not commit.` + tfTests,
     { label: `test-author ${FID}`, phase: 'Tests', schema: TESTS, agentType: 'test-author' },
   )
   if (!t || !t.ok) return finish('blocked-tests', t ? t.summary : 'test-author failed', 'Inspect the tests; re-run from "tests".')
@@ -988,14 +1030,14 @@ if (want('tests')) {
       `${CTX}\n\nIndependent red check (do not modify anything): run \`${testCmd}\` and \`${SDD} trace --feature ${NUM} --json${includes}\`. ` +
         'Report whether everything compiles, how many tests fail, which new tests unexpectedly pass, and which `must` requirements have no verifying test. ' +
         'A `must` whose Verifies tag the tool finds only in a file of its "outsideScan" list IS tested: do not report it as untested; report those files in outsideScan. ' +
-        'Before reporting a `must` as untested, grep the added test files for its id yourself.' + (RED_CHECK_TAGS ? tagCheckRule() : ''),
+        'Before reporting a `must` as untested, grep the added test files for its id yourself.' + (RED_CHECK_TAGS ? tagCheckRule() : '') + tfRed,
       { label: `red-check #${attempt + 1}`, phase: 'Tests', schema: RED_CHECK_TAGS ? REDCHECK_TAGS : REDCHECK, agentType: 'integrator', effort: 'low' },
     )
     if (red && red.compiles && !red.mustWithoutTest.length) break
     if (attempt === 1) break
     await agentR(
       `${CTX}\n\nThe red check found problems with the new tests for ${FID}:\n${JSON.stringify(red, null, 1)}\n\nMake all tests compile (skeletons only, no logic) and add tests for ` +
-        'every listed `must` requirement without one. Re-run the red check yourself. Do not commit.',
+        'every listed `must` requirement without one. Re-run the red check yourself. Do not commit.' + tfTests,
       { label: 'test-author fix', phase: 'Tests', schema: TESTS, agentType: 'test-author' },
     )
   }
@@ -1007,7 +1049,7 @@ if (want('tests')) {
     log(`tests outside trace.scan_globs (owner must extend the config before merge): ${summary.outsideScan.join(', ')}`)
   }
   if (red.unexpectedPasses.length) log(`tests already passing before implementation (recorded for review): ${red.unexpectedPasses.join(', ')}`)
-  summary.testsSha = await commit(`test(${FID}): failing tests for ${SLUG}`, 'Tests')
+  summary.testsSha = await commit(`test(${FID}): failing tests for ${SLUG}${TASK_FILTER ? ` (${tfKept.join(', ')})` : ''}`, 'Tests')
 }
 
 // ---------------------------------------------------------------------------
@@ -1040,7 +1082,7 @@ if (want('implement')) {
   if (!plan) plan = await loadPlan('Implement')
   if (!plan || !plan.ok) return finish('blocked-plan', plan && plan.problems ? plan.problems.join('; ') : 'could not load tasks.md', 'Fix tasks.md (sdd tasks --validate) or re-run from "plan".')
   if (plan.securitySensitive) summary.securitySensitive = true
-  const waves = plan.waves.slice().sort((a, b) => a.wave - b.wave).filter((w) => w.tasks.length)
+  const waves = filterPlan(plan, 'implement').waves.slice().sort((a, b) => a.wave - b.wave).filter((w) => w.tasks.length)
   const testsRef = summary.testsSha ? ` Tests were committed at ${summary.testsSha}; they must stay unchanged.` : ''
 
   for (const w of waves) {
@@ -1058,6 +1100,7 @@ if (want('implement')) {
             r = await agentR(
               `${CTX}\n\nImplement task ${t.id} of ${DIR}/tasks.md in ${WHERE} on ${BRANCH}, following your implementer role.${testsRef}\n` +
                 taskBlock(t) +
+                (TASK_FILTER ? filterNote() : '') +
                 (attempt ? `\n\nPrevious attempt failed: ${r ? r.summary : 'agent died'}. Address that first.` : '') +
                 `\n\nWhen green: mark the task [x] in tasks.md, run \`${SDD} gates --fast --feature ${FID}\`, commit "feat(${FID}): ${t.id} <summary>" with "Implements: <ids>" in the body and the trailer.`,
               { label: `${t.id} impl${attempt ? ' retry' : ''}`, phase: 'Implement', schema: IMPL, agentType: 'implementer', route: { complexity: t.complexity, risk: t.risk, retries: attempt, item: `task ${t.id}` } },
@@ -1078,7 +1121,7 @@ if (want('implement')) {
               'Follow your implementer role, section "Worktree lanes": ensure HEAD contains the base commit, implement these tasks IN ORDER, ' +
               `commit after each ("feat(${FID}): <task> <summary>" + "Implements: <ids>" + trailer). Do NOT edit tasks.md (the integrator ticks tasks after merging), ` +
               `then \`git branch -f wip/${FID}-w${w.wave}-l${i + 1} HEAD\` and report branch, headSha and worktreePath. Touch only these tasks' files.\n` +
-              lane.tasks.map(taskBlock).join('\n'),
+              lane.tasks.map(taskBlock).join('\n') + (TASK_FILTER ? filterNote() : ''),
             { label: `wave ${w.wave} lane ${i + 1}`, phase: 'Implement', schema: IMPL, agentType: 'implementer', isolation: 'worktree', route: laneRoute(lane.tasks, `wave ${w.wave} lane ${i + 1}`) },
           ),
         ),
