@@ -660,6 +660,36 @@ async function commit(message, ph) {
   return r && r.ok ? r.sha : null
 }
 
+// Tests-commit check: the files changed by the tests commit must include a file that defines one of the reported tests. Keyed by
+// the commit sha (not HEAD), so a run resumed after the Tests stage checks the tests commit, not later work.
+const TESTS_COMMIT = {
+  type: 'object',
+  properties: {
+    changed: { type: 'array', items: { type: 'string' }, description: 'repo-relative paths changed by the commit' },
+    testFiles: { type: 'array', items: { type: 'string' }, description: 'repo-relative paths of the files that define the reported tests' },
+    notes: { type: 'string' },
+  },
+  required: ['changed', 'testFiles'],
+}
+async function testsCommitCheck(sha, tests, components, ph) {
+  const r = await agentR(
+    `${CTX}\n\nRead-only check in ${WHERE} (do not modify, stage or commit anything). The test-author reported these new tests ` +
+      `(file paths or test names): ${JSON.stringify(tests || [])}, in ${COMPONENT_WORD}s ${JSON.stringify(components || [])}.\n` +
+      `1. changed: every path that commit ${sha} changes: \`git diff-tree --root --no-commit-id --name-only -r ${sha}\`.\n` +
+      `2. testFiles: the file defining each reported test as of ${sha}: an entry that is a path (strip any \`::name\` suffix) names it; ` +
+      'for a test name, find its definition with `git grep -n -w <name> ' + sha + ' -- <dirs>`, dirs being the directories of those ' + `${COMPONENT_WORD}s. ` +
+      'Paths are repo-relative, without the "<sha>:" prefix.',
+    { label: 'tests-commit check', phase: ph, schema: TESTS_COMMIT, agentType: 'integrator', effort: 'low' },
+  )
+  if (!r) return { ok: false, reason: 'tests-commit check agent failed' }
+  const changed = new Set(r.changed || [])
+  const files = r.testFiles || []
+  if (!files.some((f) => changed.has(f))) {
+    return { ok: false, reason: `the tests commit ${sha} changes none of the reported test files (${files.join(', ') || 'none found'})` }
+  }
+  return { ok: true }
+}
+
 async function specStatus(ph) {
   return agentR(
     `${CTX}\n\nRun \`${SDD} spec-info ${DIR}\` in ${WHERE} (do not modify anything) and report its "status", "needsClarification" and "requirements" fields. ` +
@@ -1032,6 +1062,7 @@ if (want('tests')) {
   // scan the directory holding the new tests. The check names the added test files explicitly (--include).
   const includes = (t.testsAdded || []).map((f) => ` --include ${f}`).join('')
   let red = null
+  const testsFixed = []
   for (let attempt = 0; attempt < 2; attempt++) {
     red = await agentR(
       `${CTX}\n\nIndependent red check (do not modify anything): run \`${testCmd}\` and \`${SDD} trace --feature ${NUM} --json${includes}\`. ` +
@@ -1042,11 +1073,12 @@ if (want('tests')) {
     )
     if (red && red.compiles && !red.mustWithoutTest.length) break
     if (attempt === 1) break
-    await agentR(
+    const fx = await agentR(
       `${CTX}\n\nThe red check found problems with the new tests for ${FID}:\n${JSON.stringify(red, null, 1)}\n\nMake all tests compile (skeletons only, no logic) and add tests for ` +
         'every listed `must` requirement without one. Re-run the red check yourself. Do not commit.' + tfTests,
       { label: 'test-author fix', phase: 'Tests', schema: TESTS, agentType: 'test-author' },
     )
+    if (fx && Array.isArray(fx.testsAdded)) testsFixed.push(...fx.testsAdded)
   }
   if (!red || !red.compiles || red.mustWithoutTest.length) {
     return finish('blocked-tests', `red check failed: compiles=${red ? red.compiles : '?'}, untested musts=${red ? red.mustWithoutTest.join(', ') : '?'}`, 'Fix tests, re-run from "tests".')
@@ -1057,6 +1089,11 @@ if (want('tests')) {
   }
   if (red.unexpectedPasses.length) log(`tests already passing before implementation (recorded for review): ${red.unexpectedPasses.join(', ')}`)
   summary.testsSha = await commit(`test(${FID}): failing tests for ${SLUG}${TASK_FILTER ? ` (${tfKept.join(', ')})` : ''}`, 'Tests')
+  // The red tests must be committed before Implement (a feature once: the commit returned no sha and 15 tasks were built on
+  // uncommitted tests). Block without a sha, or when that commit changes none of the files defining the reported tests.
+  if (!summary.testsSha) return finish('blocked-tests', 'the tests commit returned no sha (red tests not committed)', 'Commit the red tests, then re-run from "implement" with args.testsSha.')
+  const tc = await testsCommitCheck(summary.testsSha, (t.testsAdded || []).concat(testsFixed), t.components, 'Tests')
+  if (!tc.ok) return finish('blocked-tests', tc.reason, 'Commit the red tests, then re-run from "implement" with args.testsSha.')
 }
 
 // ---------------------------------------------------------------------------

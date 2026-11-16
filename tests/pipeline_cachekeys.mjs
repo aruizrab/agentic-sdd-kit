@@ -8,9 +8,12 @@
 //      that records every agent(prompt, opts) and answers from the label and the per-label call count only, so both
 //      scripts walk the same path; over several arg sets and scenarios it compares the sequences and the summaries;
 //   1b. with every earlier opt-in on, it compares the current script with the one before the last batch (--prev);
+//   The one default-path addition since then, the tests-commit check right after the tests commit (the Tests stage blocks
+//   without a tests commit), is dropped from the current run before every comparison (dropNew); 2j tests its blocking and 1c
+//   compares against the script before it (--prev2).
 //   2. it checks that the opt-in args change exactly what they should (redCheckTags, persistFindings, tasks).
 //
-// Run: node tests/pipeline_cachekeys.mjs [--baseline <git-rev>] [--prev <git-rev>]
+// Run: node tests/pipeline_cachekeys.mjs [--baseline <git-rev>] [--prev <git-rev>] [--prev2 <git-rev>]
 import { readFileSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -70,7 +73,9 @@ function responder(scenario) {
     const k = (n[label] = (n[label] || 0) + 1)
     if (scenario.persisted && label === 'load persisted findings') return { found: true, records: scenario.persisted }
     if (label === 'setup') return { ok: true, branch: 'feat/F011-x', baseSha: 'base', headSha: 'head', scaffolded: true }
+    if (scenario.nullTestsCommit && label.startsWith('commit: test(')) return { ok: false, sha: '' }
     if (/^commit/.test(label)) return { ok: true, sha: 'c' + label.length }
+    if (label === 'tests-commit check') return { changed: scenario.testsCommitMiss ? ['a/src.ts'] : ['a/src.ts', 'tests/a.test.ts'], testFiles: ['tests/a.test.ts'] }
     if (label === 'spec status') return { status: k === 1 && !scenario.approved ? 'Draft' : 'Approved', needsClarification: 0, requirements: 20 }
     if (label === 'spec-critic r1') return { verdict: 'revise', issues: [{ severity: 'major', kind: 'coverage', reqId: 'REQ-A-R010', problem: 'gap' }] }
     if (/^spec-critic/.test(label)) return { verdict: 'pass', issues: [] }
@@ -126,6 +131,20 @@ async function run(src, args, scenario = {}) {
   return { calls, summary }
 }
 
+// Calls the current script adds on the default path (the tests-commit check after the tests commit). dropNew removes it from the
+// current run before comparing; NEW_CALLS_CHECKED counts the runs in which it sat right after the tests commit.
+const NEW_CALL = /^tests-commit check( \[L\d\])?$/
+let NEW_CALLS_CHECKED = 0
+function dropNew(r) {
+  const i = r.calls.findIndex((c) => NEW_CALL.test(c.label))
+  if (i < 0) return r
+  assert.ok(/^commit: test\(/.test(r.calls[i - 1].label), `tests-commit check follows the tests commit (${r.calls[i - 1].label})`)
+  assert.equal(r.calls.filter((c) => NEW_CALL.test(c.label)).length, 1, 'one tests-commit check per run')
+  NEW_CALLS_CHECKED++
+  const summary = r.summary.telemetry ? Object.assign({}, r.summary, { telemetry: r.summary.telemetry.filter((t) => !NEW_CALL.test(t.label)) }) : r.summary
+  return Object.assign({}, r, { calls: r.calls.filter((c) => !NEW_CALL.test(c.label)), summary })
+}
+
 let checks = 0
 const ok = (m) => { checks++; console.log(`ok - ${m}`) }
 // readViaGit got one rule for every project in the 2026-11-16 batch (the feature's Markdown from the working copy, a removed
@@ -154,7 +173,7 @@ if (baselineSrc) {
     for (const [sname, scen] of SCENARIOS) {
       const s = Object.assign({}, scen, extra || {})
       const before = await run(baselineSrc, args, s)
-      const after = await run(currentSrc, args, s)
+      const after = dropNew(await run(currentSrc, args, s))
       assert.equal(after.calls.length, before.calls.length, `${name} / ${sname}: call count`)
       for (let i = 0; i < after.calls.length; i++) {
         assert.equal(after.calls[i].opts, before.calls[i].opts, `${name} / ${sname}: opts differ at call ${i} (${after.calls[i].label})`)
@@ -296,7 +315,7 @@ if (prevSrc) {
     for (const [sname, scen0] of SCENARIOS) {
       const scen = Object.assign({}, scen0, extra || {})
       const before = await run(prevSrc, args, scen)
-      const after = await run(currentSrc, args, scen)
+      const after = dropNew(await run(currentSrc, args, scen))
       assert.equal(after.calls.length, before.calls.length, `${name} / ${sname}: call count vs ${PREV_REV}`)
       for (let i = 0; i < after.calls.length; i++) {
         assert.equal(after.calls[i].opts, before.calls[i].opts, `${name} / ${sname}: opts differ at call ${i} (${after.calls[i].label})`)
@@ -307,6 +326,68 @@ if (prevSrc) {
     }
   }
   ok(`absent tasks: ${sets.length} arg sets x ${SCENARIOS.length} scenarios, ${n} agent calls identical to ${PREV_REV} (prompt, opts, summary)`)
+}
+
+// 1c. Against the script before the tests-commit check (PREV2_REV): the same calls except the one added check right after the
+// tests commit, for every arg set and scenario above (all earlier opt-ins on) and from the Tests stage.
+const PREV2_REV = argv.includes('--prev2') ? argv[argv.indexOf('--prev2') + 1] : '7cc0945'
+let prev2Src = null
+try {
+  prev2Src = execFileSync('git', ['-C', KIT, 'show', `${PREV2_REV}:${SCRIPT}`], { encoding: 'utf8', maxBuffer: 1 << 26, stdio: ['ignore', 'pipe', 'ignore'] })
+} catch {
+  console.log(`skip - ${PREV2_REV} not available: tests-commit check byte-identity not run`)
+}
+if (prev2Src) {
+  const OPTIN = Object.assign({}, REF, { redCheckTags: true, persistFindings: true, runKey: 'k' })
+  const sets = ARGSETS.concat([
+    ['all earlier opt-ins', OPTIN],
+    ['all earlier opt-ins + formula routing', Object.assign({}, OPTIN, { config: Object.assign({}, CONFIG, { routing: FORMULA }) })],
+    ['stages from tests, earlier opt-ins', Object.assign({}, OPTIN, { stages: ['tests', 'implement', 'gates', 'review', 'verify', 'finalize'] }), { approved: true }],
+    ['tasks filter', Object.assign({}, REF, { stages: ['tests', 'implement', 'gates', 'review', 'verify', 'finalize'], tasks: ['T02', 'T04'] }), { approved: true }],
+  ])
+  const before0 = NEW_CALLS_CHECKED
+  let n = 0
+  for (const [name, args, extra] of sets) {
+    for (const [sname, scen0] of SCENARIOS) {
+      const scen = Object.assign({}, scen0, extra || {})
+      const before = await run(prev2Src, args, scen)
+      const after = dropNew(await run(currentSrc, args, scen))
+      assert.equal(after.calls.length, before.calls.length, `${name} / ${sname}: call count vs ${PREV2_REV}`)
+      for (let i = 0; i < after.calls.length; i++) {
+        assert.equal(after.calls[i].opts, before.calls[i].opts, `${name} / ${sname}: opts differ at call ${i} (${after.calls[i].label})`)
+        assert.equal(after.calls[i].prompt, before.calls[i].prompt, `${name} / ${sname}: prompt differs at call ${i} (${after.calls[i].label})`)
+      }
+      assert.deepEqual(after.summary, before.summary, `${name} / ${sname}: summary differs`)
+      n += after.calls.length
+    }
+  }
+  assert.ok(NEW_CALLS_CHECKED - before0 >= 10, 'the tests-commit check ran in the runs that pass the Tests stage')
+  ok(`against ${PREV2_REV}: ${sets.length} arg sets x ${SCENARIOS.length} scenarios, ${n} agent calls identical; the only added call is the tests-commit check after the tests commit (${NEW_CALLS_CHECKED - before0} runs)`)
+}
+
+// 2j. Tests stage: no tests commit sha, or a tests commit that changes none of the reported test files, stops with blocked-tests
+// before Implement.
+{
+  const FROM_TESTS = { root: ROOT, stages: ['tests', 'implement', 'gates', 'review', 'verify', 'finalize'] }
+  const okRun = await run(currentSrc, FROM_TESTS, { approved: true })
+  const chk = okRun.calls.find((c) => c.label === 'tests-commit check')
+  const o = JSON.parse(chk.opts)
+  assert.equal(`${o.agentType}/${o.effort}/${o.phase}`, 'general-purpose/low/Tests')
+  for (const s of ['tests/a.test.ts', 'tools/x/test_b.py', 'tests/c.test.ts', 'git diff-tree --root --no-commit-id --name-only -r c', 'git grep -n -w <name> c']) assert.ok(chk.prompt.includes(s), `check prompt has ${s}`)
+  assert.ok(okRun.calls.some((c) => / impl$/.test(c.label)), 'a passing check continues to Implement')
+
+  const nul = await run(currentSrc, FROM_TESTS, { approved: true, nullTestsCommit: true })
+  assert.equal(nul.summary.status, 'blocked-tests')
+  assert.equal(nul.summary.testsSha, null)
+  assert.match(nul.summary.reason, /tests commit returned no sha/)
+  assert.ok(!nul.calls.some((c) => c.label === 'tests-commit check' || c.phase === 'Implement'), 'no check and no Implement call without a sha')
+  assert.match(nul.calls[nul.calls.length - 1].label, /^commit: test\(F011\)/)
+
+  const miss = await run(currentSrc, FROM_TESTS, { approved: true, testsCommitMiss: true })
+  assert.equal(miss.summary.status, 'blocked-tests')
+  assert.match(miss.summary.reason, /changes none of the reported test files \(tests\/a\.test\.ts\)/)
+  assert.ok(!miss.calls.some((c) => c.phase === 'Implement'))
+  ok('tests commit: null sha -> blocked-tests before any check or Implement call; a commit changing no reported test file -> blocked-tests; a good commit continues')
 }
 
 // 2c. tasks: Tests and Implement keep only the listed tasks; empty waves skipped; unlisted dependencies dropped.

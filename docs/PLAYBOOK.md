@@ -363,6 +363,13 @@ again (cost, and possibly a different answer than the one the later phases built
 3. **Move the baseline when a change is installed**: after the change merges, pass the merge
    commit as `--baseline` (or update the default in the test) so the next change is compared
    against what the running copies use.
+   One deliberate exception is always on: the Tests stage ends `blocked-tests` when the tests
+   commit returns no sha (a ferrocore feature built 15 tasks on uncommitted red tests), and
+   otherwise runs one read-only `tests-commit check` call (integrator, effort low) that reads
+   the commit by sha and requires it to change a file defining a test the test author reported.
+   It is the only added call; the test drops it from the current run before comparing
+   (`--prev2 <rev>` compares with the script before it) and has null-commit and wrong-commit
+   scenarios.
 4. A resumed run may add an opt-in only when the calls it changes lie after the phase the run
    resumes in; the test shows which calls each arg touches. Install the new script in the live
    location only between runs, or for new launches.

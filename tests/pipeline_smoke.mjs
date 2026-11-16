@@ -55,6 +55,7 @@ function makeRuntime(rules, byModel) {
     }
     for (const [rx, fn] of rules) if (rx.test(label)) return fn(base, label, prompt, calls)
     if (/^commit/.test(label)) return { ok: true, sha: 'abc1234' }
+    if (/^tests-commit check/.test(label)) return { changed: ['t', 'a/x.ts'], testFiles: ['t'] }
     if (/^spec status/.test(label)) return { status: 'Approved', needsClarification: 0, requirements: 20 }
     if (/^spec-critic/.test(label)) return { verdict: 'pass', issues: [] }
     if (/^red-check/.test(label)) return { compiles: true, failingTests: 5, unexpectedPasses: [], mustWithoutTest: [] }
@@ -615,6 +616,34 @@ const task = (id, extra = {}) => Object.assign({ id, title: id, components: ['a'
   assert.deepEqual([scr.model, scr.effort], ['new-cap', 'high']) // the pool exhausted before Gates is usable again
   assert.deepEqual(result.routing, now)
   console.log('ok 24 formula resume')
+}
+
+// 25. The Tests stage blocks without a tests commit: no sha, a commit that changes none of the reported test files, or a
+// failed check stop the run with blocked-tests before Implement; a good commit continues; the check is a read-only low-effort call.
+{
+  const noImpl = (calls) => assert.ok(!calls.some((c) => /^T\d+ impl|^wave/.test(c.label)), 'no Implement call')
+  const good = await run({ approval: 'agent' })
+  assert.equal(good.result.status, 'ready-to-merge')
+  const labels = good.calls.map((c) => c.label)
+  assert.equal(labels[labels.indexOf('commit: test(F011): failing tests for x') + 1], 'tests-commit check')
+  const chk = good.calls.find((c) => c.label === 'tests-commit check')
+  assert.equal(chk.effort, 'low')
+  assert.match(chk.prompt, /Read-only check/)
+  assert.match(chk.prompt, /git diff-tree --root --no-commit-id --name-only -r abc1234/)
+  const nul = await run({ approval: 'agent' }, [[/^commit: test\(/, () => ({ ok: false, sha: '' })]])
+  assert.equal(nul.result.status, 'blocked-tests')
+  assert.equal(nul.result.testsSha, null)
+  assert.match(nul.result.reason, /tests commit returned no sha/)
+  assert.ok(!nul.calls.some((c) => c.label === 'tests-commit check'))
+  noImpl(nul.calls)
+  const wrong = await run({ approval: 'agent' }, [[/^tests-commit check/, () => ({ changed: ['README.md'], testFiles: ['t'] })]])
+  assert.equal(wrong.result.status, 'blocked-tests')
+  assert.match(wrong.result.reason, /changes none of the reported test files \(t\)/)
+  noImpl(wrong.calls)
+  const dead = await run({ approval: 'agent' }, [[/^tests-commit check/, () => null]])
+  assert.equal(dead.result.status, 'paused', 'a check agent that dies twice pauses the run like any other call')
+  noImpl(dead.calls)
+  console.log('ok 25 tests commit check')
 }
 
 console.log('pipeline smoke: all ok')
