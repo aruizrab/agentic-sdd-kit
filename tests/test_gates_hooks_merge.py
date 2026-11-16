@@ -248,6 +248,26 @@ class HooksTest(unittest.TestCase):
                 self.assertEqual(hooks.stop_check(dict(base)), 0)  # exit 127: tool missing, never block
             self.assertIn("command not found", err.getvalue())
 
+    def test_stop_check_is_light(self) -> None:
+        # Not under the heavy-job lock, so it runs at low priority with its env (low build parallelism).
+        probe = f"{sys.executable} -I -c \"import os,sys; sys.exit(0 if os.environ.get('SDD_T_JOBS') == '2' and os.nice(0) >= 10 else 1)\""
+        self.cfg["stop_check"] = {"command": probe, "changed_globs": ["*.py"], "roles": ["implementer"], "timeout": 30,
+                                  "nice": 10, "env": {"SDD_T_JOBS": "2"}}
+        write_config(self.root, self.cfg)
+        write(self.root, "src/x.py", "x\n")
+        base = {"cwd": str(self.root), "hook_event_name": "SubagentStop", "agent_type": "implementer"}
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(hooks.stop_check(dict(base)), 0)
+            self.cfg["stop_check"]["env"] = {}
+            write_config(self.root, self.cfg)
+            self.assertEqual(hooks.stop_check(dict(base)), 2)
+        cfg = cfgmod.load(self.root)
+        self.assertEqual(cfg["stop_check"]["nice"], 10)
+        bad = dict(cfg, stop_check=dict(cfg["stop_check"], nice=25, env={"A": 1}))
+        problems = " ".join(cfgmod.validate(bad))
+        self.assertIn("stop_check.nice", problems)
+        self.assertIn("stop_check.env", problems)
+
     def test_cli_hook_reads_stdin(self) -> None:
         import subprocess
 

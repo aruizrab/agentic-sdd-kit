@@ -520,8 +520,8 @@
       "**/*.test.tsx",
       "**/*.spec.ts",
       "**/__tests__/**",
-      "test/**",
-      "tests/**",
+      "**/test/**",
+      "**/tests/**",
       "tools/sdd/githooks/**",
       "tools/sdd/sddkit/**",
       "tools/sdd/sdd.py"
@@ -558,7 +558,9 @@
     "roles": [
       "implementer"
     ],
-    "timeout": 240
+    "timeout": 240,
+    "nice": 10,
+    "env": {}
   },
   "models": {
     "mechanical": "",

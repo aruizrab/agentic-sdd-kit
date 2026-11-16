@@ -536,7 +536,11 @@
     "roles": [
       "implementer"
     ],
-    "timeout": 240
+    "timeout": 240,
+    "nice": 10,
+    "env": {
+      "GOFLAGS": "-p=2"
+    }
   },
   "models": {
     "mechanical": "",

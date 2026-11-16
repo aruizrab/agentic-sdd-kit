@@ -522,8 +522,7 @@
   },
   "role_denied_paths": {
     "implementer": [
-      "crates/*/tests/**",
-      "tests/**",
+      "**/tests/**",
       "tools/sdd/githooks/**",
       "tools/sdd/sddkit/**",
       "tools/sdd/sdd.py"
@@ -555,7 +554,11 @@
     "roles": [
       "implementer"
     ],
-    "timeout": 240
+    "timeout": 240,
+    "nice": 10,
+    "env": {
+      "CARGO_BUILD_JOBS": "2"
+    }
   },
   "models": {
     "mechanical": "",

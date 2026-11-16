@@ -178,7 +178,9 @@ DEFAULTS: Dict[str, Any] = {
     },
     "formatters": [],
     "build_cache": {"env": {}},
-    "stop_check": {"command": "", "changed_globs": [], "roles": ["implementer"], "timeout": 240},
+    # Light by design: never under the heavy-job lock (a stop hook must not wait in its queue); it runs
+    # at low priority (nice) with the build parallelism its env sets, so it never competes with locked jobs.
+    "stop_check": {"command": "", "changed_globs": [], "roles": ["implementer"], "timeout": 240, "nice": 10, "env": {}},
     "models": {
         "mechanical": "",
         "gate": "",
@@ -216,7 +218,7 @@ DEFAULTS: Dict[str, Any] = {
 
 
 # Sections whose keys are free-form (role names), and known keys that have no default.
-_FREE_FORM_SECTIONS = {"role_write_scopes", "role_denied_paths", "quality.languages", "build_cache.env", "quality.mutation.env"}
+_FREE_FORM_SECTIONS = {"role_write_scopes", "role_denied_paths", "quality.languages", "build_cache.env", "stop_check.env", "quality.mutation.env"}
 _BUILTIN_CHECKS = ("size", "arch", "coverage", "mutation", "baseline", "commits", "secrets", "protected")
 _GATE_KEYS = {"name", "command", "timeout", "optional", "skip_if_missing", "env", "install", "skip_exit"}
 _EXTRA_KEYS = {"components": {"word"}, "pipeline": {"role_tiers"}}
@@ -354,6 +356,11 @@ def validate(cfg: Dict[str, Any]) -> List[str]:
                 problems.append(f"build_cache.env.{key} must be a string")
     problems.extend(routing.config_problems(cfg))
     problems.extend(_validate_pipeline(cfg))
+    sc = cfg["stop_check"]
+    if not isinstance(sc.get("nice"), int) or isinstance(sc.get("nice"), bool) or not 0 <= sc["nice"] <= 19:
+        problems.append("stop_check.nice must be an integer from 0 (off) to 19")
+    if not isinstance(sc.get("env"), dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in sc["env"].items()):
+        problems.append("stop_check.env must map variable names to strings")
     if not cfg["commit"]["trailers"]:
         problems.append("commit.trailers is empty: add at least the attribution trailer line the project uses")
     for i, trailer in enumerate(cfg["commit"]["trailers"]):

@@ -24,7 +24,9 @@ Hooks:
   matches the edited file; exit 2 with the output when it fails (a syntax
   error from the last edit).
 * ``stop-check`` (Stop, SubagentStop): runs ``stop_check.command`` once when files
-  matching ``stop_check.changed_globs`` changed; never loops
+  matching ``stop_check.changed_globs`` changed; never loops. Light by design: not under the
+  heavy-job lock (a stop hook must not wait in its queue), at ``stop_check.nice`` priority with
+  ``stop_check.env`` (e.g. a low build parallelism), so it never competes with locked jobs
   (``stop_hook_active``), only for the roles listed.
 
 Override for a human maintenance session: ``<override_env>=1 claude`` (default
@@ -398,6 +400,20 @@ def format_file(data: Optional[Dict[str, Any]] = None) -> int:
     return 0
 
 
+def _lower_priority(nice: Any):
+    """A preexec function that raises the child's niceness by ``nice`` (None when off or unsupported)."""
+    if not isinstance(nice, int) or isinstance(nice, bool) or nice <= 0 or not hasattr(os, "nice"):
+        return None
+
+    def lower() -> None:
+        try:
+            os.nice(nice)
+        except OSError:
+            pass
+
+    return lower
+
+
 def stop_check(data: Optional[Dict[str, Any]] = None) -> int:
     data = _read_input() if data is None else data
     if os.environ.get("SDD_STOP_CHECK") == "0" or data.get("stop_hook_active"):
@@ -415,8 +431,11 @@ def stop_check(data: Optional[Dict[str, Any]] = None) -> int:
     globs = sc.get("changed_globs") or []
     if globs and not any(any_match(f, globs) for f in changed):
         return 0
+    env = dict(os.environ)
+    env.update({str(k): str(v) for k, v in (sc.get("env") or {}).items()})
     try:
-        proc = subprocess.run(sc["command"], shell=True, cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=float(sc.get("timeout", 240)))
+        proc = subprocess.run(sc["command"], shell=True, cwd=str(root), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                              timeout=float(sc.get("timeout", 240)), env=env, preexec_fn=_lower_priority(sc.get("nice")))
     except subprocess.TimeoutExpired:
         sys.stderr.write("stop-check: command timed out; not blocking.\n")
         return 0

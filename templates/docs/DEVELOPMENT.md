@@ -234,7 +234,7 @@ Configured in `.claude/settings.json`; logic in `tools/sdd/sddkit/hooks.py`, dri
 | `protect-paths.sh` | PreToolUse Edit/Write | blocks `protected_paths`, `append_only_paths` (listed roles may only create new files), `role_denied_paths`, and writes outside `role_write_scopes`. Paths resolve against the tree holding the file (worktree-safe). Fails closed on bad input. |
 | `bash-guard.sh` | PreToolUse Bash | best effort: redirections and mutating commands naming protected paths; destructive git commands (`checkout -- <path>`, `restore`, `clean`, `reset --hard`, `stash`, force-push, `--no-verify`) everywhere. |
 | `format.sh` | PostToolUse Edit/Write | runs the matching `formatters` entry; exit 2 with the parser error if the edit left invalid syntax. |
-| `stop-check.sh` | Stop, SubagentStop | runs `stop_check.command` once when matching files changed; never loops. |
+| `stop-check.sh` | Stop, SubagentStop | runs `stop_check.command` once when matching files changed; never loops. Light by design: not under the heavy-job lock (a stop hook must not wait in the queue), at low priority (`stop_check.nice`) with a low build parallelism (`stop_check.env`). |
 
 - **The hooks only run in a session started at the repository root.** Claude Code loads
   `.claude/settings.json` from the session's project directory; a session started in a parent

@@ -117,9 +117,13 @@ the diagrams.
 - `append_only_paths`: fixtures/vectors; `allowed_roles` may only create new files.
 - `role_write_scopes`: spec-author, architect-planner, product-owner -> feature dir;
   integrator -> feature dir + lockfiles.
-- `role_denied_paths`: implementer -> test paths.
+- `role_denied_paths`: implementer -> test paths: every test directory of the repository
+  (`**/tests/**`), the tests of build tools and helper packages included, not only the
+  product's (lesson 51).
 - `formatters`: `{"glob", "command" with {file}, "exclude"?, "timeout"?}`.
-- `stop_check`: a cheap compile/typecheck run when matching files changed, for the roles listed.
+- `stop_check`: a cheap compile/typecheck run when matching files changed, for the roles listed;
+  not under the heavy-job lock, so keep it light: `nice` (default 10) and a low build
+  parallelism in `env` (e.g. `CARGO_BUILD_JOBS=2`).
 
 ## 4. Models
 

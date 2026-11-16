@@ -519,7 +519,7 @@
   },
   "role_denied_paths": {
     "implementer": [
-      "tests/**",
+      "**/tests/**",
       "**/test_*.py",
       "**/*_test.py",
       "**/conftest.py",
@@ -553,7 +553,9 @@
     "roles": [
       "implementer"
     ],
-    "timeout": 120
+    "timeout": 120,
+    "nice": 10,
+    "env": {}
   },
   "models": {
     "mechanical": "",

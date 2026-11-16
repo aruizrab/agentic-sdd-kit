@@ -174,7 +174,9 @@
     "command": "",
     "changed_globs": [],
     "roles": ["implementer"],
-    "timeout": 240
+    "timeout": 240,
+    "nice": 10,
+    "env": {}
   },
   "_models_example": {
     "_comment": "The default efficient mapping (README \"Model routing\"). Copy the tiers into \"models\" with your provider's explicit model ids (never aliases); \"\" inherits the session model. effort is one of low|medium|high|xhigh|max or \"\" (the call site decides); the highest efforts are never defaults.",

@@ -437,6 +437,10 @@ until somebody looks, even after the limit has reset.
   never the whole loop: jobs that arrive meanwhile get the lock between steps. Run short jobs
   (a feature's gates, follow-up fixes) before starting a long series. A tool that takes the
   lock file with `flock` directly bypasses the queue; give it `heavy-lock.sh` instead.
+  The one exception is the stop hook's check (`stop_check`): a hook must not wait in the
+  queue, so it stays light instead, at low priority (`stop_check.nice`) and with a low build
+  parallelism (`stop_check.env`, e.g. `CARGO_BUILD_JOBS=2`). `.claude/settings.json` allows
+  `heavy.sh` so a wrapped command needs no extra permission.
 - **Run several heavy jobs within a memory budget once you know their sizes**: one at a time
   is the safe default but leaves a 16-core host idle. Export `SDD_HEAVY_BUDGET_MB` (the memory
   the heavy jobs may use together: RAM minus what sessions, agents and editors keep, e.g.

@@ -8,6 +8,8 @@
       "Bash(python3 -I tools/sdd/sdd.py *)",
       "Bash(python3 -I */tools/sdd/sdd.py *)",
       "Bash(sdd *)",
+      "Bash(tools/sdd/scripts/heavy.sh *)",
+      "Bash(*/tools/sdd/scripts/heavy.sh *)",
       "Bash(git status *)",
       "Bash(git diff *)",
       "Bash(git log *)",
