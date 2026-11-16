@@ -348,6 +348,240 @@ class ScriptsTest(unittest.TestCase):
         self.assertEqual([x.name for x in queue.iterdir() if not x.name.startswith(".")], [])
 
 
+def systemd_scope_works() -> bool:
+    if not shutil.which("systemd-run"):
+        return False
+    env = dict(os.environ)
+    if not env.get("XDG_RUNTIME_DIR") and os.path.isdir(f"/run/user/{os.getuid()}"):
+        env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
+    try:
+        return subprocess.run(["systemd-run", "--user", "--scope", "-q", "--collect", "-p", "MemoryMax=64M", "--", "true"],
+                              env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+OLD_LOCK = KIT / "tests" / "fixtures" / "heavy-lock-one-at-a-time.sh"  # the release before the memory budget
+
+
+@unittest.skipUnless(shutil.which("flock"), "flock(1) not installed")
+class HeavyBudgetTest(unittest.TestCase):
+    """SDD_HEAVY_BUDGET_MB: several heavy jobs at once within a memory budget, still first come first served."""
+
+    def setUp(self) -> None:
+        self.tmp = make_tmp("budget-")
+        self.lock = str(self.tmp / "heavy.lock")
+        self.queue = Path(self.lock + ".queue")
+        self.events = self.tmp / "events"
+        self.procs = []
+
+    def tearDown(self) -> None:
+        for p in self.procs:
+            if p.poll() is None:
+                p.kill()
+                p.wait()
+        rm(self.tmp)
+
+    def env(self, mb=None, budget="300", **extra) -> dict:
+        e = dict(os.environ, SDD_HEAVY_LOCK=self.lock, SDD_HEAVY_LOCK_POLL="0.05", SDD_HEAVY_CAP="0")
+        for k in ("SDD_HEAVY_LOCK_HELD", "SDD_HEAVY_BUDGET_MB", "SDD_HEAVY_JOB_MB", "SDD_HEAVY_LEGACY_MB"):
+            e.pop(k, None)
+        if budget is not None:
+            e["SDD_HEAVY_BUDGET_MB"] = budget
+        if mb is not None:
+            e["SDD_HEAVY_JOB_MB"] = str(mb)
+        e.update(extra)
+        return e
+
+    def step(self, name: str, secs: float) -> str:
+        ev = shlex.quote(str(self.events))
+        return f"echo {name}+ >> {ev}; sleep {secs}; echo {name}- >> {ev}"
+
+    def start(self, name: str, mb, secs: float = 0.6, script=LOCK, **env) -> subprocess.Popen:
+        p = subprocess.Popen(["sh", str(script), "sh", "-c", self.step(name, secs)], env=self.env(mb, **env),
+                             stderr=subprocess.PIPE, text=True)
+        self.procs.append(p)
+        return p
+
+    def wait_for(self, what, timeout: float = 10) -> None:
+        end = time.time() + timeout
+        while time.time() < end:
+            if what():
+                return
+            time.sleep(0.02)
+        self.fail("timed out")
+
+    def seen(self, mark: str) -> bool:
+        return self.events.exists() and mark in self.events.read_text().split()
+
+    def queued(self, count: int) -> bool:
+        return len([x for x in self.queue.iterdir() if not x.name.startswith(".")]) >= count if self.queue.exists() else False
+
+    def order(self):
+        return self.events.read_text().split()
+
+    def finish(self, *procs) -> None:
+        for p in procs:
+            self.assertEqual(p.wait(timeout=30), 0, p.stderr.read())
+            p.stderr.close()
+
+    def log_lines(self):
+        path = Path(self.lock + ".jobs.log")
+        if not path.exists():
+            return []
+        return [dict(f.split("=", 1) for f in line.split("\t")) for line in path.read_text().splitlines()]
+
+    def leftovers(self):
+        names = [x.name for x in self.queue.iterdir() if not x.name.startswith(".")]
+        running = self.queue / ".running"
+        return names + ([x.name for x in running.iterdir()] if running.exists() else [])
+
+    def test_jobs_that_fit_run_together(self) -> None:
+        a = self.start("A", 100)
+        b = self.start("B", 150)
+        self.finish(a, b)
+        o = self.order()
+        self.assertLess(max(o.index("A+"), o.index("B+")), min(o.index("A-"), o.index("B-")), o)
+        self.assertEqual(sorted(x["mb"] for x in self.log_lines()), ["100", "150"])
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_job_that_does_not_fit_waits_and_nobody_overtakes_it(self) -> None:
+        a = self.start("A", 200)
+        self.wait_for(lambda: self.seen("A+"))
+        b = self.start("B", 200, secs=0.3)  # 200 + 200 > 300: waits for A
+        self.wait_for(lambda: self.queued(2))
+        c = self.start("C", 50, secs=0.1)  # would fit next to A, but B came first
+        self.finish(a, b, c)
+        o = self.order()
+        self.assertLess(o.index("A-"), o.index("B+"), o)
+        self.assertLess(o.index("B+"), o.index("C+"), o)
+        self.assertLess(o.index("C+"), o.index("B-"), o)  # C fits next to B: 200 + 50 <= 300
+        self.assertEqual(self.leftovers(), [])
+
+    def test_a_job_bigger_than_the_budget_runs_alone(self) -> None:
+        a = self.start("A", 50)
+        self.wait_for(lambda: self.seen("A+"))
+        big = self.start("G", 1000, secs=0.3)
+        self.wait_for(lambda: self.queued(2))
+        c = self.start("C", 10, secs=0.1)
+        self.finish(a, big, c)
+        o = self.order()
+        self.assertEqual(o[o.index("G+"):o.index("G-") + 1], ["G+", "G-"], o)
+        self.assertLess(o.index("A-"), o.index("G+"), o)
+        p = subprocess.run(["sh", str(LOCK), "true"], env=self.env(1000), stderr=subprocess.PIPE, text=True, timeout=10)
+        self.assertIn("runs alone", p.stderr)
+
+    def test_jobs_log_and_exit_code(self) -> None:
+        long_arg = "x" * 400
+        p = subprocess.run(["sh", str(LOCK), "sh", "-c", 'echo "$SDD_HEAVY_LOCK_HELD $PWD"; exit 7', long_arg],
+                           env=self.env(120), cwd=self.tmp, stdout=subprocess.PIPE, text=True, timeout=10)
+        self.assertEqual((p.returncode, p.stdout.strip()), (7, f"{self.lock} {self.tmp}"))
+        (line,) = self.log_lines()
+        self.assertEqual(list(line), ["start", "end", "secs", "mb", "peak_mb", "rc", "oom_kills", "cap", "cwd", "cmd"])
+        self.assertEqual((line["mb"], line["rc"], line["cwd"], line["cap"], line["peak_mb"]), ("120", "7", str(self.tmp), "none", "-"))
+        self.assertTrue(line["cmd"].startswith("sh -c echo"), line["cmd"])
+        self.assertLessEqual(len(line["cmd"]), 300)
+        self.assertEqual(p.returncode, 7)
+        # Default job size: half the budget. A bad number is a usage error.
+        subprocess.run(["sh", str(LOCK), "true"], env=self.env(None), timeout=10)
+        self.assertEqual(self.log_lines()[-1]["mb"], "150")
+        bad = subprocess.run(["sh", str(LOCK), "true"], env=self.env("lots"), stderr=subprocess.PIPE, text=True, timeout=10)
+        self.assertEqual(bad.returncode, 2)
+
+    def test_nested_call_runs_inside_its_parent(self) -> None:
+        inner = f'SDD_HEAVY_JOB_MB=5000 sh {shlex.quote(str(LOCK))} sh -c "echo nested \\$SDD_HEAVY_LOCK_HELD"'
+        p = subprocess.run(["sh", str(LOCK), "sh", "-c", inner], env=self.env(100), stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, text=True, timeout=10)
+        self.assertEqual((p.returncode, p.stdout.strip(), p.stderr), (0, f"nested {self.lock}", ""))
+        self.assertEqual(len(self.log_lines()), 1)
+
+    def test_dead_jobs_and_tickets_are_dropped(self) -> None:
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        (self.queue / ".running").mkdir(parents=True)
+        name = f"{1:012d}.{dead.pid}"
+        (self.queue / name).write_text("")
+        (self.queue / ".running" / name).write_text("300 2026-01-01T00:00:00+0000 killed job\n")  # a job killed with -9
+        p = subprocess.run(["sh", str(LOCK), "true"], env=self.env(200), timeout=10)
+        self.assertEqual(p.returncode, 0)
+        self.assertEqual(self.leftovers(), [])
+
+    def test_cancelled_waiter_and_terminated_job_free_their_places(self) -> None:
+        a = self.start("A", 200, secs=30)
+        self.wait_for(lambda: self.seen("A+"))
+        b = self.start("B", 200)
+        self.wait_for(lambda: self.queued(2))
+        b.terminate()
+        self.assertNotEqual(b.wait(timeout=10), 0)
+        b.stderr.close()
+        self.assertEqual(len(self.leftovers()), 2)  # A's ticket and running record
+        a.terminate()
+        self.assertEqual(a.wait(timeout=10), 143)
+        a.stderr.close()
+        self.assertEqual(self.leftovers(), [])
+        self.assertEqual(self.log_lines()[-1]["rc"], "143")
+
+    def test_without_a_budget_jobs_run_one_at_a_time(self) -> None:
+        a = self.start("A", 10, budget=None)
+        self.wait_for(lambda: self.seen("A+"))
+        b = self.start("B", 10, budget=None)
+        self.finish(a, b)
+        self.assertEqual(self.order(), ["A+", "A-", "B+", "B-"])
+        self.assertFalse(Path(self.lock + ".jobs.log").exists())
+        self.assertFalse((self.queue / ".running").exists())
+
+    def test_exclusive_holder_counts_as_one_job(self) -> None:
+        """A job holding the lock the one-at-a-time way (flock, an older heavy-lock.sh) counts as
+        SDD_HEAVY_LEGACY_MB (default half the budget)."""
+        holder = subprocess.Popen(["flock", self.lock, "sleep", "1"], start_new_session=True)
+        self.procs.append(holder)
+        self.wait_for(lambda: subprocess.run(["flock", "-n", self.lock, "true"]).returncode != 0)
+        small = self.start("S", 100, secs=0.1)  # 150 + 100 <= 300: runs next to the holder
+        self.finish(small)
+        self.assertIsNone(holder.poll())
+        big = self.start("B", 200, secs=0.1)  # 150 + 200 > 300: waits for the holder
+        self.assertEqual(big.wait(timeout=10), 0)
+        big.stderr.close()
+        self.assertIsNotNone(holder.poll())
+
+    def test_one_at_a_time_callers_wait_for_budget_jobs(self) -> None:
+        """Mixed callers on one lock: a caller without a budget (this script or the previous
+        release) never starts on top of running budget jobs, and keeps its place in the queue."""
+        for script in (LOCK, OLD_LOCK):
+            with self.subTest(script=script.name):
+                self.events.unlink(missing_ok=True)
+                a = self.start("A", 100)
+                b = self.start("B", 100)
+                self.wait_for(lambda: self.seen("A+") and self.seen("B+"))
+                old = self.start("O", None, secs=0.3, script=script, budget=None)
+                self.wait_for(lambda: self.queued(3))
+                c = self.start("C", 50, secs=0.1)  # fits the budget, but arrived after the old-style caller
+                self.finish(a, b, old, c)
+                o = self.order()
+                self.assertLess(max(o.index("A-"), o.index("B-")), o.index("O+"), o)
+                self.assertLess(o.index("O+"), o.index("C+"), o)
+                self.assertLess(o.index("C+"), o.index("O-"), o)  # C runs next to the exclusive holder (150 + 50)
+                self.assertEqual(self.leftovers(), [])
+
+    @unittest.skipUnless(systemd_scope_works(), "systemd-run --user --scope not usable here")
+    def test_memory_cap_kills_only_the_job_that_outgrows_it(self) -> None:
+        other = self.start("A", 100, secs=1.5, SDD_HEAVY_CAP="1")
+        hog = "import os; b = bytearray(256 << 20); b[::4096] = b'\\x01' * len(b[::4096]); print('survived')"
+        self.wait_for(lambda: self.seen("A+"))
+        p = subprocess.run(["sh", str(LOCK), "sh", "-c", f'echo "$SDD_X $PWD"; exec python3 -I -c {shlex.quote(hog)}'],
+                           env=self.env(64, SDD_HEAVY_CAP="1", SDD_X="kept"), cwd=self.tmp, stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, text=True, timeout=30)
+        self.assertEqual(p.returncode, 137, p.stderr)
+        self.assertEqual(p.stdout.split("\n")[0], f"kept {self.tmp}")  # environment and working directory kept
+        self.finish(other)
+        line = next(x for x in self.log_lines() if x["mb"] == "64")
+        self.assertEqual((line["rc"], line["cap"], line["oom_kills"]), ("137", "64M", "1"))
+        self.assertGreaterEqual(int(line["peak_mb"]), 60)
+        a_line = next(x for x in self.log_lines() if x["mb"] == "100")
+        self.assertEqual((a_line["rc"], a_line["cap"], a_line["oom_kills"]), ("0", "100M", "0"))
+        self.assertEqual(self.leftovers(), [])
+
+
 class MemguardTest(unittest.TestCase):
     def setUp(self) -> None:
         self.mg = load_memguard()

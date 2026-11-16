@@ -27,7 +27,7 @@ agentic-sdd-kit/
                              commits, secrets), the shrink-only baseline, git hook logic
     githooks/                pre-commit, commit-msg, pre-push (installed by `sdd hooks install`)
     scripts/                 memcap-runner.sh (per-test memory cap), heavy-lock.sh (host-wide
-                             heavy-job lock), memguard.py (memory guard for unattended runs)
+                             heavy-job queue, optional memory budget), memguard.py (memory guard for unattended runs)
     pipeline/feature-pipeline.js   the per-feature Workflow script (Claude Code Workflow tool)
   claude/                    -> .claude/: 12 agents, 6 skills, 4 hooks, settings.json
   templates/                 CLAUDE.md, docs/{CONSTITUTION,DEVELOPMENT,ROADMAP}.md,

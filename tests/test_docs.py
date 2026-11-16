@@ -142,7 +142,8 @@ class PlaybookPipelineAndPausesTest(unittest.TestCase):
             self.assertIn(word, safe)
         pauses = section(text, r"(?:\d+\.\s+)?Usage-limit pauses while unattended")
         for word in ("one-shot wake-up", "reset time", "two heavy build or test jobs", "idle host", "without the compiler-cache wrapper", "registry dependencies",
-                     "heavy-lock.sh", "memcap-runner.sh", "memguard.py", "CARGO_TARGET_<TRIPLE>_RUNNER", "never remove it", "slow end-to-end tests"):
+                     "heavy-lock.sh", "memcap-runner.sh", "memguard.py", "CARGO_TARGET_<TRIPLE>_RUNNER", "never remove it", "slow end-to-end tests",
+                     "SDD_HEAVY_BUDGET_MB", "SDD_HEAVY_JOB_MB", "jobs.log", "MemoryMax"):
             self.assertIn(word, pauses)
         self.assertTrue((KIT / "tests" / "pipeline_cachekeys.mjs").is_file())
 

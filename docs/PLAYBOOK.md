@@ -400,8 +400,9 @@ until somebody looks, even after the limit has reset.
 - **Never run two heavy build or test jobs at once on a small host** (coverage, mutation
   testing, full workspace builds, build-cache measurements, full gates): two concurrent cold
   builds ran a 16 GB host out of memory, the OOM killer took a test process and froze the
-  session. Queue heavy jobs; `pipeline.max_parallel_features` and `pipeline.max_build_jobs`
-  bound the pipeline, but jobs started by hand count too.
+  session. Queue heavy jobs (or run them side by side only within a memory budget, each capped,
+  below); `pipeline.max_parallel_features` and `pipeline.max_build_jobs` bound the pipeline,
+  but jobs started by hand count too.
 - **Queue heavy jobs on the host-wide lock**: `tools/sdd/scripts/heavy-lock.sh <command>`
   runs a command under `flock` on one lock file per host (`quality.heavy_lock`, default
   `/tmp/sdd-heavy-job.lock`, the same in every worktree). `sdd check coverage` and
@@ -415,6 +416,28 @@ until somebody looks, even after the limit has reset.
   never the whole loop: jobs that arrive meanwhile get the lock between steps. Run short jobs
   (a feature's gates, follow-up fixes) before starting a long series. A tool that takes the
   lock file with `flock` directly bypasses the queue; give it `heavy-lock.sh` instead.
+- **Run several heavy jobs within a memory budget once you know their sizes**: one at a time
+  is the safe default but leaves a 16-core host idle. Export `SDD_HEAVY_BUDGET_MB` (the memory
+  the heavy jobs may use together: RAM minus what sessions, agents and editors keep, e.g.
+  10240 on a 16 GB host running several agent sessions) for every caller of the lock (put it
+  in the wrapper the pipelines call), and let each job declare `SDD_HEAVY_JOB_MB` (default half
+  the budget). The oldest waiting job starts when its MB fit next to the running jobs' MB;
+  nobody overtakes it, and a job bigger than the budget runs alone. With `systemd-run --user`
+  (systemd user session with the memory controller delegated: `systemd-run --user --scope -p
+  MemoryMax=200M true` works) each job runs in its own scope with `MemoryMax=<job MB>` and no
+  swap, so a job that outgrows its declaration is OOM-killed alone (exit 137 or a failed test)
+  instead of taking the host down; without it the job runs uncapped with a warning. Every job
+  appends a line to `<lock>.jobs.log` (MB declared, `peak_mb` actually used, exit code, OOM
+  kills, cwd, command). Start with generous declarations (half the budget for full gates and
+  mutation runs, a quarter for one package's tests), then size them from the logged peaks
+  plus about 25 % headroom; a declaration that keeps hitting the cap (`oom_kills` > 0) is too
+  small, and a cap hit can falsify results (a mutation tool whose compiler is killed records
+  the mutant as unviable): re-run such a job with a larger declaration. Switching a busy lock is safe: one-at-a-time callers (an older `heavy-lock.sh`, or
+  one without the budget) keep their places in the same queue, a job holding the lock the old
+  way counts as `SDD_HEAVY_LEGACY_MB` (default half the budget), and they never start on top
+  of budget jobs (those keep their tickets while running and hold a shared flock). Replace
+  the script with `mv` (a new file), never by rewriting it in place: queued shells are still
+  reading the old one.
 - **Cap every mutation test process**: a mutant can turn a loop into a runaway allocator that
   grows a test process by gigabytes in seconds, far faster than a test timeout stops it. With
   3 jobs and 8 test threads per job that took a 16 GB host down, init system and unrelated user
