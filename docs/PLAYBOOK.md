@@ -357,6 +357,16 @@ until somebody looks, even after the limit has reset.
 - **Re-check survivors with the slow tests before calling them test gaps**: if the mutation
   command excludes slow end-to-end tests for speed, re-run the surviving mutants with those
   tests included first; a survivor they kill is not a gap.
+- **Exclude tests that need the real repository on the mutation command line**
+  (`quality.mutation.test_filter`, `{test_filter}`): mutation tools test a copy of the tree,
+  often without `.git`, so end-to-end tests that run git or the project's tools fail the
+  unmutated baseline there. Put the filter on the command line, not in a test-runner profile:
+  fixture projects copy that profile and some runners reject a filter that matches nothing
+  (`test_filter_when` applies it only while such tests exist).
+- **Skip mutation testing on a busy host, never in CI**: `SDD_MUTATION=skip` makes `sdd check
+  mutation` report SKIP without running (for example while a long mutation series of another
+  feature holds the heavy-job lock); with `CI=true` it fails, so the pull request's CI run
+  still tests every changed line. Record in review.md that the local run was skipped.
 - **Measure build caches only on an idle host**: a cache measurement is a series of cold
   builds, and its timings are worthless (and its memory use dangerous) next to another build.
 - **Run mutation testing without the compiler-cache wrapper** (for example an empty

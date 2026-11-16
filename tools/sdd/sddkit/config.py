@@ -124,6 +124,8 @@ DEFAULTS: Dict[str, Any] = {
             "test_threads": 3,
             "memory_limit_mib": 2048,
             "env": {},
+            "test_filter": "",
+            "test_filter_when": [],
         },
         "heavy_lock": "/tmp/sdd-heavy-job.lock",
         "checks": [],
@@ -408,6 +410,11 @@ def _validate_mutation_limits(m: Dict[str, Any]) -> List[str]:
                 problems.append(f"quality.mutation.env: {key!r} is not an environment variable name")
             elif not isinstance(value, str):
                 problems.append(f"quality.mutation.env.{key} must be a string")
+    if not isinstance(m.get("test_filter", ""), str):
+        problems.append("quality.mutation.test_filter must be a string (shell text substituted for {test_filter})")
+    when = m.get("test_filter_when", [])
+    if not isinstance(when, list) or not all(isinstance(g, str) and g for g in when):
+        problems.append("quality.mutation.test_filter_when must be a list of globs")
     return problems
 
 

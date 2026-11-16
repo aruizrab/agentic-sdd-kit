@@ -197,7 +197,11 @@ large unused ranges panic at start-up; docs/LESSONS.md 30), and runs under the h
 | any (systemd) | a cgroup for the whole run instead: `systemd-run --user --scope -p MemoryMax=8G -p MemorySwapMax=0 <command>` (the kernel then kills the largest process inside the scope only) |
 
 A runaway mutant then fails alone and counts as caught. If the unmutated baseline fails only
-because of the cap, raise `memory_limit_mib`; never remove the cap. For unattended runs also
+because of the cap, raise `memory_limit_mib`; never remove the cap. If it fails because tests
+need the real repository (end-to-end tests that run git in the checkout; the tool tests a copy
+without `.git`), leave them out with `quality.mutation.test_filter` on the command line (Rust
+with nextest: `--test-tool nextest -- {test_filter}` and `"-E 'not binary(/^e2e_/)'"`, with
+`test_filter_when: ["**/tests/e2e_*.rs"]`; pytest: `-m 'not e2e'`; Vitest: `--exclude`). For unattended runs also
 start the memory guard (`python3 -I tools/sdd/scripts/memguard.py`, docs/PLAYBOOK.md §14).
 
 **Nightly** (`gates.nightly`, scheduled in CI): the whole repository, not only the diff, with

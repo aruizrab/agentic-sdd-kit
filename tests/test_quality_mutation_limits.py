@@ -112,8 +112,8 @@ class BuildCommandTest(unittest.TestCase):
         self.assertEqual((cmd, env["SDD_MEM_LIMIT_KB"]), ("tool", "0"))
 
 
-class MutationGateLimitsTest(unittest.TestCase):
-    """The limits reach the command `sdd check mutation` runs."""
+class MutationRepoCase(unittest.TestCase):
+    """A repository with a changed hand-written file on a feature branch (no tests of its own)."""
 
     def setUp(self) -> None:
         self.root = make_tmp("mutlim-")
@@ -132,14 +132,18 @@ class MutationGateLimitsTest(unittest.TestCase):
     def tearDown(self) -> None:
         rm(self.root)
 
-    def check(self, command: str, **overrides):
+    def check(self, command: str, cli_env=None, **overrides):
         self.cfg["quality"]["mutation"].update({"command": command, **overrides})
         write_config(self.root, self.cfg)
-        proc = run_cli(self.root, "check", "mutation", "--json")
+        proc = run_cli(self.root, "check", "mutation", "--json", env=cli_env)
         return proc.returncode, json.loads(proc.stdout)
 
     def read(self, name: str) -> str:
         return (self.root / "mut" / name).read_text().strip()
+
+
+class MutationGateLimitsTest(MutationRepoCase):
+    """The limits reach the command `sdd check mutation` runs."""
 
     def test_whole_command_capped_by_default(self) -> None:
         code, out = self.check("ulimit -d > mut/limit; ulimit -v > mut/as; echo {jobs} $SDD_TEST_THREADS > mut/par")
@@ -172,6 +176,49 @@ class MutationGateLimitsTest(unittest.TestCase):
         self.cfg["quality"]["heavy_lock"] = ""
         code, out = self.check('echo "${SDD_HEAVY_LOCK_HELD:-none}" > mut/held')
         self.assertEqual((code, self.read("held")), (0, "none"))
+
+
+class SwitchAndTestFilterTest(MutationRepoCase):
+    """SDD_MUTATION=skip for a loaded host (never in CI) and the {test_filter} placeholder."""
+
+    def test_switch(self) -> None:
+        ran = "echo ran > mut/ran"
+        for env, code, status in (({"SDD_MUTATION": "skip", "CI": ""}, 3, "skip"), ({"SDD_MUTATION": "skip", "CI": "true"}, 1, "fail"),
+                                  ({"SDD_MUTATION": "maybe", "CI": ""}, 2, "error"), ({"SDD_MUTATION": "Skip", "CI": "true"}, 2, "error")):
+            with self.subTest(env=env):
+                got, out = self.check(ran, cli_env=env)
+                self.assertEqual((got, out["status"]), (code, status), out)
+                self.assertFalse((self.root / "mut" / "ran").exists(), "the switch never runs the tool")
+                self.assertIn("SDD_MUTATION", " ".join(out["notes"]))
+        self.assertIn("not allowed in CI", " ".join(self.check(ran, cli_env={"SDD_MUTATION": "skip", "CI": "true"})[1]["notes"]))
+        got, out = self.check(ran, cli_env={"SDD_MUTATION": "run", "CI": ""})
+        self.assertEqual((got, self.read("ran")), (0, "ran"), out)
+
+    def test_test_filter_on_the_command_line(self) -> None:
+        cmd = "printf '%s\\n' x {test_filter} > mut/argv; echo \"$FILTER\" > mut/env"
+        filt = "-E 'not binary(/^e2e_/)'"
+        over = {"test_filter": filt, "test_filter_when": ["**/tests/e2e_*.py"], "env": {"FILTER": "{test_filter}"}}
+        got, out = self.check(cmd, **over)
+        self.assertEqual(got, 0, out)
+        self.assertEqual(self.read("argv"), "x")  # no end-to-end test is tracked: no filter (runners reject one that matches nothing)
+        self.assertEqual(self.read("env"), "")
+        write(self.root, "pkg/tests/e2e_hooks.py", "def test_hooks():\n    pass\n")
+        self.repo.git("add", "pkg/tests/e2e_hooks.py")
+        got, out = self.check(cmd, **over)
+        self.assertEqual(got, 0, out)
+        self.assertEqual(self.read("argv").split("\n"), ["x", "-E", "not binary(/^e2e_/)"])
+        self.assertEqual(self.read("env"), filt)
+        over["test_filter_when"] = []  # no condition: always applied
+        (self.root / "pkg/tests/e2e_hooks.py").unlink()
+        self.repo.git("rm", "-q", "--cached", "pkg/tests/e2e_hooks.py")
+        self.check(cmd, **over)
+        self.assertEqual(self.read("argv").split("\n"), ["x", "-E", "not binary(/^e2e_/)"])
+
+    def test_filter_validation(self) -> None:
+        cfg = test_config()
+        cfg["quality"]["mutation"].update({"test_filter": ["-E"], "test_filter_when": "e2e_*"})
+        problems = [p for p in cfgmod.validate(cfg) if "test_filter" in p]
+        self.assertEqual(len(problems), 2, problems)
 
 
 class ScriptsTest(unittest.TestCase):
