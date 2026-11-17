@@ -51,6 +51,17 @@ branches when every one is merged, as for a feature that merges in parts) and ``
 commit for 24 hours before ``generatedAt``), so a paused feature is never shown as moving; the
 table marks it ``(idle since <date>)``.
 
+Paused features: a feature the orchestrator deliberately holds is listed in ``paths.paused`` (default
+``tools/progress/paused.json``), a JSON object mapping a feature id to a one-line public reason, and
+its row gets ``paused: true`` and ``pausedReason``. Paused is a status beside the stage: ``stage``,
+``percent``, ``idle`` and ``lastCommit`` are unchanged (a site shows Paused over Idle). The file is
+read from the main ref only, never from the working tree or a feature branch, so a branch cannot
+pause (or unpause) itself; an absent file pauses nothing. It is validated strictly and an invalid
+file fails the run rather than being skipped: a JSON object without duplicate keys, every key a
+roadmap feature id, every value a string of 1 to 160 characters without control characters, and
+no e-mail address, URL or absolute filesystem path (reasons are published; the rest is on review).
+The orchestrator lists a feature when it holds it on purpose and removes the entry when work resumes.
+
 The evidence ref for an unfinished feature is its newest unmerged ``<branch_prefix>F<NNN>-*``
 branch (remote first, then local), else main. A feature that merges in parts (the plan first,
 then one branch per work item) therefore shows its real stage until its spec on main says
@@ -63,8 +74,9 @@ import datetime as _dt
 import json
 import os
 import re
+import unicodedata
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .trace import spec_status
 from .util import Git, is_placeholder_line, strip_html_comments
@@ -89,6 +101,13 @@ _TASK_LINE = re.compile(r"^- \[([ xX])\] T\d{2,3}\b")
 # substitutes (so a scaffold no longer holds them and they cannot mark one).
 _TOKEN = re.compile(r"<[^<>\n]+>")
 _SUBSTITUTED = ("<NNN>", "<slug>", "{{")
+PAUSED_REASON_MAX = 160
+# Text a published progress feed must not carry; rejected mechanically in a pause reason.
+_PAUSED_LEAKS = (
+    ("an e-mail address", re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+\.[A-Za-z0-9.-]*[A-Za-z]")),
+    ("a URL", re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://|\bwww\.", re.IGNORECASE)),
+    ("a filesystem path", re.compile(r"(?<![\w.:/])(?:/home/|/Users/|/mnt/|/tmp/|/var/|/etc/|/root/|[A-Za-z]:\\)")),
+)
 # git -G (POSIX ERE, case-insensitive with -i) for a spec's Status line, as trace.STATUS_LINE reads it.
 _STATUS_LINE_ERE = r"^[[:space:]>*_-]*status[*_]*[[:space:]]*:"
 KIND_MILESTONE = "milestone"
@@ -165,6 +184,48 @@ def parse_roadmap(text: str, cfg: Dict[str, Any]) -> Tuple[List[Dict[str, str]],
     if any(f["milestone"] == KIND_UNASSIGNED for f in features) and KIND_UNASSIGNED not in seen_m:
         groups.append({"id": KIND_UNASSIGNED, "name": "No milestone", "kind": KIND_UNASSIGNED})
     return groups, features
+
+
+def _reject_duplicate_keys(pairs: List[Tuple[str, object]]) -> Dict[str, object]:
+    obj: Dict[str, object] = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate key {key!r}")
+        obj[key] = value
+    return obj
+
+
+def parse_paused(text: Optional[str], feature_ids: Set[str], path: str = "paused.json") -> Dict[str, str]:
+    """``{feature id: reason}`` from the text of the paused file (None: absent, nothing is paused).
+    Raises ValueError naming ``path`` and the offending entry when the file or an entry is invalid
+    (rules in the module docstring); nothing is skipped silently."""
+    if text is None:
+        return {}
+    try:
+        data = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+    except ValueError as exc:  # json.JSONDecodeError is a ValueError
+        raise ValueError(f"{path}: not valid JSON: {exc}") from None
+    if not isinstance(data, dict):
+        raise ValueError(f"{path}: must be a JSON object mapping feature ids to reasons")
+    paused: Dict[str, str] = {}
+    for fid in sorted(data):
+        reason = data[fid]
+        if fid not in feature_ids:
+            raise ValueError(f"{path}: {fid!r} is not a feature in the roadmap")
+        if not isinstance(reason, str):
+            raise ValueError(f"{path}: {fid}: reason must be a string, got {type(reason).__name__}")
+        if not reason.strip():
+            raise ValueError(f"{path}: {fid}: reason must not be empty")
+        if len(reason) > PAUSED_REASON_MAX:
+            raise ValueError(f"{path}: {fid}: reason has {len(reason)} characters, at most {PAUSED_REASON_MAX} allowed")
+        bad = next((ch for ch in reason if unicodedata.category(ch) in ("Cc", "Zl", "Zp")), None)
+        if bad is not None:
+            raise ValueError(f"{path}: {fid}: reason must be one line without control characters (found U+{ord(bad):04X})")
+        for what, pattern in _PAUSED_LEAKS:
+            if pattern.search(reason):
+                raise ValueError(f"{path}: {fid}: reason is public and must not contain {what}")
+        paused[fid] = reason
+    return paused
 
 
 def count_tasks(text: Optional[str], template_lines: frozenset = frozenset()) -> Tuple[int, int]:
@@ -371,6 +432,9 @@ def build_report(root: Path, cfg: Dict[str, Any], main_ref: Optional[str] = None
     if roadmap is None:
         raise RuntimeError(f"{cfg['paths']['roadmap']} not found at {resolved}")
     milestones, features = parse_roadmap(roadmap, cfg)
+    paused_path = cfg["paths"].get("paused") or ""
+    # From the main ref only (never the working tree or a feature branch): a branch cannot pause itself.
+    paused = parse_paused(repo.git.show(resolved, paused_path) if paused_path else None, {f["id"] for f in features}, paused_path)
     main_dirs = repo.feature_dirs(resolved)
     repo.load_templates(resolved, root)
     branches = repo.feature_branches()
@@ -393,6 +457,9 @@ def build_report(root: Path, cfg: Dict[str, Any], main_ref: Optional[str] = None
             if last:
                 rows[-1]["lastCommit"] = _dt.datetime.fromtimestamp(last, tz=_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 rows[-1]["idle"] = now_ts - last > IDLE_AFTER_SECONDS
+        if f["id"] in paused:
+            rows[-1]["paused"] = True
+            rows[-1]["pausedReason"] = paused[f["id"]]
     ms = []
     for m in milestones:
         ids = [f["id"] for f in features if f["milestone"] == m["id"]]
@@ -416,6 +483,8 @@ def render_table(report: Dict[str, Any]) -> str:
     lines.append("")
     for f in report["features"]:
         idle = f" (idle since {f['lastCommit'][:10]})" if f.get("idle") else ""
+        if f.get("paused"):
+            idle += f" (paused: {f['pausedReason']})"
         lines.append(f"  {f['id']:<6} {f['percent']:5.1f}%  {f['stage']:<14} {f['name']}{idle}")
     return "\n".join(lines) + "\n"
 

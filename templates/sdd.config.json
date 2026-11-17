@@ -119,6 +119,7 @@
     "heavy_lock": ".wt/locks/heavy.lock",
     "heavy_budget_mb": 0,
     "heavy_job_mb": 0,
+    "heavy_job_mb_by_command": [],
     "checks": [],
     "secrets": {"gitleaks": true, "patterns": [], "allow_globs": []},
     "hooks": {

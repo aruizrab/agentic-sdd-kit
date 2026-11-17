@@ -62,3 +62,15 @@ graph LR
 
 #### F004 <slug> — <Feature title> (placeholder, specs later)
 - **Goal:** <work that serves every milestone, e.g. container images, observability>
+
+## 5. Infrastructure chores (orchestrator; status kept current here)
+
+Work on the project's own tooling, CI and host that is not a product feature, so it has no `F<NNN>`
+and no spec. The orchestrator's start-up checklist reads this section (docs/ORCHESTRATOR.md §1),
+so a compacted or new session picks the chores up. Run them through subagents; each names what it
+waits for (component claims, ORCHESTRATOR §5). Keep one bullet per chore and update its status in
+the same commit as the change that moves it.
+
+- **CHORE-<AREA>-1, <what and why>.** <Scope, with the measurement or incident that justifies it.>
+  Status: <waiting for <what> | ready: <next step> | in progress on <branch> | done <date> (<sha>)>.
+  Open: <remaining sub-items>.

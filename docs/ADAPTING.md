@@ -403,6 +403,17 @@ Agents cannot edit the hooks and checkers locally either: `<tools_dir>/githooks/
 copy) and `<tools_dir>/sdd.py` are denied to every subagent (the pipeline's
 role fallback runs all roles as `general-purpose`, so a role-keyed denial would never fire).
 
+**Self-hosted runner in Docker.** Tools that make a benchmark deterministic by disabling address
+space randomisation (`setarch -R`, i.e. `personality(ADDR_NO_RANDOMIZE)`: valgrind-based runners
+such as gungraun / iai-callgrind) fail inside a container under Docker's default seccomp profile,
+which refuses that call; the benchmark tests fail while everything else passes. Check with
+`docker exec <runner> setarch -R true`. Prefer the tool's own opt-out over loosening the
+container's security: set its environment variable on the runner container (`-e
+GUNGRAUN_ALLOW_ASLR=yes` for gungraun, which then skips `setarch`) and rebuild the runner.
+Instruction counts barely depend on ASLR; keep the regression threshold well above the noise
+(lesson 60). Also cap the runner container's memory and build parallelism, and count the cap
+against the host budget (PLAYBOOK §14, lesson 58).
+
 Schedule `CI=true python3 -I tools/sdd/sdd.py gates --plan nightly` for the full-repository
 coverage and mutation runs, long fuzzing and benchmarks.
 

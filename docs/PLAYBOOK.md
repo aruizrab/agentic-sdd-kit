@@ -478,6 +478,27 @@ until somebody looks, even after the limit has reset.
   of budget jobs (those keep their tickets while running and hold a shared flock). Replace
   the script with `mv` (a new file), never by rewriting it in place: queued shells are still
   reading the old one.
+- **Declare per-command job sizes in the configuration, not in scripts**: a step that needs
+  more than the default (a full gate run with an instrumented coverage build outgrows a
+  mutation run's size) is sized by `quality.heavy_job_mb_by_command`: `[{"match": "<words of
+  the command>", "unless": ["--fast"], "mb": <MB>}]`; the first matching rule sets that job's
+  `SDD_HEAVY_JOB_MB` (`heavy.sh` passes it the command; a job's own `SDD_HEAVY_JOB_MB` still
+  wins). Reason: the full gates of the reference project were OOM-killed at the 4096 MB default
+  in their coverage step; raising every job's size would have cut the number of parallel jobs.
+- **Count every memory consumer on the host against one budget**: `heavy_budget_mb` bounds the
+  heavy jobs only. A self-hosted CI runner container on the same machine (its `--memory` cap),
+  editors and agent sessions take memory outside it. Write the sum down (budget + runner cap +
+  the rest = RAM, with the rest measured, not guessed) in ORCHESTRATOR §6; when you raise the
+  budget, lower the runner cap or its build parallelism first, and set the runner cap in the
+  runner's own configuration so a rebuild keeps it. Most of a CI job's cgroup memory is page
+  cache, which the kernel reclaims at the cap; measure anonymous memory before sizing it.
+- **Stopping a pipeline run does not stop its heavy job**: the job lives in its own systemd
+  scope (`sdd-heavy-<ticket>-<pid>.scope`), outside the run's process tree, so cancelling the run
+  (or killing the agent session) leaves the build, its shell and its memory reservation holding
+  the queue until it finishes. After stopping a run run
+  `tools/sdd/scripts/heavy-stop.sh <worktree>` (`--dry-run` first): it stops the `sdd-heavy-*`
+  scopes that have a process in that worktree and nothing else. Check
+  `ls .wt/locks/heavy.lock.queue/` before the replacement run (lesson 59).
 - **Cap every mutation test process**: a mutant can turn a loop into a runaway allocator that
   grows a test process by gigabytes in seconds, far faster than a test timeout stops it. With
   3 jobs and 8 test threads per job that took a 16 GB host down, init system and unrelated user
@@ -683,6 +704,12 @@ the owner's standing rules) drifts or vanishes. Keep it in tracked files:
   section that owns its topic (else the owner-rules table), replacing a line it contradicts or
   asking which wins, commits (`docs(orchestrator): <rule>`), confirms in one line and acts on
   the rule.
+- **The roadmap's "Infrastructure chores" section** (ROADMAP template §5): work that has no
+  feature number (tooling, CI, host, build speed) with a status per chore, read by the
+  orchestrator's start-up checklist, so a compacted or new session picks it up (lesson 57).
+- **`paths.paused`** (default `tools/progress/paused.json`, on main): features the orchestrator
+  holds on purpose, with a public reason; `sdd progress` adds `paused`/`pausedReason` to their
+  rows (lesson 56). The orchestrator lists a feature when it holds it and removes it on resume.
 - **`specs/MERGE-OBLIGATIONS.md`** (template installed by the kit): one row per cross-feature
   obligation (MARK, EDIT, DOCS, TEST, ORDER, SPEC, SEC, PO), added when the spec that creates
   it is approved, checked before every merge, closed with the merge commit's sha, never

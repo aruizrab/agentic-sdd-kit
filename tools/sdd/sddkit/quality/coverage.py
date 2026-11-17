@@ -140,11 +140,23 @@ def main_checkout(root: Path) -> Path:
     return Path(root).resolve()
 
 
-def heavy_env(cfg: Dict[str, Any], root: Path) -> Dict[str, str]:
+def job_mb_for(cfg: Dict[str, Any], command: str) -> int:
+    """The job size in MB that ``quality.heavy_job_mb_by_command`` declares for ``command`` (its words
+    joined by single spaces): the first rule whose ``match`` is a substring of the command and none of
+    whose ``unless`` strings are. 0 = no rule applies (``quality.heavy_job_mb`` then decides)."""
+    text = f" {' '.join(command.split())} "
+    for rule in cfg["quality"].get("heavy_job_mb_by_command") or []:
+        if f" {rule['match'].strip()} " in text and not any(f" {u.strip()} " in text for u in rule.get("unless") or []):
+            return int(rule["mb"])
+    return 0
+
+
+def heavy_env(cfg: Dict[str, Any], root: Path, command: str = "") -> Dict[str, str]:
     """The heavy-job lock settings for ``heavy-lock.sh``: ``SDD_HEAVY_LOCK`` from ``quality.heavy_lock``
     (a relative path is resolved against the main checkout, so every worktree shares the lock; its
     directory is created), and the budget and default job size from ``quality.heavy_budget_mb`` /
-    ``heavy_job_mb`` unless the environment already sets them. Empty without a lock."""
+    ``heavy_job_mb`` unless the environment already sets them; for ``command`` the first matching rule of
+    ``quality.heavy_job_mb_by_command`` overrides the default job size. Empty without a lock."""
     q = cfg["quality"]
     lock = q.get("heavy_lock") or ""
     if not lock:
@@ -157,6 +169,9 @@ def heavy_env(cfg: Dict[str, Any], root: Path) -> Dict[str, str]:
     for key, var in (("heavy_budget_mb", "SDD_HEAVY_BUDGET_MB"), ("heavy_job_mb", "SDD_HEAVY_JOB_MB")):
         if q.get(key) and not os.environ.get(var):
             env[var] = str(int(q[key]))
+    by_command = job_mb_for(cfg, command) if command else 0
+    if by_command and not os.environ.get("SDD_HEAVY_JOB_MB"):
+        env["SDD_HEAVY_JOB_MB"] = str(by_command)
     return env
 
 

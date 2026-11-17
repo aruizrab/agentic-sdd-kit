@@ -38,6 +38,7 @@ DEFAULTS: Dict[str, Any] = {
         "development": "docs/DEVELOPMENT.md",
         "orchestrator": "docs/ORCHESTRATOR.md",
         "handoff": ".wt/handoff/STATE.md",
+        "paused": "tools/progress/paused.json",
         "logs_dir": ".sdd/logs",
         "worktree_root": ".wt",
         "build_dirs": [],
@@ -133,6 +134,7 @@ DEFAULTS: Dict[str, Any] = {
         "heavy_lock": ".wt/locks/heavy.lock",
         "heavy_budget_mb": 0,
         "heavy_job_mb": 0,
+        "heavy_job_mb_by_command": [],
         "checks": [],
         "secrets": {"gitleaks": True, "patterns": [], "allow_globs": []},
         "hooks": {
@@ -413,6 +415,9 @@ def _validate_orchestrator(cfg: Dict[str, Any]) -> List[str]:
         value = cfg["paths"].get(key)
         if not isinstance(value, str) or not _PLAIN_PATH.fullmatch(value) or ".." in value.split("/"):
             problems.append(f"paths.{key} must be a plain repository-relative file path")
+    paused = cfg["paths"].get("paused", "")
+    if not isinstance(paused, str) or (paused and (not _PLAIN_PATH.fullmatch(paused) or ".." in paused.split("/"))):
+        problems.append("paths.paused must be empty (no paused marker) or a plain repository-relative file path")
     return problems
 
 
@@ -565,6 +570,22 @@ def _validate_quality(q: Dict[str, Any]) -> List[str]:
         v = q.get(key)
         if not isinstance(v, int) or isinstance(v, bool) or v < 0:
             problems.append(f"quality.{key} must be a whole number of MB (0 = {'one heavy job at a time' if key == 'heavy_budget_mb' else 'half the budget'})")
+    rules = q.get("heavy_job_mb_by_command")
+    if not isinstance(rules, list):
+        problems.append("quality.heavy_job_mb_by_command must be a list of {match, mb, unless} rules")
+    else:
+        for i, rule in enumerate(rules):
+            where = f"quality.heavy_job_mb_by_command[{i}]"
+            if not isinstance(rule, dict) or set(rule) - {"match", "mb", "unless", "note"}:
+                problems.append(f"{where} must be an object with 'match', 'mb' and optionally 'unless' (and 'note')")
+                continue
+            if not isinstance(rule.get("match"), str) or not rule["match"].strip():
+                problems.append(f"{where}.match must be a non-empty string (words of the command, e.g. \"xtask gates\")")
+            if not isinstance(rule.get("mb"), int) or isinstance(rule.get("mb"), bool) or rule["mb"] < 1:
+                problems.append(f"{where}.mb must be a whole number of MB (>= 1)")
+            unless = rule.get("unless", [])
+            if not isinstance(unless, list) or not all(isinstance(u, str) and u.strip() for u in unless):
+                problems.append(f"{where}.unless must be a list of non-empty strings")
     seen = set()
     for i, c in enumerate(q.get("checks") or []):
         where = f"quality.checks[{i}]"

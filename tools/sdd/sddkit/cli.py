@@ -55,7 +55,7 @@ def cmd_config(args: argparse.Namespace) -> int:
         return 0
     if args.heavy_env:
         # Shell assignments for tools/sdd/scripts/heavy.sh: the lock from the config (always), budget and job size unless set.
-        env = coverage.heavy_env(cfg, Path(cfg["_root"]))
+        env = coverage.heavy_env(cfg, Path(cfg["_root"]), args.command or "")
         print(f"SDD_HEAVY_LOCK={shlex.quote(env.get('SDD_HEAVY_LOCK', ''))}; export SDD_HEAVY_LOCK")
         for var in ("SDD_HEAVY_BUDGET_MB", "SDD_HEAVY_JOB_MB"):
             if var in env:
@@ -387,6 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--compact", action="store_true", help="with --pipeline: one-line JSON (safe to embed in a prompt)")
     c.add_argument("--get", help="print one key, e.g. paths.features_dir")
     c.add_argument("--heavy-env", action="store_true", help="shell assignments of the heavy-job lock settings (tools/sdd/scripts/heavy.sh)")
+    c.add_argument("--command", help="with --heavy-env: the heavy command, so quality.heavy_job_mb_by_command can size its job")
     c.add_argument("--init", action="store_true", help="write the template config")
     c.add_argument("--force", action="store_true")
     c.set_defaults(fn=cmd_config)

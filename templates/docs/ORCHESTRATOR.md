@@ -27,6 +27,10 @@ replace the old line or ask the owner which one wins.
 5. Make sure the heartbeat runs. Run `CronList`; if no "{{PROJECT}} heartbeat" job exists,
    create it as §4 "Heartbeat and wake-ups" says, and note its id and creation date in the
    handoff file.
+6. Read the roadmap's **Infrastructure chores** section (`docs/ROADMAP.md`, template §5). Each
+   chore has a status; continue those whose status says what is ready, through a subagent (§6),
+   and update the status when it changes. A compacted or new session finds them there, not in
+   the previous session's memory.
 
 ## 2. Roles and authority
 
@@ -159,16 +163,40 @@ Heartbeat steps, on every heartbeat or wake-up turn:
 - The tiers in `sdd.config.json` (`models`, or the formula router's table) decide models and
   efforts; record here the owner's standing choices (e.g. the fallback when a capped model's
   pool is exhausted, efforts never to use).
+- **Delegate all work to subagents** (`<owner, yyyy-mm-dd>`). The orchestrator does not do the
+  work itself: diagnosis, measurements, fixes, refactors, patches for the owner, kit ports,
+  site fixes and research all go to subagents or pipelines. It decides, launches, reviews the
+  reports, and does only the bookkeeping (this file, `paths.handoff`, the merge register, the
+  roadmap's status lines) and the short git steps of an approved merge and push. Keeping its
+  own context for decisions is also what lets it survive compactions.
 - Every heavy command goes through `tools/sdd/scripts/heavy.sh` (kit PLAYBOOK §14). The memory
   guard (`tools/sdd/scripts/memguard.py`) is a last resort; a test it kills in a mutation run
   is reported, never counted as caught.
 - Host notes: `<memory, disk, where build output may live, systemd user scopes, ...>`.
+- **Host memory is one budget.** `quality.heavy_budget_mb` covers the heavy jobs only. Anything
+  else on the host that holds memory counts against the host: a CI runner container on the same
+  machine (its `--memory` cap), editors, agent sessions. Keep budget + runner cap + the rest
+  inside the machine's RAM, and record the numbers here (budget, default job, per-command sizes
+  from `quality.heavy_job_mb_by_command`, runner cap): `<numbers>`. Change one number, re-check
+  the sum (kit PLAYBOOK §14).
+- **Stopping a run does not stop its heavy job.** A cancelled or killed pipeline run leaves its
+  job running in its own systemd scope (`sdd-heavy-<ticket>-<pid>.scope`), holding its memory
+  and its place in the queue. After stopping a run, stop its heavy scopes:
+  `tools/sdd/scripts/heavy-stop.sh <worktree>` (`--dry-run` lists them), or by hand
+  `systemctl --user stop <scope>` for that run's scopes only. Then look at the queue
+  (`ls .wt/locks/heavy.lock.queue/`) before launching the replacement.
 - Never kill other jobs by process group; stop only your own background jobs.
 
 ## 7. Reporting to the owner
 
 - Say when work is paused or blocked, and why; never let a summary or the progress site show a
   paused feature as moving (`sdd progress` marks it idle).
+- **Mark a feature you deliberately hold.** When you hold a feature on purpose (waiting for a
+  merge, a decision, a window), add it to `paths.paused` on main (default
+  `tools/progress/paused.json`: `{"F015": "Waits for F012 to merge."}`) with a public one-line
+  reason, and remove the entry when work resumes; `sdd progress` then emits `paused` and
+  `pausedReason` (stage and percent unchanged) so the progress site shows a Paused badge instead
+  of a feature that looks stuck. The reason is published: no paths, URLs or e-mail addresses.
 - **Keep the progress site current** (when `orchestrator.progress_site` names one): it must
   show the real stage of every feature; the heartbeat checks it (§4 heartbeat step 5).
 - Separate verified from believed: a diagnosis is a hypothesis until it is checked.

@@ -9,7 +9,8 @@
 # from the main checkout or any worktree. It takes the lock file, the memory budget and the
 # default job size from sdd.config.json (`sdd config --heavy-env`: quality.heavy_lock, resolved
 # against the main checkout when relative, so all worktrees share one queue; quality.
-# heavy_budget_mb; quality.heavy_job_mb); variables already set in the environment win. With
+# heavy_budget_mb; quality.heavy_job_mb, or the size quality.heavy_job_mb_by_command declares for
+# this command); variables already set in the environment win. With
 # quality.heavy_lock "" the command runs directly. The queue itself is heavy-lock.sh (fair,
 # first come first served, optional memory budget with a capped systemd scope per job).
 set -eu
@@ -18,7 +19,7 @@ if [ "$#" -eq 0 ]; then
   echo "usage: heavy.sh <command> [args...]" >&2
   exit 2
 fi
-envs="$(python3 -I "$here/../sdd.py" config --heavy-env)" || {
+envs="$(python3 -I "$here/../sdd.py" config --heavy-env --command "$*")" || {
   echo "heavy.sh: cannot read the heavy-job settings (sdd config --heavy-env); refusing to run unlocked" >&2
   exit 2
 }
