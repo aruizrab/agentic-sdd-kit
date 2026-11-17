@@ -8,7 +8,11 @@ stage              percent  evidence
 not-started            0.0  no ``<features_dir>/<nnn>-*/spec.md`` anywhere
 spec-draft             5.0  spec present, ``Status: Draft`` (or unknown status)
 spec-approved         15.0  ``Status: Approved``
-planned                20.0  ``design.md`` and ``tasks.md`` present
+planned                20.0  ``design.md`` and ``tasks.md`` hold a written plan (not the
+                            unfilled ``sdd new-feature`` scaffold, see below) committed
+                            after the spec's latest ``Status:`` change (a plan made before
+                            a re-specification or amendment is stale, unless a
+                            ``test(F<NNN>)`` commit followed the re-approval)
 tests                  30.0  a ``test(F<NNN>)`` commit on the branch (red tests)
 implementing      30 + 60r  r = checked tasks / total tasks in ``tasks.md`` (r > 0)
 implemented           95.0  ``Status: Implemented`` but not merged into main
@@ -33,10 +37,19 @@ newest feature branch, else main), else the roadmap heading title after the slug
 placeholder note such as ``(placeholder, specs later)`` or ``(TBD)`` is dropped from feature
 titles and group names.
 
-Idle features: a feature in a started stage (planned, tests, implementing, implemented) with an
-unmerged branch also gets ``lastCommit`` (the newest commit on its unmerged branches, UTC) and
-``idle`` (no such commit for 24 hours before ``generatedAt``), so a paused feature is never shown
-as moving; the table marks it ``(idle since <date>)``.
+Scaffold plans: ``sdd new-feature`` copies ``paths.templates_dir`` into every new feature
+directory, so a feature holds ``design.md`` and ``tasks.md`` long before it is planned. The
+markers come from the project's own templates (read at the main ref, else from the working
+tree): a design is still the scaffold while its H1 keeps a ``<placeholder>`` of the template's
+H1 (``<Feature title>``) or its text keeps the template's first placeholder paragraph line (the
+overview); tasks are planned only with at least one real task line (template example lines and
+``<placeholder>`` lines do not count). Without templates only a missing file is unplanned.
+
+Idle features: a feature in a started stage (planned, tests, implementing, implemented) with a
+branch also gets ``lastCommit`` (the newest commit on its unmerged branches, UTC; on all its
+branches when every one is merged, as for a feature that merges in parts) and ``idle`` (no such
+commit for 24 hours before ``generatedAt``), so a paused feature is never shown as moving; the
+table marks it ``(idle since <date>)``.
 
 The evidence ref for an unfinished feature is its newest unmerged ``<branch_prefix>F<NNN>-*``
 branch (remote first, then local), else main. A feature that merges in parts (the plan first,
@@ -72,6 +85,12 @@ IMPLEMENTING_SPAN = 60.0
 IDLE_AFTER_SECONDS = 24 * 3600
 ACTIVE_STAGES = ("planned", "tests", "implementing", "implemented")
 _TASK_LINE = re.compile(r"^- \[([ xX])\] T\d{2,3}\b")
+# A ``<placeholder>`` token (``<Feature title>``) and the template variables ``sdd new-feature``
+# substitutes (so a scaffold no longer holds them and they cannot mark one).
+_TOKEN = re.compile(r"<[^<>\n]+>")
+_SUBSTITUTED = ("<NNN>", "<slug>", "{{")
+# git -G (POSIX ERE, case-insensitive with -i) for a spec's Status line, as trace.STATUS_LINE reads it.
+_STATUS_LINE_ERE = r"^[[:space:]>*_-]*status[*_]*[[:space:]]*:"
 KIND_MILESTONE = "milestone"
 KIND_CROSS_CUTTING = "cross-cutting"
 KIND_UNASSIGNED = "unassigned"
@@ -148,12 +167,14 @@ def parse_roadmap(text: str, cfg: Dict[str, Any]) -> Tuple[List[Dict[str, str]],
     return groups, features
 
 
-def count_tasks(text: Optional[str]) -> Tuple[int, int]:
+def count_tasks(text: Optional[str], template_lines: frozenset = frozenset()) -> Tuple[int, int]:
+    """``(done, total)`` task checkboxes in a tasks.md. Lines inside ``<!-- -->`` comments,
+    ``<placeholder>`` lines and the tasks template's own task lines (``template_lines``) are not tasks."""
     if text is None:
         return (0, 0)
     done = total = 0
     for line in strip_html_comments(text).splitlines():
-        if is_placeholder_line(line):
+        if is_placeholder_line(line) or line.strip() in template_lines:
             continue
         m = _TASK_LINE.match(line)
         if not m:
@@ -164,6 +185,46 @@ def count_tasks(text: Optional[str]) -> Tuple[int, int]:
     return (done, total)
 
 
+class Scaffold:
+    """What an unfilled ``sdd new-feature`` scaffold keeps, read from the project's templates."""
+
+    def __init__(self, design_template: Optional[str] = None, tasks_template: Optional[str] = None) -> None:
+        self.title_tokens: Tuple[str, ...] = ()
+        self.body_marker: Optional[str] = None
+        if design_template:
+            fenced = seen_h1 = False
+            for line in strip_html_comments(design_template).splitlines():
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    fenced = not fenced
+                    continue
+                if fenced:
+                    continue
+                if not seen_h1 and line.startswith("# "):
+                    seen_h1 = True
+                    self.title_tokens = tuple(t for t in _TOKEN.findall(line) if not any(s in t for s in _SUBSTITUTED))
+                elif seen_h1 and stripped.startswith("<") and not any(s in stripped for s in _SUBSTITUTED):
+                    self.body_marker = stripped
+                    break
+        self.task_lines = frozenset(
+            line.strip() for line in strip_html_comments(tasks_template or "").splitlines() if _TASK_LINE.match(line)
+        )
+
+    def is_scaffold_design(self, text: Optional[str]) -> bool:
+        """True for a design.md that is absent or still the unfilled template."""
+        if text is None:
+            return True
+        body = strip_html_comments(text)
+        h1 = next((line for line in body.splitlines() if line.startswith("# ")), "")
+        if any(token in h1 for token in self.title_tokens):
+            return True
+        return bool(self.body_marker) and self.body_marker in body
+
+    def is_plan(self, design: Optional[str], tasks: Optional[str]) -> bool:
+        """True when design.md and tasks.md hold a written plan, not the new-feature scaffold."""
+        return not self.is_scaffold_design(design) and count_tasks(tasks, self.task_lines)[1] > 0
+
+
 class Repo:
     def __init__(self, root: Path, cfg: Dict[str, Any], remote: str) -> None:
         self.git = Git(root)
@@ -172,6 +233,18 @@ class Repo:
         self.features_dir = cfg["paths"]["features_dir"]
         self.prefix = cfg["features"]["branch_prefix"]
         self.num_rx = re.compile(r"^(\d{%d,})-" % int(cfg["features"]["id_digits"]))
+        self.scaffold = Scaffold()
+
+    def load_templates(self, ref: str, root: Path) -> None:
+        """Read the design and tasks templates at ``ref``, else from the working tree."""
+        texts = []
+        for name in ("design.md", "tasks.md"):
+            rel = f"{self.cfg['paths']['templates_dir'].rstrip('/')}/{name}"
+            text = self.git.show(ref, rel)
+            if text is None and (root / rel).is_file():
+                text = (root / rel).read_text(encoding="utf-8", errors="replace")
+            texts.append(text)
+        self.scaffold = Scaffold(*texts)
 
     def feature_dirs(self, ref: str) -> Dict[str, str]:
         dirs: Dict[str, str] = {}
@@ -200,6 +273,26 @@ class Repo:
     def has_test_commit(self, fid: str, base: str, ref: str) -> bool:
         rx = re.compile(rf"^test\({re.escape(fid)}\)")
         return any(rx.match(s) for s in self.git.subjects(f"{base}..{ref}"))
+
+    def last_change(self, ref: str, paths: List[str], regex: Optional[str] = None) -> Optional[str]:
+        """Newest commit on ``ref`` that changed ``paths`` (only lines matching ``regex``, a
+        case-insensitive POSIX ERE, when given), or None."""
+        extra = ["-i", f"-G{regex}"] if regex else []
+        out = self.git.run("log", "-1", "--format=%H", *extra, ref, "--", *paths, check=False).strip()
+        return out or None
+
+    def plan_is_stale(self, fid: str, ref: str, fdir: str) -> bool:
+        """True when the spec's ``Status:`` line changed after design.md/tasks.md were last
+        committed (re-specified or amended through Draft and re-approved since the plan) and no
+        ``test(F<NNN>)`` commit since then shows the pipeline went on with that plan. Spec edits
+        that keep the Status line do not make a plan stale."""
+        status = self.last_change(ref, [f"{fdir}/spec.md"], _STATUS_LINE_ERE)
+        if status is None:
+            return False
+        plan = self.last_change(ref, [f"{fdir}/design.md", f"{fdir}/tasks.md"])
+        if plan is None or self.git.is_ancestor(status, plan):
+            return False
+        return not self.has_test_commit(fid, status, ref)
 
 
 def feature_stage(repo: Repo, fid: str, main_ref: str, main_dirs: Dict[str, str], branches: List[str], done_without_spec: set) -> Tuple[str, float]:
@@ -232,12 +325,12 @@ def feature_stage(repo: Repo, fid: str, main_ref: str, main_dirs: Dict[str, str]
     stage = "spec-approved" if status == "Approved" else "spec-draft"
     design = repo.git.show(ref, f"{fdir}/design.md")
     tasks = repo.git.show(ref, f"{fdir}/tasks.md")
-    if design is None or tasks is None:
+    if not repo.scaffold.is_plan(design, tasks) or repo.plan_is_stale(fid, ref, fdir):
         return stage, STAGES[stage]
     stage = "planned"
     if ref != main_ref and repo.has_test_commit(fid, main_ref, ref):
         stage = "tests"
-    done, total = count_tasks(tasks)
+    done, total = count_tasks(tasks, repo.scaffold.task_lines)
     if total > 0 and done > 0:
         return "implementing", IMPLEMENTING_BASE + IMPLEMENTING_SPAN * done / total
     return stage, STAGES[stage]
@@ -256,6 +349,14 @@ def feature_name(repo: "Repo", fid: str, fallback: str, main_ref: str, main_dirs
     return fallback
 
 
+def last_activity(git: Git, main_ref: str, branches: List[str]) -> Optional[int]:
+    """Newest commit time on the feature's unmerged branches, else on all its branches (a feature
+    that merges in parts has every branch merged while it is still in progress), or None when it
+    has no branch."""
+    refs = [ref for ref in branches if not git.is_ancestor(ref, main_ref)] or branches
+    return max((git.commit_time(ref) for ref in refs), default=0) or None
+
+
 def _mean(values: List[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
@@ -271,6 +372,7 @@ def build_report(root: Path, cfg: Dict[str, Any], main_ref: Optional[str] = None
         raise RuntimeError(f"{cfg['paths']['roadmap']} not found at {resolved}")
     milestones, features = parse_roadmap(roadmap, cfg)
     main_dirs = repo.feature_dirs(resolved)
+    repo.load_templates(resolved, root)
     branches = repo.feature_branches()
     done_set = set(cfg["features"].get("done_without_spec") or [])
     prefix = cfg["features"]["id_prefix"]
@@ -287,8 +389,7 @@ def build_report(root: Path, cfg: Dict[str, Any], main_ref: Optional[str] = None
         name = feature_name(repo, f["id"], f["name"], resolved, main_dirs, fbranches)
         rows.append({"id": f["id"], "name": name, "slug": f["slug"], "milestone": f["milestone"], "stage": stage, "percent": round(pct, 1)})
         if stage in ACTIVE_STAGES:
-            unmerged = [ref for ref in fbranches if not repo.git.is_ancestor(ref, resolved)]
-            last = max((repo.git.commit_time(ref) for ref in unmerged), default=0)
+            last = last_activity(repo.git, resolved, fbranches)
             if last:
                 rows[-1]["lastCommit"] = _dt.datetime.fromtimestamp(last, tz=_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 rows[-1]["idle"] = now_ts - last > IDLE_AFTER_SECONDS

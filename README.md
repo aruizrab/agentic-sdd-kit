@@ -101,7 +101,7 @@ Put `bin/sdd` on your PATH to type `sdd gates --fast` instead of
 | `sdd baseline [--report [--json]\|--init\|--update\|--resolve\|--merge-driver O A B]` | the shrink-only violation baseline: report every violation by kind and file, record it once at adoption, shrink it, resolve merge conflicts mechanically |
 | `sdd hooks install [--force]`, `sdd hooks run NAME` | sets `core.hooksPath` to the kit's git hooks (refuses over hooks already in use); the hook logic |
 | `sdd new-feature NNN slug` | scaffolds the feature directory from the templates and prints the feature's requirement id block |
-| `sdd progress [--json]` | lifecycle-stage progress per feature, milestone, cross-cutting group and overall from the roadmap and git refs; display names from the spec H1, else the roadmap title, else the slug; a started feature whose unmerged branches saw no commit for 24 h is marked `idle` (with `lastCommit`) |
+| `sdd progress [--json]` | lifecycle-stage progress per feature, milestone, cross-cutting group and overall from the roadmap and git refs; display names from the spec H1, else the roadmap title, else the slug; "planned" needs a written design and at least one real task line (the unfilled `new-feature` scaffold, recognised from the project's own templates, does not count) committed after the spec's latest `Status:` change (else the plan is stale, unless a `test(<FID>)` commit followed); a started feature whose branches (its unmerged ones, else all of them) saw no commit for 24 h is marked `idle` (with `lastCommit`) |
 | `sdd union-merge [files]` | resolves additive manifest conflicts only (union); refuses everything else |
 | `sdd spec-info DIR`, `sdd markers FILE` | Status, open clarification markers (ignores comments, code spans, prose), requirement counts |
 | `sdd tasks DIR [--lanes] [--validate]` | tasks.md as JSON: waves, tasks, components, lanes, the planner's `complexity` and `risk` ratings; plan exit criteria |
@@ -200,7 +200,7 @@ changes the table. Reference: docs/CONFIG.md ("Model routing"), docs/PLAYBOOK.md
 ## Testing the kit
 
 ```sh
-python3 -I -m unittest discover -s tests -v     # 232 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
+python3 -I -m unittest discover -s tests -v     # 292 tests (or: python3 -m pytest -q tests); synthetic git repos under .scratch/
 node tests/pipeline_smoke.mjs                   # drives feature-pipeline.js with a fake agent()
 node tests/pipeline_hardening.mjs               # the safety defaults: arg checks, hook probe, raw gate lines, votes, evidence, security, testsSha
 node tests/pipeline_cachekeys.mjs               # cache keys: (prompt, opts) byte-identical to the baseline script without new args (PLAYBOOK §13)
