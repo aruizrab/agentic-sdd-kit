@@ -127,9 +127,15 @@ Heartbeat steps, on every heartbeat or wake-up turn:
    runs at all, launch the cheapest runnable work.
 4. **Host:** check free memory and disk and the heavy-job queue. A job waiting much longer than
    its peers means something is stuck; look into it.
-5. **Report only changes:** one or two lines if something happened (a launch, a merge, a
+5. **Progress site** (only when `orchestrator.progress_site` names one; skip this step
+   otherwise): after a merge, an approval, a plan or any stage change, check that the latest run
+   of the job that publishes `sdd progress --json` to the site succeeded (its log says it
+   published, or that the data was unchanged). If the site does not show a feature's real stage,
+   fix the feed (`sdd progress`, its configuration, or the publishing job) or the site the same
+   day, through a subagent; a fault in `sdd progress` itself goes to the kit as well.
+6. **Report only changes:** one or two lines if something happened (a launch, a merge, a
    blocker, a decision the owner should know). Nothing if nothing changed.
-6. **Renew** the heartbeat if it is due (above).
+7. **Renew** the heartbeat if it is due (above).
 
 ## 5. Component claims, merge order, main stays green
 
@@ -161,8 +167,10 @@ Heartbeat steps, on every heartbeat or wake-up turn:
 
 ## 7. Reporting to the owner
 
-- Say when work is paused or blocked, and why; never let a summary show a paused feature as
-  moving (`sdd progress` marks it idle).
+- Say when work is paused or blocked, and why; never let a summary or the progress site show a
+  paused feature as moving (`sdd progress` marks it idle).
+- **Keep the progress site current** (when `orchestrator.progress_site` names one): it must
+  show the real stage of every feature; the heartbeat checks it (§4 heartbeat step 5).
 - Separate verified from believed: a diagnosis is a hypothesis until it is checked.
 - **Keep standing rules in this file.** Whenever the owner states a standing rule or
   direction, record it here in that same turn ("Recording an owner rule" below).

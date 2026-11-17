@@ -703,7 +703,10 @@ the owner's standing rules) drifts or vanishes. Keep it in tracked files:
     `orchestrator.heartbeat.minute`; session crons die with the session and recurring ones
     expire after 7 days, so renew at 6) and schedule a one-shot wake-up at each usage reset
     plus 2 minutes (usage from `orchestrator.usage_file`; ORCHESTRATOR template §4 "Heartbeat
-    and wake-ups", with the six heartbeat steps). SessionStart fires for the main
+    and wake-ups", with the seven heartbeat steps). When `orchestrator.progress_site` names
+    the site the project publishes `sdd progress --json` to, the habit also says to check,
+    after each merge, approval, plan or stage change, that the site was published and shows
+    each feature's real stage (heartbeat step 5; lesson 55). SessionStart fires for the main
     session only (subagents get SubagentStart), and the hook exits silently for input
     carrying `agent_id`, and when `paths.orchestrator` does not exist. Paths come from
     `paths.orchestrator` and `paths.handoff`;

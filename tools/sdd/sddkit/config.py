@@ -211,10 +211,13 @@ DEFAULTS: Dict[str, Any] = {
     # for every subagent. Every other skill stays available to subagents. heartbeat and usage_file feed
     # the orchestrator-context SessionStart reminder (the hourly "<project.name> heartbeat" cron at
     # heartbeat.minute; usage_file: a JSON capture of Claude Code's status-line input with rate_limits).
+    # progress_site: where the project publishes `sdd progress --json` (a site, page or repository);
+    # empty: no progress site, and heartbeat step 5 (check it shows each feature's real stage) is skipped.
     "orchestrator": {
         "main_only_skills": ["owner-rule", "compact-handoff"],
         "heartbeat": {"enabled": True, "minute": 17},
         "usage_file": "",
+        "progress_site": "",
     },
     "merge": {
         "union_manifests": [],
@@ -403,6 +406,9 @@ def _validate_orchestrator(cfg: Dict[str, Any]) -> List[str]:
     usage = orch.get("usage_file")
     if not isinstance(usage, str) or (usage and not re.fullmatch(r"~?[A-Za-z0-9_./@+-]+", usage)):
         problems.append("orchestrator.usage_file must be empty or a plain file path (a leading ~ is allowed)")
+    site = orch.get("progress_site", "")
+    if not isinstance(site, str) or len(site) > 300 or any(ord(c) < 32 for c in site):
+        problems.append("orchestrator.progress_site must be empty or one line naming the progress site (a URL, path or repository; at most 300 characters)")
     for key in ("orchestrator", "handoff"):
         value = cfg["paths"].get(key)
         if not isinstance(value, str) or not _PLAIN_PATH.fullmatch(value) or ".." in value.split("/"):

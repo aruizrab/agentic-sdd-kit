@@ -432,7 +432,8 @@ HEARTBEAT_SECTION = "Heartbeat and wake-ups"
 def orchestrator_reminder(rules: str, handoff: str, source: str, heartbeat: Optional[Dict[str, Any]] = None) -> str:
     """The habits text the SessionStart hook injects into the main session.
 
-    ``heartbeat`` (None: off) holds ``name``, ``minute`` and ``usage_file`` for the third habit.
+    ``heartbeat`` (None: off) holds ``name``, ``minute``, ``usage_file`` and ``progress_site`` for
+    the third habit.
     """
     habits = (
         f"(1) when the owner states a standing rule or direction, record it in {rules} in the same turn, "
@@ -450,6 +451,12 @@ def orchestrator_reminder(rules: str, handoff: str, source: str, heartbeat: Opti
             f"in {rules}; session crons die with the session and recurring ones expire after 7 days, so renew it "
             f"at 6 days), and schedule a one-shot wake-up at each usage reset{usage_note} plus 2 minutes"
         )
+        site = heartbeat.get("progress_site") or ""
+        if site:
+            habits += (
+                f"; after a merge, an approval, a plan or a stage change, check that the progress site ({site}) was "
+                "published and shows each feature's real stage, and fix the feed or the site the same day (heartbeat step 5)"
+            )
         count = "Three"
     msg = (
         "Main session: you are the orchestrator unless the owner says otherwise. Standing rules are in "
@@ -473,7 +480,8 @@ def orchestrator_context(data: Optional[Dict[str, Any]] = None) -> int:
         orch = cfg.get("orchestrator") or {}
         hb = orch.get("heartbeat") or {}
         heartbeat = ({"name": f"{cfg['project']['name']} heartbeat", "minute": int(hb.get("minute", 17)),
-                      "usage_file": str(orch.get("usage_file") or "")} if hb.get("enabled", True) else None)
+                      "usage_file": str(orch.get("usage_file") or ""), "progress_site": str(orch.get("progress_site") or "")}
+                     if hb.get("enabled", True) else None)
     except (cfgmod.ConfigError, OSError, KeyError, TypeError, ValueError):  # a broken config must not break session start; `sdd doctor` reports it
         return 0
     if not (root / rules).is_file():

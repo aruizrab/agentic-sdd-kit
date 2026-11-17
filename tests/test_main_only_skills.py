@@ -134,6 +134,7 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(cfgmod.DEFAULTS["paths"]["handoff"], ".wt/handoff/STATE.md")
         self.assertEqual(cfgmod.DEFAULTS["orchestrator"]["heartbeat"], {"enabled": True, "minute": 17})
         self.assertEqual(cfgmod.DEFAULTS["orchestrator"]["usage_file"], "")
+        self.assertEqual(cfgmod.DEFAULTS["orchestrator"]["progress_site"], "")
         ok = cfgmod._merge(cfgmod.DEFAULTS, test_config())
         self.assertFalse([p for p in cfgmod.validate(ok) if "orchestrator." in p or "paths." in p])
         cases = [
@@ -146,6 +147,9 @@ class ConfigTest(unittest.TestCase):
             (("orchestrator", "heartbeat"), {"enabled": True, "minute": True}, "heartbeat.minute must be"),
             (("orchestrator", "usage_file"), "a b.json", "usage_file must be"),
             (("orchestrator", "usage_file"), 3, "usage_file must be"),
+            (("orchestrator", "progress_site"), 3, "progress_site must be"),
+            (("orchestrator", "progress_site"), "site\nrm -rf", "progress_site must be"),
+            (("orchestrator", "progress_site"), "x" * 301, "progress_site must be"),
         ]
         for (section, key), value, text in cases:
             with self.subTest(key=key, value=value):
@@ -215,7 +219,8 @@ class WiringAndTemplatesTest(unittest.TestCase):
         for word in ("`/owner-rule <rule>`", "`/compact-handoff`", "main-only-skills", "orchestrator-context", "disable-model-invocation",
                      "### Recording an owner rule\n", "### Handoff before compaction\n", "every other skill stays available to subagents",
                      "### Heartbeat and wake-ups\n", '"{{PROJECT}} heartbeat"', "CronList", "orchestrator.heartbeat.minute", "orchestrator.usage_file",
-                     "Heartbeat steps", "6 or more days"):
+                     "Heartbeat steps", "6 or more days", "**Progress site** (only when `orchestrator.progress_site`",
+                     "**Keep the progress site current**", "7. **Renew**"):
             self.assertIn(word, orch)
         playbook = read("docs/PLAYBOOK.md")
         for word in ("`owner-rule`", "`compact-handoff`", "orchestrator.main_only_skills", "only restriction on skills", "orchestrator-context",
@@ -274,6 +279,7 @@ class OrchestratorContextHookTest(unittest.TestCase):
                      "expire after 7 days", "renew it at 6 days", "one-shot wake-up at each usage reset", "plus 2 minutes"):
             self.assertIn(word, msg)
         self.assertNotIn("rate_limits", msg, "no usage file configured")
+        self.assertNotIn("progress site", msg, "no progress site configured")
 
     def test_heartbeat_is_configuration(self) -> None:
         self.cfg["project"]["name"] = "acme"
@@ -281,6 +287,12 @@ class OrchestratorContextHookTest(unittest.TestCase):
         write_config(self.root, self.cfg)
         msg = self.context(source="resume")
         for word in ('"acme heartbeat"', 'cron "43 * * * *"', "rate_limits.*.resets_at in ~/.claude/state/statusline-input.json"):
+            self.assertIn(word, msg)
+        self.assertNotIn("progress site", msg)
+        self.cfg["orchestrator"]["progress_site"] = "../acme-site"
+        write_config(self.root, self.cfg)
+        msg = self.context(source="startup")
+        for word in ("progress site (../acme-site)", "real stage", "same day", "heartbeat step 5"):
             self.assertIn(word, msg)
         self.cfg["orchestrator"]["heartbeat"]["enabled"] = False
         write_config(self.root, self.cfg)
